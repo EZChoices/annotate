@@ -1,0 +1,7 @@
+# Python dependencies
+Flask
+Flask-CORS
+pandas
+numpy
+tqdm
+# Add more later as needed (e.g., pyannote, whisper)
