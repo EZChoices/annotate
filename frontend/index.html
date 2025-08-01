@@ -8,11 +8,13 @@
 <body>
   <div class='container'>
     <h2>Dialect Data Annotation</h2>
+
     <!-- ✅ Video player for MP4 clips -->
     <video id='videoPlayer' controls></video>
 
-    <h3>Transcript</h3>
-    <textarea id='transcriptBox' rows='6'></textarea>
+    <!-- ✅ Segment list instead of giant JSON blob -->
+    <h3>Transcript Segments</h3>
+    <div id='segmentsList'></div>
 
     <h3>Tags</h3>
     <div class='tags'>
