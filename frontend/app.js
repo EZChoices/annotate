@@ -14,6 +14,7 @@ async function loadClip() {
     return;
   }
 
+  // ✅ Use video player for MP4
   document.getElementById('videoPlayer').src = 'http://localhost:5000' + data.video_url;
   document.getElementById('transcriptBox').value = JSON.stringify(data.transcript, null, 2);
 }
