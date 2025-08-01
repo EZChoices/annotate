@@ -1,12 +1,46 @@
 <!DOCTYPE html>
-<html>
+<html lang='en'>
 <head>
- <meta name='viewport' content='width=device-width, initial-scale=1.0'>
- <title>Dialect Data Annotator</title>
- <link rel='stylesheet' href='styles.css'>
+  <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+  <title>Dialect Data Annotator</title>
+  <link rel='stylesheet' href='styles.css'>
 </head>
 <body>
- <div id='app'></div>
- <script src='app.js'></script>
+  <div class='container'>
+    <h2>Dialect Data Annotation</h2>
+    <audio id='audioPlayer' controls></audio>
+
+    <h3>Transcript</h3>
+    <textarea id='transcriptBox' rows='6'></textarea>
+
+    <h3>Tags</h3>
+    <div class='tags'>
+      <p><strong>Dialect:</strong></p>
+      <button onclick="setTag('dialect', 'Levantine')">Levantine</button>
+      <button onclick="setTag('dialect', 'Iraqi')">Iraqi</button>
+      <button onclick="setTag('dialect', 'Gulf')">Gulf</button>
+      <button onclick="setTag('dialect', 'Yemeni')">Yemeni</button>
+    </div>
+
+    <div class='tags'>
+      <p><strong>Gender:</strong></p>
+      <button onclick="setTag('gender', 'Male')">Male</button>
+      <button onclick="setTag('gender', 'Female')">Female</button>
+      <button onclick="setTag('gender', 'Unknown')">Unknown</button>
+    </div>
+
+    <div class='tags'>
+      <p><strong>Accent Notes:</strong></p>
+      <button onclick="setTag('accent', 'Kurdish influence')">Kurdish influence</button>
+      <button onclick="setTag('accent', 'Heavy Iraqi')">Heavy Iraqi</button>
+      <button onclick="setTag('accent', 'Gulf Arabic')">Gulf Arabic</button>
+      <button onclick="setTag('accent', 'Other')">Other</button>
+    </div>
+
+    <button id='flagBtn' class='flag'>🚩 Flag Clip</button>
+    <button id='submitBtn' class='submit'>✅ Save & Next</button>
+  </div>
+
+  <script src='app.js'></script>
 </body>
 </html>
