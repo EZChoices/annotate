@@ -1,2 +1,8 @@
-body { font-family: sans-serif; margin: 0; padding: 0; background: #fafafa; }
-#app { padding: 1em; }
+body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f8f8f8; }
+.container { padding: 1em; max-width: 500px; margin: auto; }
+h2 { text-align: center; }
+video { width: 100%; max-height: 300px; margin-bottom: 10px; border-radius: 8px; }
+button { padding: 10px; margin: 5px; border-radius: 8px; border: none; cursor: pointer; }
+button.submit { background: #4CAF50; color: white; width: 100%; margin-top: 10px; }
+button.flag { background: #e74c3c; color: white; width: 100%; margin-top: 5px; }
+textarea { width: 100%; padding: 10px; border-radius: 5px; border: 1px solid #ddd; margin-bottom: 10px; }
