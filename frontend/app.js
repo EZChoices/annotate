@@ -1,5 +1,5 @@
 let tags = { dialect: null, gender: null, accent: null };
-let transcriptSegments = [];
+let transcriptSegments = []; // ✅ stores editable transcript segments
 
 function setTag(type, value) {
   tags[type] = value;
@@ -44,7 +44,7 @@ function playSegment(start, end) {
   video.currentTime = start;
   video.play();
 
-  // Stop video after segment end (add 1 sec padding)
+  // Stop video after segment end (with +1 sec buffer)
   setTimeout(() => {
     if (video.currentTime >= end + 1) {
       video.pause();
@@ -61,7 +61,10 @@ async function loadClip() {
     return;
   }
 
+  // ✅ Set video player source
   document.getElementById('videoPlayer').src = 'http://localhost:5000' + data.video_url;
+
+  // ✅ Store segments & render list
   transcriptSegments = data.transcript.segments;
   renderSegments(transcriptSegments);
 }
@@ -78,7 +81,9 @@ async function submitAnnotation() {
   alert('✅ Annotation submitted!');
 }
 
+// ✅ Button listeners
 document.getElementById('submitBtn').addEventListener('click', submitAnnotation);
 document.getElementById('flagBtn').addEventListener('click', () => { alert('🚩 Clip flagged!'); });
 
+// ✅ Load first clip on page load
 loadClip();
