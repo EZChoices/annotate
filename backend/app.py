@@ -1,8 +1,10 @@
 import os, json
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, render_template
 from flask_cors import CORS
 
-app = Flask(__name__)
+app = Flask(
+    __name__, static_folder='../frontend', template_folder='../frontend', static_url_path=''
+)
 CORS(app)
 
 SAMPLES_DIR = os.path.join(os.path.dirname(__file__), '..', 'samples')
@@ -76,6 +78,18 @@ def ensure_split_json(json_filename):
 
     print(f'✅ Split created: {split_path}')
     return split_path
+
+
+@app.route('/meta')
+def meta_screen():
+    return render_template('meta.html')
+
+
+@app.route('/submit_meta', methods=['POST'])
+def submit_meta():
+    data = request.json
+    print('\n✅ META SUBMISSION RECEIVED:\n', json.dumps(data, indent=2, ensure_ascii=False))
+    return jsonify({'status': 'ok', 'message': 'Meta saved'})
 
 
 @app.route('/clip', methods=['GET'])
