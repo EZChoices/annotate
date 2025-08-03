@@ -93,23 +93,30 @@ document.getElementById('exprOther').addEventListener('input',e=>tags.facial_exp
 
 // ---------- Dialect / sub-dialect logic ----------
 function handleDialectChange(dialect){
-  const sel=document.getElementById('subDialectSelect');sel.innerHTML='';
-  let list=DIALECTS[dialect];
-  if(dialect==='Levantine'&&tags.sub_dialect==='Lebanon')list=LEB_SUB; // we’ll update once LB picked
-  list.forEach(opt=>{const o=document.createElement('option');o.value=opt;o.innerText=opt;sel.appendChild(o);});
+  const sel=document.getElementById('subDialectSelect');
+  sel.innerHTML='';
+  DIALECTS[dialect].forEach(opt=>{
+    const o=document.createElement('option');
+    o.value=opt; o.innerText=opt; sel.appendChild(o);
+  });
   sel.classList.remove('hidden');
-  sel.onchange=e=>tags.sub_dialect=e.target.value;
-  sel.value=list[0];tags.sub_dialect=list[0];
-  // If Levantine-Lebanon is later selected, we rebuild options again
-  if(dialect==='Levantine')sel.onchange=(e)=>{
-    if(e.target.value==='Lebanon'){buildLebaneseSubs();}
+  sel.onchange=e=>{
     tags.sub_dialect=e.target.value;
+    if(dialect==='Levantine' && e.target.value==='Lebanon') buildLebaneseSubs();
   };
+  sel.value=DIALECTS[dialect][0];
+  tags.sub_dialect=DIALECTS[dialect][0];
 }
 function buildLebaneseSubs(){
-  const sel=document.getElementById('subDialectSelect');sel.innerHTML='';
-  LEB_SUB.forEach(opt=>{const o=document.createElement('option');o.value=opt;o.innerText=opt;sel.appendChild(o);});
-  sel.value=LEB_SUB[0];tags.sub_dialect=LEB_SUB[0];
+  const sel=document.getElementById('subDialectSelect');
+  sel.innerHTML='';
+  LEB_SUB.forEach(opt=>{
+    const o=document.createElement('option');
+    o.value=opt; o.innerText=opt; sel.appendChild(o);
+  });
+  sel.onchange=e=>tags.sub_dialect=e.target.value;
+  sel.value=LEB_SUB[0];
+  tags.sub_dialect=LEB_SUB[0];
 }
 
 // ---------- Video source ----------
