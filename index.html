@@ -2,18 +2,156 @@
 <html lang='en'>
 <head>
   <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-  <title>Dialect Data Annotator</title>
+  <title>Dialect Data Meta Tagging</title>
   <link rel='stylesheet' href='public/styles.css'>
 </head>
 <body>
   <div class='container'>
     <h2>Dialect Data Meta Tagging</h2>
+
+    <!-- 🎥 Video Player -->
     <video id='videoPlayer' controls></video>
+
+    <!-- 📜 Transcript Segments -->
     <h3>Transcript Segments</h3>
     <div id='segmentsList'></div>
+
+    <!-- 🌍 Dialect -->
+    <h3>Dialect</h3>
+    <div class='tags'>
+      <button onclick="setTag('dialect','Levantine')">Levantine</button>
+      <button onclick="setTag('dialect','Iraqi')">Iraqi</button>
+      <button onclick="setTag('dialect','Gulf')">Gulf</button>
+      <button onclick="setTag('dialect','Yemeni')">Yemeni</button>
+      <button onclick="setTag('dialect','Egyptian')">Egyptian</button>
+      <button onclick="setTag('dialect','Maghrebi')">Maghrebi</button>
+      <button onclick="setTag('dialect','MSA')">MSA</button>
+      <button onclick="setTag('dialect','Mixed')">Mixed</button>
+      <button onclick="setTag('dialect','Other')">Other</button>
+    </div>
+
+    <!-- 🇱🇧 Sub-Dialects -->
+    <h3>Lebanese Sub-Dialects</h3>
+    <div class='tags'>
+      <button onclick="setTag('sub_dialect','Beirut')">Beirut</button>
+      <button onclick="setTag('sub_dialect','Tripoli')">Tripoli</button>
+      <button onclick="setTag('sub_dialect','South Lebanon')">South Lebanon</button>
+      <button onclick="setTag('sub_dialect','Bekaa')">Bekaa</button>
+      <button onclick="setTag('sub_dialect','Mount Lebanon')">Mount Lebanon</button>
+      <button onclick="setTag('sub_dialect','Akkar')">Akkar</button>
+      <button onclick="setTag('sub_dialect','Other Lebanese')">Other</button>
+    </div>
+
+    <!-- 🎙 Accent Notes -->
+    <h3>Accent Notes</h3>
+    <div class='tags'>
+      <button onclick="toggleAccent('Urban Beirut')">Urban Beirut</button>
+      <button onclick="toggleAccent('Rural Bekaa')">Rural Bekaa</button>
+      <button onclick="toggleAccent('South Lebanese')">South Lebanese</button>
+      <button onclick="toggleAccent('Chouf')">Chouf</button>
+      <button onclick="toggleAccent('Palestinian Lebanese')">Palestinian Lebanese</button>
+      <button onclick="toggleAccent('Queer Lebanese')">Queer Lebanese</button>
+      <button onclick="toggleAccent('Other')">Other</button>
+    </div>
+    <input type='text' id='accentOtherBox' placeholder='Type other accent here…'>
+
+    <!-- 👥 Gender -->
+    <h3>Gender</h3>
+    <div class='tags'>
+      <button onclick="setTag('gender','Male')">Male</button>
+      <button onclick="setTag('gender','Female')">Female</button>
+      <button onclick="setTag('gender','Mixed')">Mixed</button>
+      <button onclick="setTag('gender','Unknown')">Unknown</button>
+    </div>
+
+    <!-- 👶 Age Group -->
+    <h3>Apparent Age Group</h3>
+    <div class='tags'>
+      <button onclick="setTag('age','Child')">Child</button>
+      <button onclick="setTag('age','Teen')">Teen</button>
+      <button onclick="setTag('age','Young Adult')">Young Adult</button>
+      <button onclick="setTag('age','Adult')">Adult</button>
+      <button onclick="setTag('age','Elderly')">Elderly</button>
+      <button onclick="setTag('age','Unknown')">Unknown</button>
+    </div>
+
+    <!-- 🎭 Emotion -->
+    <h3>Emotion (multi-select)</h3>
+    <div class='tags'>
+      <button onclick="toggleEmotion('Neutral')">Neutral</button>
+      <button onclick="toggleEmotion('Happy')">Happy</button>
+      <button onclick="toggleEmotion('Angry')">Angry</button>
+      <button onclick="toggleEmotion('Sad')">Sad</button>
+      <button onclick="toggleEmotion('Excited')">Excited</button>
+      <button onclick="toggleEmotion('Other')">Other</button>
+    </div>
+    <input type='text' id='emotionOtherBox' placeholder='Type other emotion here…'>
+
+    <!-- 🔀 Code-Switching -->
+    <h3>Code-Switching</h3>
+    <div class='tags'>
+      <button onclick="setTag('code_switch','None')">None</button>
+      <button onclick="setTag('code_switch','Arabic-English')">Arabic-English</button>
+      <button onclick="setTag('code_switch','Arabic-French')">Arabic-French</button>
+      <button onclick="setTag('code_switch','Arabic-Other')">Arabic-Other</button>
+      <button onclick="setTag('code_switch','Other')">Other</button>
+    </div>
+    <input type='text' id='codeSwitchOtherBox' placeholder='Type details (e.g. numbers in French)…'>
+
+    <!-- 🎯 Topic -->
+    <h3>Topic</h3>
+    <div class='tags'>
+      <button onclick="setTag('topic','Lifestyle')">Lifestyle</button>
+      <button onclick="setTag('topic','Comedy')">Comedy</button>
+      <button onclick="setTag('topic','Fashion/Beauty')">Fashion/Beauty</button>
+      <button onclick="setTag('topic','Food')">Food</button>
+      <button onclick="setTag('topic','Travel')">Travel</button>
+      <button onclick="setTag('topic','Politics')">Politics</button>
+      <button onclick="setTag('topic','Religion')">Religion</button>
+      <button onclick="setTag('topic','Technology')">Technology</button>
+      <button onclick="setTag('topic','Education')">Education</button>
+      <button onclick="setTag('topic','Music/Performance')">Music/Performance</button>
+      <button onclick="setTag('topic','Other')">Other</button>
+    </div>
+    <input type='text' id='topicOtherBox' placeholder='Type other topic here…'>
+
+    <!-- 🌎 Environment -->
+    <h3>Environment</h3>
+    <div class='tags'>
+      <button onclick="setTag('environment','Indoor')">Indoor</button>
+      <button onclick="setTag('environment','Outdoor')">Outdoor</button>
+      <button onclick="setTag('environment','Street noise')">Street noise</button>
+      <button onclick="setTag('environment','Background music')">Background music</button>
+      <button onclick="setTag('environment','Café noise')">Café noise</button>
+      <button onclick="setTag('environment','Quiet/Studio')">Quiet/Studio</button>
+      <button onclick="setTag('environment','Other')">Other</button>
+    </div>
+    <input type='text' id='environmentOtherBox' placeholder='Type other environment…'>
+
+    <!-- 👀 Visual Metadata -->
+    <h3>Visual Metadata</h3>
+    <div class='tags'>
+      <button onclick="setTag('face_visible','Yes')">Face Visible</button>
+      <button onclick="setTag('face_visible','Partially')">Partially</button>
+      <button onclick="setTag('face_visible','No')">No Face</button>
+    </div>
+    <div class='tags'>
+      <button onclick="setTag('lip_visible','Yes')">Lips Visible</button>
+      <button onclick="setTag('lip_visible','No')">No Lips</button>
+    </div>
+    <div class='tags'>
+      <button onclick="setTag('gestures_visible','Yes')">Gestures Visible</button>
+      <button onclick="setTag('gestures_visible','No')">No Gestures</button>
+    </div>
+
+    <!-- 🌙 Dark Mode -->
+    <button id='darkModeBtn' onclick='toggleDarkMode()'>🌙 Toggle Dark Mode</button>
+
+    <!-- 🚩 Buttons -->
     <button id='flagBtn' class='flag'>🚩 Flag Clip</button>
     <button id='submitBtn' class='submit'>✅ Save & Next</button>
   </div>
+
   <script src='public/app.js'></script>
 </body>
 </html>
