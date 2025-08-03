@@ -1,20 +1,21 @@
 // ======== CONFIG ========
-const API='http://localhost:5000';
-const tags={
-  dialect:null,sub_dialect:null,accent_notes:[],accent_notes_custom:'',
-  gender:null,age:null,speaker_count:null,
-  emotion:[],emotion_other:'',
-  code_switch:null,code_switch_other:'',
-  topic:null,topic_other:'',
-  environment:null,environment_other:'',
-  face_visible:null,lip_visible:null,
-  facial_expression:null,facial_expression_other:'',
+const API = 'http://localhost:5000';
+const tags = {
+  dialect:null, sub_dialect:null,
+  accent_notes:[], accent_notes_custom:'',
+  gender:null, age:null, speaker_count:null,
+  emotion:[], emotion_other:'',
+  code_switch:null, code_switch_other:'',
+  topic:null, topic_other:'',
+  environment:null, environment_other:'',
+  face_visible:null, lip_visible:null,
+  facial_expression:null, facial_expression_other:'',
   gestures_visible:null,
   notes:''
 };
 
 // ---------- Option lists ----------
-const DIALECTS={
+const DIALECTS = {
   'Levantine':['Unspecified','Syria','Jordan','Palestine','Lebanon'],
   'Iraqi':['Unspecified','South Iraqi','Central Iraqi','Kurdish-influenced'],
   'Gulf':['Unspecified','Emirati','Saudi Najdi','Saudi Hijazi','Qatari','Bahraini','Kuwaiti','Omani'],
@@ -25,48 +26,60 @@ const DIALECTS={
   'Mixed':['Unspecified'],
   'Other':['Unspecified']
 };
-// --- Lebanese sub-regions ---
-const LEB_SUB=['Beirut','Tripoli/North','South Lebanon','Bekaa','Mount Lebanon','Akkar','Other LB'];
 
-const ACCENTS=[
+// --- Lebanese sub-regions ---
+const LEB_SUB = ['Beirut','Tripoli/North','South Lebanon','Bekaa','Mount Lebanon','Akkar','Other LB'];
+
+const ACCENTS = [
   'Kurdish influence','Bedouin Najdi','Coastal Syrian','Tripolitan',
   'Queer Lebanese','Gulf Arabic','Armenian influence','South Lebanese',
   'Bekaa Rural','Urban Beirut','Chouf','Palestinian Lebanese','Other'
 ];
-const GENDERS=['Male','Female','Mixed','Unknown'];
-const AGES=['Child','Teen','Young Adult','Adult','Elderly','Unknown'];
-const SPEAKERS=['1','2','3','4','5+'];
-const EMOTIONS=['Neutral','Happy','Angry','Sad','Excited','Other'];
-const CODE_SWITCH=['None','Arabic-English','Arabic-French','Arabic-Other','Other'];
-const TOPICS=['Lifestyle','Comedy','Fashion/Beauty','Food','Travel','Politics','Religion','Technology','Education','Music/Performance','Other'];
-const ENVIRON=['Indoor','Outdoor','Street noise','Café noise','Background music','Quiet/Studio','Other'];
-const FACE_VIS=['Yes','Partially','No'];
-const LIP_VIS=['Yes','No'];
-const EXPRESSIONS=['Neutral','Smiling','Laughing','Angry','Surprised','Sarcastic','Unknown','Other'];
-const GESTURES=['Yes','No'];
+const GENDERS = ['Male','Female','Mixed','Unknown'];
+const AGES = ['Child','Teen','Young Adult','Adult','Elderly','Unknown'];
+const SPEAKERS = ['1','2','3','4','5+'];
+const EMOTIONS = ['Neutral','Happy','Angry','Sad','Excited','Other'];
+const CODE_SWITCH = ['None','Arabic-English','Arabic-French','Arabic-Other','Other'];
+const TOPICS = ['Lifestyle','Comedy','Fashion/Beauty','Food','Travel','Politics','Religion','Technology','Education','Music/Performance','Other'];
+const ENVIRON = ['Indoor','Outdoor','Street noise','Café noise','Background music','Quiet/Studio','Other'];
+const FACE_VIS = ['Yes','Partially','No'];
+const LIP_VIS = ['Yes','No'];
+const EXPRESSIONS = ['Neutral','Smiling','Laughing','Angry','Surprised','Sarcastic','Unknown','Other'];
+const GESTURES = ['Yes','No'];
 
 // ---------- UI helpers ----------
 function makeButtons(containerId,list,key,{multi=false,otherBox=null}={}){
   const box=document.getElementById(containerId);
   list.forEach(item=>{
-    const b=document.createElement('button');b.innerText=item;
+    const b=document.createElement('button');
+    b.innerText=item;
     b.addEventListener('click',()=>{
       if(multi){
         const arr=tags[key];
-        if(arr.includes(item)){arr.splice(arr.indexOf(item),1);b.classList.remove('selected');}
-        else{arr.push(item);b.classList.add('selected');if(item==='Other'&&otherBox)toggle(otherBox,true);}
-      }else{
+        if(arr.includes(item)){
+          arr.splice(arr.indexOf(item),1);
+          b.classList.remove('selected');
+        } else {
+          arr.push(item);
+          b.classList.add('selected');
+          if(item==='Other' && otherBox) toggle(otherBox,true);
+        }
+      } else {
         box.querySelectorAll('button').forEach(btn=>btn.classList.remove('selected'));
-        tags[key]=item;b.classList.add('selected');
-        if(key==='dialect')handleDialectChange(item);
-        if(otherBox)toggle(otherBox,item==='Other');
+        tags[key]=item;
+        b.classList.add('selected');
+        if(key==='dialect') handleDialectChange(item);
+        if(otherBox) toggle(otherBox,item==='Other');
       }
       console.log(tags);
     });
     box.appendChild(b);
   });
 }
-function toggle(id,show){document.getElementById(id).classList[show?'remove':'add']('hidden');}
+
+function toggle(id,show){
+  document.getElementById(id).classList[show?'remove':'add']('hidden');
+}
 
 // ---------- Build groups ----------
 makeButtons('dialectButtons',Object.keys(DIALECTS),'dialect');
@@ -83,6 +96,7 @@ makeButtons('lipButtons',LIP_VIS,'lip_visible');
 makeButtons('exprButtons',EXPRESSIONS,'facial_expression',{otherBox:'exprOther'});
 makeButtons('gestButtons',GESTURES,'gestures_visible');
 
+// ---------- Inputs ----------
 document.getElementById('notesBox').addEventListener('input',e=>tags.notes=e.target.value);
 document.getElementById('accentFree').addEventListener('input',e=>tags.accent_notes_custom=e.target.value.trim());
 document.getElementById('emotionOther').addEventListener('input',e=>tags.emotion_other=e.target.value.trim());
@@ -107,6 +121,7 @@ function handleDialectChange(dialect){
   sel.value=DIALECTS[dialect][0];
   tags.sub_dialect=DIALECTS[dialect][0];
 }
+
 function buildLebaneseSubs(){
   const sel=document.getElementById('subDialectSelect');
   sel.innerHTML='';
@@ -127,9 +142,12 @@ document.getElementById('videoPlayer').src=`${API}/samples/${file}`;
 async function submit(){
   if(!tags.dialect) return alert('Select dialect');
   const payload={file_id:file.replace('.mp4',''),meta:tags};
-  await fetch(`${API}/submit_meta`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  await fetch(`${API}/submit_meta`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(payload)
+  });
   alert('Meta saved! Loading annotation…');
   window.location.href=`/annotate.html?file=${file}`;
 }
 document.getElementById('submitBtn').addEventListener('click',submit);
-
