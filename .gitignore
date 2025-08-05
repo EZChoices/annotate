@@ -2,3 +2,8 @@ __pycache__/
 *.pyc
 .env
 node_modules/
+
+*.mp4
+*.mov
+samples/*
+videos/*
