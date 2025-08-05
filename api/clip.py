@@ -14,4 +14,4 @@ async def get_clip():
     with open(sample_json, "r", encoding="utf-8") as f:
         transcript_data = json.load(f)
 
-    return {"video_url": "/public/sample.mp4", "transcript": transcript_data}
+    return {"video_url": "https://test.b-cdn.net/bunny.mp4", "transcript": transcript_data}
