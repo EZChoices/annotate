@@ -49,7 +49,14 @@ async function loadClip() {
     return;
   }
 
-  document.getElementById('videoPlayer').src = data.video_url;
+  const video = document.getElementById('videoPlayer');
+  const source = video.querySelector('source');
+  if (source) {
+    source.src = data.video_url;
+    video.load();
+  } else {
+    video.src = data.video_url;
+  }
 }
 
 async function submitAnnotation() {

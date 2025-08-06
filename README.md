@@ -13,7 +13,6 @@ annotate/
 ├─ public/                   # Static assets served as-is
 │    ├─ styles.css
 │    ├─ app.js
-│    └─ sample.mp4 (test file)
 │
 └─ index.html                # Meta tagging UI entrypoint
 ```
@@ -68,7 +67,7 @@ async def get_clip():
     with open(sample_json, "r", encoding="utf-8") as f:
         transcript_data = json.load(f)
 
-    return {"video_url": "/public/sample.mp4", "transcript": transcript_data}
+    return {"video_url": "https://raw.githubusercontent.com/EZChoices/annotate/main/public/sample.mp4", "transcript": transcript_data}
 ```
 
 ---
@@ -105,7 +104,10 @@ async def submit_annotations(req: Request):
 <body>
   <div class='container'>
     <h2>Dialect Data Meta Tagging</h2>
-    <video id='videoPlayer' controls></video>
+    <video
+      src='https://raw.githubusercontent.com/EZChoices/annotate/main/public/sample.mp4'
+      controls autoplay muted loop
+    ></video>
     <h3>Transcript Segments</h3>
     <div id='segmentsList'></div>
     <button id='flagBtn' class='flag'>🚩 Flag Clip</button>

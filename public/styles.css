@@ -1,25 +1,102 @@
 body {
-  font-family: Arial, sans-serif;
-  margin: 0; padding: 0;
-  background: #f8f8f8;
-  color: #222;
-}
-body.dark {
-  background: #1a1a1a;
-  color: #f1f1f1;
+  margin: 0;
+  padding: 1rem;
+  background: var(--bg, #121212);
+  color: var(--text, #ffffff);
+  font-family: system-ui, sans-serif;
 }
 
-.container { padding: 1em; max-width: 500px; margin: auto; }
-h2 { text-align: center; }
-video { width: 100%; max-height: 300px; margin-bottom: 10px; border-radius: 8px; }
-
-.tags { display: flex; flex-wrap: wrap; margin-bottom: 8px; }
-button { padding: 10px; margin: 5px; border-radius: 8px; border: none; cursor: pointer; font-size: 14px; }
-button.submit { background: #4CAF50; color: white; width: 100%; margin-top: 10px; }
-button.flag { background: #e74c3c; color: white; width: 100%; margin-top: 5px; }
-button#darkModeBtn { background: #333; color: white; width: 100%; margin: 10px 0; }
-
-input[type='text'] {
-  width: 100%; padding: 8px; margin-bottom: 10px; border-radius: 6px; border: 1px solid #ddd;
+.light-mode {
+  --bg: #ffffff;
+  --text: #000000;
 }
-body.dark input[type='text'] { background: #333; color: white; border: 1px solid #555; }
+
+.dark-mode {
+  --bg: #121212;
+  --text: #ffffff;
+}
+
+video {
+  width: 100%;
+  max-width: 720px;
+  display: block;
+  margin: 0 auto 1rem;
+  border-radius: 8px;
+}
+
+.question-box {
+  background: #1e1e1e;
+  border-radius: 8px;
+  padding: 1rem;
+  max-width: 720px;
+  margin: 0 auto 1rem;
+}
+
+button {
+  width: 100%;
+  padding: 0.75rem;
+  margin: 0.5rem 0;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+button.option {
+  background: #333;
+  color: #fff;
+}
+
+button.option.selected {
+  background: #0066cc;
+}
+
+button.action {
+  background: #4caf50;
+  color: #fff;
+}
+
+.summary-item {
+  margin-bottom: 1rem;
+}
+
+.hidden {
+  display: none;
+}
+
+input[type="text"] {
+  width: 100%;
+  padding: 0.5rem;
+  margin: 0.5rem 0;
+  border-radius: 6px;
+  border: 1px solid #555;
+  background: #222;
+  color: #fff;
+}
+
+.sticky-video {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.comment {
+  background: #1e1e1e;
+  border-radius: 8px;
+  padding: 1rem;
+  margin: 1rem auto;
+  max-width: 720px;
+}
+
+.light-mode .comment {
+  background: #f0f0f0;
+}
+
+.mode-toggle {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 200;
+  padding: 0.5rem 1rem;
+  width: auto;
+}
