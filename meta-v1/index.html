@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Metadata Tagging - V1</title>
+  <link rel="stylesheet" href="/public/styles.css">
+</head>
+<body>
+  <div class="container">
+    <h2>Metadata Tagging – Version 1</h2>
+    <video id="video" controls></video>
+
+    <form id="metaForm">
+      <!-- Dialect -->
+      <label for="dialect">Dialect</label>
+      <select id="dialect" name="dialect">
+        <option value="">Select...</option>
+        <option value="Levantine">Levantine</option>
+        <option value="Iraqi">Iraqi</option>
+        <option value="Gulf">Gulf</option>
+        <option value="Yemeni">Yemeni</option>
+        <option value="Egyptian">Egyptian</option>
+        <option value="Maghrebi">Maghrebi</option>
+        <option value="MSA">MSA</option>
+        <option value="Mixed">Mixed</option>
+        <option value="Other">Other</option>
+      </select>
+
+      <!-- Lebanese Sub-Dialects -->
+      <label for="sub_dialect">Lebanese Sub-Dialect</label>
+      <select id="sub_dialect" name="sub_dialect">
+        <option value="">Select...</option>
+        <option value="Beirut">Beirut</option>
+        <option value="Tripoli">Tripoli</option>
+        <option value="South Lebanon">South Lebanon</option>
+        <option value="Bekaa">Bekaa</option>
+        <option value="Mount Lebanon">Mount Lebanon</option>
+        <option value="Akkar">Akkar</option>
+        <option value="Other Lebanese">Other</option>
+      </select>
+
+      <!-- Accent Notes -->
+      <fieldset>
+        <legend>Accent Notes</legend>
+        <label><input type="checkbox" name="accent_notes" value="Urban Beirut"> Urban Beirut</label>
+        <label><input type="checkbox" name="accent_notes" value="Rural Bekaa"> Rural Bekaa</label>
+        <label><input type="checkbox" name="accent_notes" value="South Lebanese"> South Lebanese</label>
+        <label><input type="checkbox" name="accent_notes" value="Chouf"> Chouf</label>
+        <label><input type="checkbox" name="accent_notes" value="Palestinian Lebanese"> Palestinian Lebanese</label>
+        <label><input type="checkbox" name="accent_notes" value="Queer Lebanese"> Queer Lebanese</label>
+        <label><input type="checkbox" name="accent_notes" value="Other"> Other</label>
+        <input type="text" id="accentOther" name="accent_other" placeholder="Type other accent here…">
+      </fieldset>
+
+      <!-- Gender -->
+      <label for="gender">Gender</label>
+      <select id="gender" name="gender">
+        <option value="">Select...</option>
+        <option value="Male">Male</option>
+        <option value="Female">Female</option>
+        <option value="Mixed">Mixed</option>
+        <option value="Unknown">Unknown</option>
+      </select>
+
+      <!-- Age -->
+      <label for="age">Apparent Age Group</label>
+      <select id="age" name="age">
+        <option value="">Select...</option>
+        <option value="Child">Child</option>
+        <option value="Teen">Teen</option>
+        <option value="Young Adult">Young Adult</option>
+        <option value="Adult">Adult</option>
+        <option value="Elderly">Elderly</option>
+        <option value="Unknown">Unknown</option>
+      </select>
+
+      <!-- Emotion -->
+      <fieldset>
+        <legend>Emotion (multi-select)</legend>
+        <label><input type="checkbox" name="emotion" value="Neutral"> Neutral</label>
+        <label><input type="checkbox" name="emotion" value="Happy"> Happy</label>
+        <label><input type="checkbox" name="emotion" value="Angry"> Angry</label>
+        <label><input type="checkbox" name="emotion" value="Sad"> Sad</label>
+        <label><input type="checkbox" name="emotion" value="Excited"> Excited</label>
+        <label><input type="checkbox" name="emotion" value="Other"> Other</label>
+        <input type="text" id="emotionOther" name="emotion_other" placeholder="Type other emotion here…">
+      </fieldset>
+
+      <!-- Code-Switching -->
+      <label for="code_switch">Code-Switching</label>
+      <select id="code_switch" name="code_switch">
+        <option value="">Select...</option>
+        <option value="None">None</option>
+        <option value="Arabic-English">Arabic-English</option>
+        <option value="Arabic-French">Arabic-French</option>
+        <option value="Arabic-Other">Arabic-Other</option>
+        <option value="Other">Other</option>
+      </select>
+
+      <!-- Topic -->
+      <label for="topic">Topic</label>
+      <select id="topic" name="topic">
+        <option value="">Select...</option>
+        <option value="Lifestyle">Lifestyle</option>
+        <option value="Comedy">Comedy</option>
+        <option value="Fashion/Beauty">Fashion/Beauty</option>
+        <option value="Food">Food</option>
+        <option value="Travel">Travel</option>
+        <option value="Politics">Politics</option>
+        <option value="Religion">Religion</option>
+        <option value="Technology">Technology</option>
+        <option value="Education">Education</option>
+        <option value="Music/Performance">Music/Performance</option>
+        <option value="Other">Other</option>
+      </select>
+      <input type="text" id="topicOther" name="topic_other" placeholder="Type other topic here…">
+
+      <!-- Environment -->
+      <label for="environment">Environment</label>
+      <select id="environment" name="environment">
+        <option value="">Select...</option>
+        <option value="Indoor">Indoor</option>
+        <option value="Outdoor">Outdoor</option>
+        <option value="Street noise">Street noise</option>
+        <option value="Background music">Background music</option>
+        <option value="Café noise">Café noise</option>
+        <option value="Quiet/Studio">Quiet/Studio</option>
+        <option value="Other">Other</option>
+      </select>
+      <input type="text" id="environmentOther" name="environment_other" placeholder="Type other environment…">
+
+      <!-- Visual Metadata -->
+      <label for="face_visible">Face Visible</label>
+      <select id="face_visible" name="face_visible">
+        <option value="">Select...</option>
+        <option value="Yes">Yes</option>
+        <option value="Partially">Partially</option>
+        <option value="No">No</option>
+      </select>
+
+      <label for="lip_visible">Lips Visible</label>
+      <select id="lip_visible" name="lip_visible">
+        <option value="">Select...</option>
+        <option value="Yes">Yes</option>
+        <option value="No">No</option>
+      </select>
+
+      <label for="gestures_visible">Gestures Visible</label>
+      <select id="gestures_visible" name="gestures_visible">
+        <option value="">Select...</option>
+        <option value="Yes">Yes</option>
+        <option value="No">No</option>
+      </select>
+
+      <!-- Buttons -->
+      <button type="button" id="flagBtn" class="flag">🚩 Flag Clip</button>
+      <button type="button" id="submitBtn" class="submit">✅ Save & Next</button>
+    </form>
+  </div>
+
+  <script src="/public/meta-v1.js"></script>
+</body>
+</html>
