@@ -12,10 +12,16 @@ annotate/
 │
 ├─ public/                   # Static assets served as-is
 │    ├─ styles.css
-│    ├─ app.js
-│    └─ sample.mp4 (test file)
+│    ├─ video-utils.js       # shared video loader with fallback
+│    ├─ meta-v1.js           # traditional form handler
+│    ├─ meta-v2.js           # Reddit-style handler
+│    └─ sample.mp4           # test clip
 │
-└─ index.html                # Meta tagging UI entrypoint
+├─ meta-v1/                  # Traditional UI (checkboxes/dropdowns)
+│    └─ index.html
+├─ meta-v2/                  # Reddit-style UI (video + scrollable tags)
+│    └─ index.html
+└─ index.html                # Legacy entrypoint
 ```
 
 ---
@@ -28,10 +34,14 @@ annotate/
   "builds": [
     { "src": "api/*.py", "use": "@vercel/python" },
     { "src": "index.html", "use": "@vercel/static" },
+    { "src": "meta-v1/index.html", "use": "@vercel/static" },
+    { "src": "meta-v2/index.html", "use": "@vercel/static" },
     { "src": "public/**/*", "use": "@vercel/static" }
   ],
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/$1.py" },
+    { "src": "/meta-v1", "dest": "/meta-v1/index.html" },
+    { "src": "/meta-v2", "dest": "/meta-v2/index.html" },
     { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
@@ -45,6 +55,7 @@ annotate/
 fastapi
 uvicorn
 python-multipart
+requests
 ```
 
 ---
@@ -53,22 +64,33 @@ python-multipart
 
 ```python
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
-import json, os
+import json, os, random, re, requests
 
 app = FastAPI()
+BUNNY_KEEP_URL = os.environ.get("BUNNY_KEEP_URL")
 
 @app.get("/api/clip")
 async def get_clip():
-    # ✅ Test clip + JSON (later wire Supabase)
+    """Return demo clip metadata with Bunny CDN fallback."""
+    transcript = []
+
+    if BUNNY_KEEP_URL:
+        try:
+            resp = requests.get(BUNNY_KEEP_URL, timeout=5)
+            resp.raise_for_status()
+            files = re.findall(r'href="([^"?]+\.mp4)"', resp.text)
+            if files:
+                choice = random.choice(files)
+                url = choice if choice.startswith("http") else BUNNY_KEEP_URL.rstrip("/") + "/" + choice
+                return {"video_url": url, "transcript": transcript}
+        except Exception:
+            pass
+
     sample_json = os.path.join(os.path.dirname(__file__), "..", "public", "sample.json")
-    if not os.path.exists(sample_json):
-        return JSONResponse({"error": "No sample JSON found."}, status_code=404)
-
-    with open(sample_json, "r", encoding="utf-8") as f:
-        transcript_data = json.load(f)
-
-    return {"video_url": "/public/sample.mp4", "transcript": transcript_data}
+    if os.path.exists(sample_json):
+        with open(sample_json, "r", encoding="utf-8") as f:
+            transcript = json.load(f)
+    return {"video_url": "/public/sample.mp4", "transcript": transcript}
 ```
 
 ---
