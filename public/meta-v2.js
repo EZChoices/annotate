@@ -2,17 +2,7 @@ let tags = {
   dialect: null,
   sub_dialect: null,
   accent_notes: [],
-  accent_other: "",
-  gender: null,
-  age: null,
-  emotion: [],
-  emotion_other: "",
-  code_switch: null,
-  code_switch_other: "",
-  topic: null,
-  topic_other: "",
-  environment: null,
-  environment_other: "",
+
   face_visible: null,
   lip_visible: null,
   gestures_visible: null
@@ -47,16 +37,12 @@ function toggleDarkMode() {
 
 function loadClip() {
   const video = document.getElementById('videoPlayer');
-  loadSampleVideo(video);
+
 }
 
 async function submitAnnotation() {
   const payload = { ...tags };
-  payload.accent_other = document.getElementById('accentOtherBox').value;
-  payload.emotion_other = document.getElementById('emotionOtherBox').value;
-  payload.topic_other = document.getElementById('topicOtherBox').value;
-  payload.environment_other = document.getElementById('environmentOtherBox').value;
-  payload.code_switch_other = document.getElementById('codeSwitchOtherBox').value;
+
   await fetch('/api/submit', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
