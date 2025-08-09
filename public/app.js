@@ -87,4 +87,11 @@ function initApp() {
   loadClip();
 }
 
-document.addEventListener('DOMContentLoaded', initApp);
+// When this script is included at the end of the page the DOM is already
+// parsed, so `DOMContentLoaded` may have fired. Initialise immediately if the
+// document is ready, otherwise wait for the event.
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}
