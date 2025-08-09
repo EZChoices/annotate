@@ -22,7 +22,10 @@ async def get_clip():
         try:
             resp = requests.get(BUNNY_KEEP_URL, timeout=5)
             resp.raise_for_status()
-            files = re.findall(r'href="([^"?]+\.mp4)"', resp.text)
+            # Bunny links may include query parameters (e.g. for security tokens).
+            # Capture the entire URL up to the closing quote so we keep any
+            # required query string instead of stripping it off.
+            files = re.findall(r'href="([^" ]+\.mp4[^" ]*)"', resp.text)
             if files:
                 choice = random.choice(files)
                 if not choice.startswith("http"):
