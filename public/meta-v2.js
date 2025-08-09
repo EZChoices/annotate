@@ -2,12 +2,7 @@ let tags = {
   dialect: null,
   sub_dialect: null,
   accent_notes: [],
-  gender: null,
-  age: null,
-  emotion: [],
-  code_switch: null,
-  topic: null,
-  environment: null,
+
   face_visible: null,
   lip_visible: null,
   gestures_visible: null
@@ -42,14 +37,12 @@ function toggleDarkMode() {
 
 function loadClip() {
   const video = document.getElementById('videoPlayer');
-  video.src = '/public/sample.mp4';
-  video.addEventListener('error', () => {
-    video.src = 'https://raw.githubusercontent.com/EZChoices/annotate/main/public/sample.mp4';
-  });
+
 }
 
 async function submitAnnotation() {
   const payload = { ...tags };
+
   await fetch('/api/submit', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
