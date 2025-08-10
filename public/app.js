@@ -80,14 +80,16 @@ function nextClipIdx(){ clipIdx = (clipIdx + 1) % Math.max(1, playlist.length); 
 
 // ====== VIDEO ======
 function attachVideo(src){
-  const video = document.getElementById('video');
+  const video = document.getElementById('video') || document.getElementById('videoPlayer');
   const err = document.getElementById('videoError');
   if(!video) return;
   if(destroyHls) { try{ destroyHls(); }catch{} destroyHls=null; }
-  err.classList.add('hide'); err.textContent='';
+  if(err){ err.classList.add('hide'); err.textContent=''; }
   destroyHls = window.HLSPlayer.attach(video, src, (e)=>{
-    err.textContent = 'Video error – likely CORS/Hotlink protection on Bunny (401/403) or bad URL.';
-    err.classList.remove('hide');
+    if(err){
+      err.textContent = 'Video error – likely CORS/Hotlink protection on Bunny (401/403) or bad URL.';
+      err.classList.remove('hide');
+    }
   });
 }
 
@@ -184,7 +186,8 @@ async function loadClipAndStart(){
   if(!clip){ return; }
   // Bunny swap: if BUNNY_BASE present & clip.id exists, build m3u8
   const src = (BUNNY_BASE && clip.id && !clip.src) ? `${BUNNY_BASE}${clip.id}/playlist.m3u8` : (clip.src || "");
-  document.getElementById('clipId').textContent = clip.id || '–';
+  const clipIdEl = document.getElementById('clipId');
+  if(clipIdEl) clipIdEl.textContent = clip.id || '–';
   attachVideo(src);
   resetTagsForClip({ id: clip.id, src });
   step = 0; renderStep(); enqueueCurrent();
@@ -198,8 +201,11 @@ async function initApp(){
   // playlist
   await loadPlaylist();
   if(playlist.length === 0){
-    document.getElementById('videoError').textContent = 'No clips found in playlist.json';
-    document.getElementById('videoError').classList.remove('hide');
+    const err = document.getElementById('videoError');
+    if(err){
+      err.textContent = 'No clips found in playlist.json';
+      err.classList.remove('hide');
+    }
     return;
   }
 
@@ -209,14 +215,14 @@ async function initApp(){
   const back = document.getElementById('backBtn');
   const skip = document.getElementById('skipBtn');
   const flag = document.getElementById('flagBtn');
-  const save = document.getElementById('saveNextBtn');
+  const save = document.getElementById('saveNextBtn') || document.getElementById('submitBtn');
   const dark = document.getElementById('darkModeBtn');
   const pip = document.getElementById('pipBtn');
 
-  back.addEventListener('click', ()=> prevStep());
-  skip.addEventListener('click', ()=> nextStep());
-  flag.addEventListener('click', ()=>{ tags.flagged = !tags.flagged; enqueueCurrent(); alert(tags.flagged ? '🚩 Flagged' : 'Flag removed'); });
-  save.addEventListener('click', ()=>{
+  if(back) back.addEventListener('click', ()=> prevStep());
+  if(skip) skip.addEventListener('click', ()=> nextStep());
+  if(flag) flag.addEventListener('click', ()=>{ tags.flagged = !tags.flagged; enqueueCurrent(); alert(tags.flagged ? '🚩 Flagged' : 'Flag removed'); });
+  if(save) save.addEventListener('click', ()=>{
     // simple validation: required keys
     const required = ['topic','speaker_count','code_switch','environment','face_visible','lip_visible','gestures_visible'];
     const missing = required.filter(k=> !tags[k] || (Array.isArray(tags[k]) && tags[k].length===0));
@@ -228,8 +234,11 @@ async function initApp(){
     nextClipIdx();
     loadClipAndStart();
   });
-  dark.addEventListener('click', toggleTheme);
-  pip.addEventListener('click', ()=> window.HLSPlayer.requestPiP(document.getElementById('video')));
+  if(dark) dark.addEventListener('click', toggleTheme);
+  if(pip) pip.addEventListener('click', ()=> {
+    const vid = document.getElementById('video') || document.getElementById('videoPlayer');
+    if(vid) window.HLSPlayer.requestPiP(vid);
+  });
 }
 
 if(document.readyState === 'loading'){
