@@ -2,8 +2,8 @@
 // ====== CONFIG ======
 const STORAGE_KEY = "dd_meta_queue_v1";
 const THEME_KEY = "dd_theme";
-const PLAYLIST_PATH = "/public/playlist.json"; // swap to Bunny later
-const BUNNY_BASE = ""; // e.g. "https://YOUR_PULL_ZONE.b-cdn.net/keep/" (optional)
+const BUNNY_BASE = window.BUNNY_BASE || ""; // e.g. "https://YOUR_PULL_ZONE.b-cdn.net/keep/" (optional)
+const PLAYLIST_PATH = BUNNY_BASE ? `${BUNNY_BASE}playlist.json` : "/public/playlist.json";
 
 // ====== GOLD META SCHEMA (post-triage) ======
 let tags = {
@@ -47,10 +47,13 @@ const QUESTIONS = [
 // ====== THEME ======
 function applyTheme(theme){
   const t = theme || localStorage.getItem(THEME_KEY) || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light');
+  document.documentElement.classList.toggle('dark', t === 'dark');
   document.body.classList.toggle('dark', t === 'dark');
   localStorage.setItem(THEME_KEY, t);
 }
-function toggleTheme(){ applyTheme(document.body.classList.contains('dark') ? 'light' : 'dark'); }
+function toggleTheme(){
+  applyTheme(document.documentElement.classList.contains('dark') ? 'light' : 'dark');
+}
 
 // ====== STORAGE ======
 function loadQueue(){ try{ return JSON.parse(localStorage.getItem(STORAGE_KEY)||"[]"); }catch{ return []; } }
