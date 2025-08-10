@@ -1,0 +1,5 @@
+{
+  "clips": [
+    { "id": "sample-001", "src": "/public/sample.mp4", "title": "Sample local MP4" }
+  ]
+}
