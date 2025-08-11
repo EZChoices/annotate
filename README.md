@@ -46,12 +46,12 @@ Legacy `meta-v1` and `meta-v2` pages have been removed; the metadata UI now live
 
 ### Bunny CDN configuration
 
-`public/app.js` builds clip URLs using `window.BUNNY_BASE`. At runtime this value is loaded from `public/env.js`:
+The frontend looks for `window.BUNNY_BASE` when constructing clip URLs. The helper script `public/config.js` populates this value from `public/env.js` at runtime:
 
 1. Copy `public/env.example.js` to `public/env.js`.
 2. Set `BUNNY_BASE` to your Bunny pull zone, e.g. `https://MY_PULL_ZONE.b-cdn.net/keep/`.
 
-If not provided, the app warns in the console and falls back to local sample media.
+If not provided, the app logs a warning and falls back to local sample media.
 
 ---
 
