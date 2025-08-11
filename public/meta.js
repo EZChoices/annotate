@@ -72,7 +72,10 @@ document.addEventListener('DOMContentLoaded', () => {
   if(envOther) envOther.addEventListener('input', e => { tags.environment_other = e.target.value; });
 
   const dark = document.getElementById('darkModeBtn');
-  if(dark) dark.addEventListener('click', () => document.body.classList.toggle('dark'));
+  if(dark) dark.addEventListener('click', () => {
+    document.documentElement.classList.toggle('dark');
+    document.body.classList.toggle('dark');
+  });
   const flag = document.getElementById('flagBtn');
   if(flag) flag.addEventListener('click', () => { tags.flagged = true; alert('🚩 Clip flagged'); });
   const submit = document.getElementById('submitBtn');
