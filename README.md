@@ -21,6 +21,8 @@ annotate/
 └─ index.html               # Metadata tagging interface
 ```
 
+Legacy `meta-v1` and `meta-v2` pages have been removed; the metadata UI now lives at the root `index.html`.
+
 ---
 
 ### 📄 vercel.json
