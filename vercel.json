@@ -3,12 +3,12 @@
   "builds": [
     { "src": "api/*.py", "use": "@vercel/python" },
     { "src": "index.html", "use": "@vercel/static" },
-      { "src": "meta-v2/index.html", "use": "@vercel/static" },
+    { "src": "meta-v2/index.html", "use": "@vercel/static" },
     { "src": "public/**/*", "use": "@vercel/static" }
   ],
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/$1.py" },
-      { "src": "/meta-v2", "dest": "/meta-v2/index.html" },
+    { "src": "/meta-v2", "dest": "/meta-v2/index.html" },
     { "src": "/(.*)", "dest": "/index.html" }
   ]
 }

@@ -23,6 +23,9 @@ annotate/
 └─ index.html                # Legacy entrypoint
 ```
 
+
+Legacy `meta-v1` page has been removed; `meta-v2` now serves as the sole metadata UI.
+
 ---
 
 ### 📄 vercel.json
@@ -48,7 +51,8 @@ annotate/
 
 ### Bunny CDN configuration
 
-`public/app.js` builds clip URLs using `window.BUNNY_BASE`. At runtime this value is loaded from `public/env.js`:
+The frontend looks for `window.BUNNY_BASE` when constructing clip URLs. The helper script `public/config.js` populates this value from `public/env.js` at runtime:
+
 
 1. Copy `public/env.example.js` to `public/env.js`.
 2. Set `BUNNY_BASE` to your Bunny pull zone, e.g. `https://MY_PULL_ZONE.b-cdn.net/keep/`.
@@ -122,70 +126,44 @@ async def submit_annotations(req: Request):
 
 ---
 
-### 📄 index.html
+### 📄 meta-v2/index.html
 
 ```html
 <!DOCTYPE html>
-<html lang='en'>
+<html lang="en">
 <head>
-  <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-  <title>Dialect Data Annotator</title>
-  <link rel='stylesheet' href='public/styles.css'>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Metadata Tagging - V2</title>
+  <link rel="stylesheet" href="/public/styles.css">
 </head>
 <body>
-  <div class='container'>
-    <h2>Dialect Data Meta Tagging</h2>
-    <video id='videoPlayer' controls></video>
-    <h3>Transcript Segments</h3>
-    <div id='segmentsList'></div>
-    <button id='flagBtn' class='flag'>🚩 Flag Clip</button>
-    <button id='submitBtn' class='submit'>✅ Save & Next</button>
-  </div>
-  <script src='public/app.js'></script>
+  <!-- Tagging UI omitted for brevity -->
+  <script src="/public/env.js"></script>
+  <script src="/public/config.js"></script>
+  <script src="/public/video-utils.js"></script>
+  <script src="/public/meta.js"></script>
 </body>
 </html>
 ```
 
 ---
 
-### 📄 public/app.js
+### 📄 public/meta.js
 
 ```js
-let tags = { dialect: null, gender: null, accent: null };
-let transcriptSegments = [];
+const tags = {
+  accent_notes: [],
+  emotion: []
+};
 
-function setTag(type, value) {
-  tags[type] = value;
-  console.log(`✅ ${type} set to`, value);
-}
-
-async function loadClip() {
-  const res = await fetch('/api/clip');
-  const data = await res.json();
-
-  if (data.error) {
-    alert(data.error);
-    return;
-  }
-
-  document.getElementById('videoPlayer').src = data.video_url;
-  transcriptSegments = data.transcript.segments || [];
-}
-
-async function submitAnnotation() {
-  const payload = { transcript: transcriptSegments, tags };
-  await fetch('/api/submit', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+function setTag(key, value, btn){
+  tags[key] = value;
+  document.querySelectorAll(`[data-set-tag="${key}"]`).forEach(b => {
+    b.classList.toggle('selected', b === btn);
   });
-  alert('✅ Annotation submitted!');
 }
 
-document.getElementById('submitBtn').addEventListener('click', submitAnnotation);
-document.getElementById('flagBtn').addEventListener('click', () => { alert('🚩 Clip flagged!'); });
-
-loadClip();
+// additional helpers handle multi-select toggles and submission
 ```
 
 ---
@@ -195,7 +173,7 @@ loadClip();
 1️⃣ **Create `vercel.json`** exactly as above.  
 2️⃣ **Move all Flask code to `/api` folder** (replace Flask with FastAPI).  
 3️⃣ **Move current JS/CSS to `/public`**.  
-4️⃣ **Update all API calls in `app.js`** to use `/api/clip` & `/api/submit`.  
+4️⃣ **Update all API calls in the JS** to use `/api/clip` & `/api/submit`.
 5️⃣ **Delete Flask backend** – Vercel will now run `api/*.py` serverless.  
 6️⃣ **Ensure `requirements.txt`** lists FastAPI.
 7️⃣ Commit + push → Vercel auto-builds → live test link ready.
