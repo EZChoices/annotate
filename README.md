@@ -13,15 +13,17 @@ annotate/
 ├─ public/                   # Static assets served as-is
 │    ├─ styles.css
 │    ├─ video-utils.js       # shared video loader with fallback
-│    ├─ meta.js             # tag-selection helpers
-│    ├─ config.js           # loads runtime env vars
-│    ├─ env.example.js      # template for env settings
-│    └─ sample.mp4          # test clip
+│    ├─ meta.js              # tag-selection helpers
+│    ├─ config.js            # loads runtime env vars
+│    ├─ env.example.js       # template for env settings
+│    └─ sample.mp4           # test clip
 │
-└─ index.html               # Metadata tagging interface
+├─ meta-v2/                  # Metadata tagging UI
+│    └─ index.html
+└─ index.html                # Annotation interface
 ```
 
-Legacy `meta-v1` and `meta-v2` pages have been removed; the metadata UI now lives at the root `index.html`.
+Legacy `meta-v1` page has been removed; `meta-v2` now serves as the sole metadata UI.
 
 ---
 
@@ -33,10 +35,12 @@ Legacy `meta-v1` and `meta-v2` pages have been removed; the metadata UI now live
   "builds": [
     { "src": "api/*.py", "use": "@vercel/python" },
     { "src": "index.html", "use": "@vercel/static" },
+    { "src": "meta-v2/index.html", "use": "@vercel/static" },
     { "src": "public/**/*", "use": "@vercel/static" }
   ],
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/$1.py" },
+    { "src": "/meta-v2", "dest": "/meta-v2/index.html" },
     { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
@@ -51,7 +55,7 @@ The frontend looks for `window.BUNNY_BASE` when constructing clip URLs. The help
 1. Copy `public/env.example.js` to `public/env.js`.
 2. Set `BUNNY_BASE` to your Bunny pull zone, e.g. `https://MY_PULL_ZONE.b-cdn.net/keep/`.
 
-If not provided, the app logs a warning and falls back to local sample media.
+If not provided, the app warns in the console and falls back to local sample media.
 
 ---
 
@@ -120,18 +124,20 @@ async def submit_annotations(req: Request):
 
 ---
 
-### 📄 index.html
+### 📄 meta-v2/index.html
 
 ```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Metadata Tagging</title>
+  <title>Metadata Tagging - V2</title>
   <link rel="stylesheet" href="/public/styles.css">
 </head>
 <body>
   <!-- Tagging UI omitted for brevity -->
+  <script src="/public/env.js"></script>
+  <script src="/public/config.js"></script>
   <script src="/public/video-utils.js"></script>
   <script src="/public/meta.js"></script>
 </body>
