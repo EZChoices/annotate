@@ -20,11 +20,11 @@ annotate/
 │
 ├─ meta-v2/                  # Reddit-style UI (video + scrollable tags)
 │    └─ index.html
-└─ index.html                # Legacy entrypoint
+└─ (legacy files removed)
 ```
 
 
-Legacy `meta-v1` page has been removed; `meta-v2` now serves as the sole metadata UI.
+`meta-v2` now serves as the sole metadata UI and is exposed at the root path.
 
 ---
 
@@ -35,14 +35,12 @@ Legacy `meta-v1` page has been removed; `meta-v2` now serves as the sole metadat
   "version": 2,
   "builds": [
     { "src": "api/*.py", "use": "@vercel/python" },
-    { "src": "index.html", "use": "@vercel/static" },
     { "src": "meta-v2/index.html", "use": "@vercel/static" },
     { "src": "public/**/*", "use": "@vercel/static" }
   ],
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/$1.py" },
-    { "src": "/meta-v2", "dest": "/meta-v2/index.html" },
-    { "src": "/(.*)", "dest": "/index.html" }
+    { "src": "/(.*)", "dest": "/meta-v2/index.html" }
   ]
 }
 ```
