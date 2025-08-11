@@ -13,12 +13,11 @@ annotate/
 ├─ public/                   # Static assets served as-is
 │    ├─ styles.css
 │    ├─ video-utils.js       # shared video loader with fallback
-│    ├─ meta-v1.js           # traditional form handler
 │    ├─ meta-v2.js           # Reddit-style handler
+│    ├─ config.js            # loads runtime env vars
+│    ├─ env.example.js       # template for env settings
 │    └─ sample.mp4           # test clip
 │
-├─ meta-v1/                  # Traditional UI (checkboxes/dropdowns)
-│    └─ index.html
 ├─ meta-v2/                  # Reddit-style UI (video + scrollable tags)
 │    └─ index.html
 └─ index.html                # Legacy entrypoint
@@ -34,18 +33,27 @@ annotate/
   "builds": [
     { "src": "api/*.py", "use": "@vercel/python" },
     { "src": "index.html", "use": "@vercel/static" },
-    { "src": "meta-v1/index.html", "use": "@vercel/static" },
     { "src": "meta-v2/index.html", "use": "@vercel/static" },
     { "src": "public/**/*", "use": "@vercel/static" }
   ],
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/$1.py" },
-    { "src": "/meta-v1", "dest": "/meta-v1/index.html" },
     { "src": "/meta-v2", "dest": "/meta-v2/index.html" },
     { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
 ```
+
+---
+
+### Bunny CDN configuration
+
+`public/app.js` builds clip URLs using `window.BUNNY_BASE`. At runtime this value is loaded from `public/env.js`:
+
+1. Copy `public/env.example.js` to `public/env.js`.
+2. Set `BUNNY_BASE` to your Bunny pull zone, e.g. `https://MY_PULL_ZONE.b-cdn.net/keep/`.
+
+If not provided, the app warns in the console and falls back to local sample media.
 
 ---
 
