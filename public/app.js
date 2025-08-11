@@ -71,9 +71,13 @@ function enqueueCurrent(){
 async function loadPlaylist(){
   try{
     const res = await fetch(PLAYLIST_PATH, {cache:'no-store'});
+    if(!res.ok) throw new Error(`status ${res.status}`);
     const data = await res.json();
     playlist = Array.isArray(data.clips)? data.clips : [];
-  }catch(e){ playlist = []; }
+  }catch(e){
+    console.warn('Failed to load playlist:', PLAYLIST_PATH, e);
+    playlist = [];
+  }
 }
 function currentClip(){ return playlist[clipIdx] || null; }
 function nextClipIdx(){ clipIdx = (clipIdx + 1) % Math.max(1, playlist.length); }
@@ -185,7 +189,11 @@ async function loadClipAndStart(){
   const clip = currentClip();
   if(!clip){ return; }
   // Bunny swap: if BUNNY_BASE present & clip.id exists, build m3u8
-  const src = (BUNNY_BASE && clip.id && !clip.src) ? `${BUNNY_BASE}${clip.id}/playlist.m3u8` : (clip.src || "");
+  let src = (BUNNY_BASE && clip.id && !clip.src) ? `${BUNNY_BASE}${clip.id}/playlist.m3u8` : (clip.src || "");
+  // If clip.src is relative, prepend BUNNY_BASE so remote clips resolve
+  if(BUNNY_BASE && src && !src.startsWith('http') && !src.startsWith('/')){
+    src = `${BUNNY_BASE}${src}`;
+  }
   const clipIdEl = document.getElementById('clipId');
   if(clipIdEl) clipIdEl.textContent = clip.id || '–';
   attachVideo(src);
