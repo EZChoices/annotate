@@ -13,15 +13,16 @@ annotate/
 ├─ public/                   # Static assets served as-is
 │    ├─ styles.css
 │    ├─ video-utils.js       # shared video loader with fallback
-│    ├─ meta.js              # tag-selection helpers
+│    ├─ meta-v2.js           # Reddit-style handler
 │    ├─ config.js            # loads runtime env vars
 │    ├─ env.example.js       # template for env settings
 │    └─ sample.mp4           # test clip
 │
-├─ meta-v2/                  # Metadata tagging UI
+├─ meta-v2/                  # Reddit-style UI (video + scrollable tags)
 │    └─ index.html
-└─ index.html                # Annotation interface
+└─ index.html                # Legacy entrypoint
 ```
+
 
 Legacy `meta-v1` page has been removed; `meta-v2` now serves as the sole metadata UI.
 
@@ -51,6 +52,7 @@ Legacy `meta-v1` page has been removed; `meta-v2` now serves as the sole metadat
 ### Bunny CDN configuration
 
 The frontend looks for `window.BUNNY_BASE` when constructing clip URLs. The helper script `public/config.js` populates this value from `public/env.js` at runtime:
+
 
 1. Copy `public/env.example.js` to `public/env.js`.
 2. Set `BUNNY_BASE` to your Bunny pull zone, e.g. `https://MY_PULL_ZONE.b-cdn.net/keep/`.
