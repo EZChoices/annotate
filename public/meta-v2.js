@@ -103,23 +103,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const toggleBtn = document.getElementById('videoToggle');
   const sentinel = document.getElementById('video-sentinel');
   if(wrapper && sentinel){
-    // Preserve layout when the wrapper is fixed as a mini-player
+    // Preserve layout space for the fixed mini-player
     sentinel.style.height = wrapper.offsetHeight + 'px';
-
-    const observer = new IntersectionObserver(entries => {
-      entries.forEach(entry => {
-        if(entry.isIntersecting){
-          wrapper.classList.remove('mini');
-        } else {
-          wrapper.classList.add('mini');
-        }
-      });
-    });
-    observer.observe(sentinel);
   }
   if(toggleBtn && wrapper){
     toggleBtn.addEventListener('click', () => {
-      wrapper.classList.toggle('mini');
+      wrapper.classList.toggle('hidden');
     });
   }
 });
