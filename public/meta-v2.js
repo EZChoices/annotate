@@ -48,9 +48,22 @@ async function submitAnnotation(){
   }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   const video = document.getElementById('videoPlayer');
-  if(video) loadSampleVideo(video);
+  if(video){
+    try{
+      const res = await fetch('/api/clip');
+      const data = await res.json();
+      if(data && data.video_url){
+        video.src = data.video_url;
+        video.addEventListener('error', () => loadSampleVideo(video), { once:true });
+      }else{
+        loadSampleVideo(video);
+      }
+    }catch(e){
+      loadSampleVideo(video);
+    }
+  }
 
   document.querySelectorAll('[data-set-tag]').forEach(btn => {
     btn.addEventListener('click', () => setTag(btn.dataset.setTag, btn.dataset.value, btn));
