@@ -101,11 +101,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const wrapper = document.getElementById('video-wrapper');
   const toggleBtn = document.getElementById('videoToggle');
-  const sentinel = document.getElementById('video-sentinel');
-  if(wrapper && sentinel){
-    // Preserve layout space for the fixed mini-player
-    sentinel.style.height = wrapper.offsetHeight + 'px';
-  }
   if(toggleBtn && wrapper){
     toggleBtn.addEventListener('click', () => {
       wrapper.classList.toggle('hidden');
