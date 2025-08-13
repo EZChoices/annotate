@@ -101,7 +101,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const wrapper = document.getElementById('video-wrapper');
   const toggleBtn = document.getElementById('videoToggle');
-  if(wrapper){
+  const sentinel = document.getElementById('video-sentinel');
+  if(wrapper && sentinel){
+    // Preserve layout when the wrapper is fixed as a mini-player
+    sentinel.style.height = wrapper.offsetHeight + 'px';
+
     const observer = new IntersectionObserver(entries => {
       entries.forEach(entry => {
         if(entry.isIntersecting){
@@ -111,7 +115,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
     });
-    observer.observe(wrapper);
+    observer.observe(sentinel);
   }
   if(toggleBtn && wrapper){
     toggleBtn.addEventListener('click', () => {
