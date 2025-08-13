@@ -56,6 +56,18 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('click', startPlayback, { once: true });
     document.addEventListener('touchstart', startPlayback, { once: true });
     loadSampleVideo(video);
+
+    // Prevent mobile browsers from forcing fullscreen playback
+    const keepInline = () => {
+      if(document.fullscreenElement === video){
+        document.exitFullscreen().catch(()=>{});
+      }
+      if(video.webkitDisplayingFullscreen){
+        video.webkitExitFullscreen();
+      }
+    };
+    video.addEventListener('fullscreenchange', keepInline);
+    video.addEventListener('webkitbeginfullscreen', keepInline);
   }
 
   document.querySelectorAll('[data-set-tag]').forEach(btn => {
