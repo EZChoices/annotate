@@ -20,6 +20,18 @@ window.HLSPlayer = {
     }
   },
   async requestPiP(videoEl){
-    try{ if(document.pictureInPictureEnabled && !videoEl.disablePictureInPicture){ await videoEl.requestPictureInPicture(); } }catch{}
+    if(!videoEl || !document.pictureInPictureEnabled || videoEl.disablePictureInPicture){ return; }
+    try{
+      if(document.pictureInPictureElement){
+        await document.exitPictureInPicture();
+      }else{
+        await videoEl.requestPictureInPicture();
+        videoEl.addEventListener('leavepictureinpicture', ()=>{
+          if(document.pictureInPictureEnabled && !videoEl.paused){
+            window.HLSPlayer.requestPiP(videoEl);
+          }
+        }, { once:true });
+      }
+    }catch{}
   }
 };
