@@ -243,10 +243,21 @@ async function initApp(){
     loadClipAndStart();
   });
   if(dark) dark.addEventListener('click', toggleTheme);
-  if(pip) pip.addEventListener('click', ()=> {
+  if(pip){
     const vid = document.getElementById('video') || document.getElementById('videoPlayer');
-    if(vid) window.HLSPlayer.requestPiP(vid);
-  });
+    if(!document.pictureInPictureEnabled || !vid || vid.disablePictureInPicture){
+      pip.style.display = 'none';
+    }else{
+      const update = ()=>{
+        pip.textContent = document.pictureInPictureElement ? '❎' : '📺';
+      };
+      pip.title = 'Toggle Picture-in-Picture';
+      pip.addEventListener('click', ()=> window.HLSPlayer.requestPiP(vid));
+      vid.addEventListener('enterpictureinpicture', update);
+      vid.addEventListener('leavepictureinpicture', update);
+      update();
+    }
+  }
 }
 
 if(document.readyState === 'loading'){

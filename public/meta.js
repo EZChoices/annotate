@@ -50,7 +50,13 @@ async function submitAnnotation(){
 
 document.addEventListener('DOMContentLoaded', () => {
   const video = document.getElementById('videoPlayer');
-  if(video) loadSampleVideo(video);
+  if(video){
+    video.muted = true;
+    const startPlayback = () => { video.play().catch(()=>{}); };
+    document.addEventListener('click', startPlayback, { once: true });
+    document.addEventListener('touchstart', startPlayback, { once: true });
+    loadSampleVideo(video);
+  }
 
   document.querySelectorAll('[data-set-tag]').forEach(btn => {
     btn.addEventListener('click', () => setTag(btn.dataset.setTag, btn.dataset.value, btn));
