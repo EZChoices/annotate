@@ -86,4 +86,24 @@ document.addEventListener('DOMContentLoaded', () => {
   if(flag) flag.addEventListener('click', () => { tags.flagged = true; alert('🚩 Clip flagged'); });
   const submit = document.getElementById('submitBtn');
   if(submit) submit.addEventListener('click', submitAnnotation);
+
+  const wrapper = document.getElementById('video-wrapper');
+  const toggleBtn = document.getElementById('videoToggle');
+  if(wrapper){
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if(entry.isIntersecting){
+          wrapper.classList.remove('mini');
+        } else {
+          wrapper.classList.add('mini');
+        }
+      });
+    });
+    observer.observe(wrapper);
+  }
+  if(toggleBtn && wrapper){
+    toggleBtn.addEventListener('click', () => {
+      wrapper.classList.toggle('mini');
+    });
+  }
 });

@@ -11,7 +11,11 @@
 <body>
   <div class="container">
     <h2>Metadata Tagging – Version 2</h2>
-    <video id="videoPlayer" controls playsinline webkit-playsinline muted autoplay></video>
+
+    <div id="video-wrapper">
+      <button id="videoToggle" aria-label="Toggle mini player">✕</button>
+      <video id="videoPlayer" controls playsinline webkit-playsinline muted autoplay></video>
+    </div>
 
     <div class="questions">
       <!-- Dialect -->
@@ -150,6 +154,6 @@
   <script src="/public/env.js"></script>
   <script src="/public/config.js"></script>
   <script src="/public/video-utils.js"></script>
-  <script src="/public/meta.js"></script>
+  <script src="/public/meta-v2.js"></script>
 </body>
 </html>
