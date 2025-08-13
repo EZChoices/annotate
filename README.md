@@ -181,3 +181,23 @@ function setTag(key, value, btn){
 ✅ **After Codex push, you just:**
 - Run `vercel` (or connect repo to Vercel dashboard)
 - Annotators can hit `meta.dialectdata.com` → instantly live updates
+
+---
+
+### 🐇 Fetching clips from Supabase and Bunny
+
+`scripts/download_keep_files.py` pulls file names from the `keep` table in Supabase and downloads each file from Bunny Storage.
+
+Required environment variables:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `SUPABASE_SERVICE_KEY`
+- `BUNNY_STORAGE_ZONE`
+- `BUNNY_STORAGE_PASSWORD`
+- `FILTERED_FOLDER` (optional path inside the storage zone)
+
+Run the script with:
+
+```
+python scripts/download_keep_files.py
+```
