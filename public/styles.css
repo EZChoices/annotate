@@ -5,7 +5,7 @@ body{ margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; 
 .container{ padding:0 1rem 120px }
 .topbar{ position:sticky; top:0; z-index:10; display:flex; justify-content:space-between; align-items:center; padding:.6rem .9rem; background:var(--card); border-bottom:1px solid var(--border) }
 .topbar .actions button{ margin-left:.5rem }
-.player-sticky{ position:sticky; top:48px; z-index:9; background:var(--card); border-bottom:1px solid var(--border) }
+.player-sticky{ position:sticky; top:0; z-index:1000; background:var(--card); border-bottom:1px solid var(--border) }
 video{ width:100%; height:auto; display:block; background:#000 }
 
 #video-wrapper{
