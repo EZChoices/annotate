@@ -6,15 +6,35 @@ async function loadSampleVideo(
 ){
   if(!video) return;
   try{
-    const res = await fetch('/api/clip');
+    // Cache-bust so the backend can serve a different clip each time
+    const res = await fetch(`/api/clip?rand=${Date.now()}`, {cache:'no-store'});
     if(res.ok){
       const data = await res.json();
       if(data && data.video_url){
-        video.src = data.video_url;
+        // Append timestamp to bypass any CDN caching
+        const sep = data.video_url.includes('?') ? '&' : '?';
+        video.src = `${data.video_url}${sep}t=${Date.now()}`;
         return;
       }
     }
   }catch(e){ /* ignore and fall back */ }
+
+  // Fallback: pick a random clip from local playlist if available
+  try{
+    const plist = await fetch('/public/playlist.json', {cache:'no-store'});
+    if(plist.ok){
+      const j = await plist.json();
+      const clips = Array.isArray(j.clips) ? j.clips : [];
+      if(clips.length){
+        const choice = clips[Math.floor(Math.random()*clips.length)];
+        if(choice && choice.src){
+          video.src = choice.src;
+          return;
+        }
+      }
+    }
+  }catch(e){ /* ignore and fall back */ }
+
   video.src = local;
   video.addEventListener('error', ()=>{ video.src = remote; }, { once:true });
 }

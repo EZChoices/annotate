@@ -43,6 +43,18 @@ async function submitAnnotation(){
     });
     const data = await res.json();
     alert(data.message || 'Annotation submitted');
+
+    // Load a new random clip after submission
+    const video = document.getElementById('videoPlayer');
+    loadSampleVideo(video);
+
+    // Reset tag selections and input boxes
+    Object.keys(tags).forEach(k => {
+      if(Array.isArray(tags[k])) tags[k] = [];
+      else tags[k] = null;
+    });
+    document.querySelectorAll('.selected').forEach(el => el.classList.remove('selected'));
+    document.querySelectorAll('input[type="text"]').forEach(inp => { inp.value = ''; });
   }catch(e){
     alert('Failed to submit annotation');
   }
