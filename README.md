@@ -201,3 +201,25 @@ Run the script with:
 ```
 python scripts/download_keep_files.py
 ```
+
+### 🚫 Preventing duplicate clip assignments
+
+`/api/clip` can optionally track which videos have been given out so two
+annotators don't receive the same file. Create a Supabase table (default
+`clip_assignments`) with columns:
+
+| column | purpose |
+| --- | --- |
+| `file_name` | name of the clip from the `keep` table |
+| `assigned_to` | identifier for the annotator |
+| `assigned_at` | timestamp of the assignment |
+
+Environment variables (all optional) customise the column names:
+
+- `SUPABASE_ASSIGN_TABLE`
+- `SUPABASE_ASSIGN_FILE_COL`
+- `SUPABASE_ASSIGN_USER_COL`
+- `SUPABASE_ASSIGN_TIME_COL`
+
+Requesting `/api/clip?annotator=alice` returns the first clip not yet
+assigned and records the assignment before responding.

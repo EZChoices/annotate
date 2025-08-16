@@ -1,6 +1,7 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 import json, os, random, re
+from datetime import datetime
 import requests
 
 app = FastAPI()
@@ -10,34 +11,72 @@ SUPABASE_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_ANON_KEY")
 SUPABASE_TABLE = os.environ.get("SUPABASE_KEEP_TABLE", "keep")
 SUPABASE_FILE_COL = os.environ.get("SUPABASE_FILE_COL", "file_name")
+ASSIGN_TABLE = os.environ.get("SUPABASE_ASSIGN_TABLE", "clip_assignments")
+ASSIGN_FILE_COL = os.environ.get("SUPABASE_ASSIGN_FILE_COL", "file_name")
+ASSIGN_USER_COL = os.environ.get("SUPABASE_ASSIGN_USER_COL", "assigned_to")
+ASSIGN_TIME_COL = os.environ.get("SUPABASE_ASSIGN_TIME_COL", "assigned_at")
 
 @app.get("/api/clip")
-async def get_clip():
-    """Return a random clip for demo tagging.
+async def get_clip(annotator: str = Query("anonymous")):
+    """Return a clip for tagging.
 
-    If ``BUNNY_KEEP_URL`` is provided, attempt to fetch a random ``.mp4``
-    from that folder. Falls back to the bundled sample clip and transcript
-    when no remote video can be retrieved.
+    If Supabase is configured, the endpoint looks for the first clip in
+    ``SUPABASE_TABLE`` that has not been assigned in ``ASSIGN_TABLE``.
+    The selection is recorded to prevent two annotators from getting the
+    same file. When Supabase is unavailable, fall back to a random file
+    or the bundled sample clip.
     """
 
     transcript_data = []
 
     if BUNNY_KEEP_URL:
-        # First try Supabase for a list of file names
         if SUPABASE_URL and SUPABASE_KEY:
+            headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+            keep_endpoint = f"{SUPABASE_URL}/rest/v1/{SUPABASE_TABLE}?select={SUPABASE_FILE_COL}"
+
             try:
-                endpoint = f"{SUPABASE_URL}/rest/v1/{SUPABASE_TABLE}?select={SUPABASE_FILE_COL}"
-                headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-                resp = requests.get(endpoint, headers=headers, timeout=5)
-                resp.raise_for_status()
-                rows = resp.json()
-                if rows:
-                    file_name = random.choice(rows).get(SUPABASE_FILE_COL)
-                    if file_name:
-                        video_url = BUNNY_KEEP_URL.rstrip("/") + "/" + file_name
-                        return {"video_url": video_url, "transcript": transcript_data}
+                keep_resp = requests.get(keep_endpoint, headers=headers, timeout=5)
+                keep_resp.raise_for_status()
+                keep_rows = keep_resp.json()
             except Exception:
-                pass
+                keep_rows = []
+
+            # Try to find first unassigned clip
+            if keep_rows:
+                try:
+                    assign_endpoint = f"{SUPABASE_URL}/rest/v1/{ASSIGN_TABLE}?select={ASSIGN_FILE_COL}"
+                    assign_resp = requests.get(assign_endpoint, headers=headers, timeout=5)
+                    assign_resp.raise_for_status()
+                    assigned = {r.get(ASSIGN_FILE_COL) for r in assign_resp.json()}
+
+                    chosen = None
+                    for row in keep_rows:
+                        fname = row.get(SUPABASE_FILE_COL)
+                        if fname and fname not in assigned:
+                            chosen = fname
+                            break
+
+                    if chosen:
+                        video_url = BUNNY_KEEP_URL.rstrip("/") + "/" + chosen
+                        payload = {
+                            ASSIGN_FILE_COL: chosen,
+                            ASSIGN_USER_COL: annotator,
+                            ASSIGN_TIME_COL: datetime.utcnow().isoformat(),
+                        }
+                        try:
+                            requests.post(assign_endpoint, headers=headers, json=payload, timeout=5)
+                        except Exception:
+                            pass
+                        return {"video_url": video_url, "transcript": transcript_data}
+                except Exception:
+                    pass
+
+            # Fall back to random selection from keep table
+            if keep_rows:
+                file_name = random.choice(keep_rows).get(SUPABASE_FILE_COL)
+                if file_name:
+                    video_url = BUNNY_KEEP_URL.rstrip("/") + "/" + file_name
+                    return {"video_url": video_url, "transcript": transcript_data}
 
         # Fallback: scrape directory listing
         try:
