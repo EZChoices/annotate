@@ -60,3 +60,16 @@ video{ width:100%; height:100%; display:block; background:#000 }
 .flag{ background:var(--danger); color:#fff; border:none; border-radius:10px; padding:.9rem 1rem; flex:1 }
 /* Larger tap targets */
 button{ -webkit-tap-highlight-color:transparent }
+/* Enhancements for wider screens */
+@media (min-width:600px){
+  .container{ padding:220px 2rem 120px }
+  .q-title{ font-size:1.1rem }
+  .btn{ flex:1 1 calc(33.333% - .5rem); padding:1rem 1.2rem; font-size:1.05rem }
+  .input-note{ font-size:1.05rem; padding:.8rem 1.1rem }
+}
+@media (min-width:900px){
+  .container{ padding:220px 3rem 120px }
+  .q-title{ font-size:1.2rem }
+  .btn{ flex:1 1 calc(25% - .5rem); padding:1.2rem 1.4rem; font-size:1.1rem }
+  .input-note{ font-size:1.1rem; padding:1rem 1.2rem }
+}
