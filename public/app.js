@@ -125,6 +125,13 @@ function attachVideo(src){
   });
 }
 
+function updateVideoHeight(){
+  const wrapper = document.getElementById('video-wrapper');
+  if(wrapper){
+    document.documentElement.style.setProperty('--video-height', wrapper.offsetHeight + 'px');
+  }
+}
+
 // ====== RENDER ======
 function renderStep(){
   const qRoot = document.getElementById('questions');
@@ -133,33 +140,33 @@ function renderStep(){
   if(!qRoot||!q) return;
   const totalSteps = QUESTIONS.length + (tags.code_switch === 'Yes' ? 1 : 0);
   const progress = Math.round((step+1)/totalSteps*100);
-  bar.style.width = progress + '%';
+  if(bar) bar.style.width = progress + '%';
 
-  let html = `<section class=\"card\">\n<h3 class=\"q-title\">${q.label}</h3>`;
+  let html = `<section class="card">\n<h3 class="q-title">${q.label}</h3>`;
   if(q.type === 'single'){
-    html += `<div class=\"btns\">` + q.options.map(v=>{
+    html += `<div class="btns">` + q.options.map(v=>{
       const sel = (tags[q.key] === v) ? 'selected' : '';
-      return `<button class=\"btn ${sel}\" data-k=\"${q.key}\" data-v=\"${v}\">${v}</button>`;
+      return `<button class="btn ${sel}" data-k="${q.key}" data-v="${v}">${v}</button>`;
     }).join('') + `</div>`;
   }
   if(q.type === 'multi'){
-    html += `<div class=\"btns\">` + q.options.map(v=>{
+    html += `<div class="btns">` + q.options.map(v=>{
       const chosen = (tags[q.key]||[]).includes(v) ? 'selected' : '';
-      return `<button class=\"btn ${chosen}\" data-k=\"${q.key}\" data-v=\"${v}\">${v}</button>`;
+      return `<button class="btn ${chosen}" data-k="${q.key}" data-v="${v}">${v}</button>`;
     }).join('') + `</div>`;
   }
   if(q.type === 'text'){
     const val = (tags[q.key]||'').replace(/</g,'&lt;');
-    html += `<textarea class=\"input-note\" id=\"noteInput\" rows=\"3\" placeholder=\"Optional\">${val}</textarea>`;
+    html += `<textarea class="input-note" id="noteInput" rows="3" placeholder="Optional">${val}</textarea>`;
   }
   html += `</section>`;
 
   // Follow-up for code-switch languages
   if(q.key === 'code_switch' && tags.code_switch === 'Yes'){
     const f = q.follow;
-    html += `<section class=\"card\">\n<h3 class=\"q-title\">${f.label}</h3><div class=\"btns\">` + f.options.map(v=>{
+    html += `<section class="card">\n<h3 class="q-title">${f.label}</h3><div class="btns">` + f.options.map(v=>{
       const chosen = (tags[f.key]||[]).includes(v) ? 'selected' : '';
-      return `<button class=\"btn ${chosen}\" data-k=\"${f.key}\" data-v=\"${v}\">${v}</button>`;
+      return `<button class="btn ${chosen}" data-k="${f.key}" data-v="${v}">${v}</button>`;
     }).join('') + `</div></section>`;
   }
 
@@ -225,6 +232,7 @@ async function loadClipAndStart(){
   const clipIdEl = document.getElementById('clipId');
   if(clipIdEl) clipIdEl.textContent = clip.id || '–';
   attachVideo(src);
+  updateVideoHeight();
   resetTagsForClip({ id: clip.id, src });
   step = 0; renderStep(); enqueueCurrent();
 }
@@ -247,8 +255,11 @@ async function initApp(){
 
   await loadClipAndStart();
 
+  // merged: keep both viewport resize handling and first-interaction playback kick
+  window.addEventListener('resize', updateVideoHeight);
   const video = document.getElementById('video') || document.getElementById('videoPlayer');
   function startPlayback(){
+    if (!video) return;
     video.play().catch(()=>{});
   }
   document.addEventListener('click', startPlayback, { once:true });

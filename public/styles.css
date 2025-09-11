@@ -1,8 +1,8 @@
 /* Mobile-first layout */
-:root{ --bg:#f8f8f8; --fg:#222; --card:#fff; --muted:#666; --accent:#2b7cff; --danger:#cc3344; --border:#ddd }
+:root{ --bg:#f8f8f8; --fg:#222; --card:#fff; --muted:#666; --accent:#2b7cff; --danger:#cc3344; --border:#ddd; --video-height:202px }
 :root.dark{ --bg:#101010; --fg:#eee; --card:#181818; --muted:#aaa; --accent:#6aa4ff; --danger:#ff5566; --border:#333 }
 body{ margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; background:var(--bg); color:var(--fg) }
-.container{ padding:220px 1rem 120px }
+.container{ padding-left:1rem; padding-right:1rem; padding-top:calc(var(--video-height) + 1rem); padding-bottom:8vh }
 .topbar{ position:sticky; top:0; z-index:10; display:flex; justify-content:space-between; align-items:center; padding:.6rem .9rem; background:var(--card); border-bottom:1px solid var(--border) }
 .topbar .actions button{ margin-left:.5rem }
 .player-sticky{
