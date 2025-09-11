@@ -97,6 +97,13 @@ function attachVideo(src){
   });
 }
 
+function updateVideoHeight(){
+  const wrapper = document.getElementById('video-wrapper');
+  if(wrapper){
+    document.documentElement.style.setProperty('--video-height', wrapper.offsetHeight + 'px');
+  }
+}
+
 // ====== RENDER ======
 function renderStep(){
   const qRoot = document.getElementById('questions');
@@ -197,6 +204,7 @@ async function loadClipAndStart(){
   const clipIdEl = document.getElementById('clipId');
   if(clipIdEl) clipIdEl.textContent = clip.id || '–';
   attachVideo(src);
+  updateVideoHeight();
   resetTagsForClip({ id: clip.id, src });
   step = 0; renderStep(); enqueueCurrent();
 }
@@ -218,6 +226,8 @@ async function initApp(){
   }
 
   await loadClipAndStart();
+
+  window.addEventListener('resize', updateVideoHeight);
 
   // controls
   const back = document.getElementById('backBtn');
