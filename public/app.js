@@ -219,6 +219,13 @@ async function initApp(){
 
   await loadClipAndStart();
 
+  const video = document.getElementById('video') || document.getElementById('videoPlayer');
+  function startPlayback(){
+    video.play().catch(()=>{});
+  }
+  document.addEventListener('click', startPlayback, { once:true });
+  document.addEventListener('touchstart', startPlayback, { once:true });
+
   // controls
   const back = document.getElementById('backBtn');
   const skip = document.getElementById('skipBtn');
