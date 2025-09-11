@@ -55,6 +55,34 @@ function toggleTheme(){
   applyTheme(document.documentElement.classList.contains('dark') ? 'light' : 'dark');
 }
 
+// ====== NOTIFY ======
+function notify(msg, timeout = 3000){
+  let box = document.getElementById('notify');
+  if(!box){
+    box = document.createElement('div');
+    box.id = 'notify';
+    box.style.position = 'fixed';
+    box.style.bottom = '1rem';
+    box.style.left = '50%';
+    box.style.transform = 'translateX(-50%)';
+    box.style.background = 'var(--card)';
+    box.style.color = 'var(--fg)';
+    box.style.border = '1px solid var(--border)';
+    box.style.padding = '.6rem .9rem';
+    box.style.borderRadius = '10px';
+    box.style.boxShadow = '0 2px 6px rgba(0,0,0,0.2)';
+    box.style.pointerEvents = 'none';
+    box.style.opacity = '0';
+    box.style.transition = 'opacity .3s';
+    box.style.zIndex = '1000';
+    document.body.appendChild(box);
+  }
+  box.textContent = msg;
+  box.style.opacity = '1';
+  clearTimeout(notify._t);
+  notify._t = setTimeout(()=>{ box.style.opacity = '0'; }, timeout);
+}
+
 // ====== STORAGE ======
 function loadQueue(){ try{ return JSON.parse(localStorage.getItem(STORAGE_KEY)||"[]"); }catch{ return []; } }
 function saveQueue(q){ localStorage.setItem(STORAGE_KEY, JSON.stringify(q)); }
@@ -112,33 +140,33 @@ function renderStep(){
   if(!qRoot||!q) return;
   const totalSteps = QUESTIONS.length + (tags.code_switch === 'Yes' ? 1 : 0);
   const progress = Math.round((step+1)/totalSteps*100);
-  bar.style.width = progress + '%';
+  if(bar) bar.style.width = progress + '%';
 
-  let html = `<section class=\"card\">\n<h3 class=\"q-title\">${q.label}</h3>`;
+  let html = `<section class="card">\n<h3 class="q-title">${q.label}</h3>`;
   if(q.type === 'single'){
-    html += `<div class=\"btns\">` + q.options.map(v=>{
+    html += `<div class="btns">` + q.options.map(v=>{
       const sel = (tags[q.key] === v) ? 'selected' : '';
-      return `<button class=\"btn ${sel}\" data-k=\"${q.key}\" data-v=\"${v}\">${v}</button>`;
+      return `<button class="btn ${sel}" data-k="${q.key}" data-v="${v}">${v}</button>`;
     }).join('') + `</div>`;
   }
   if(q.type === 'multi'){
-    html += `<div class=\"btns\">` + q.options.map(v=>{
+    html += `<div class="btns">` + q.options.map(v=>{
       const chosen = (tags[q.key]||[]).includes(v) ? 'selected' : '';
-      return `<button class=\"btn ${chosen}\" data-k=\"${q.key}\" data-v=\"${v}\">${v}</button>`;
+      return `<button class="btn ${chosen}" data-k="${q.key}" data-v="${v}">${v}</button>`;
     }).join('') + `</div>`;
   }
   if(q.type === 'text'){
     const val = (tags[q.key]||'').replace(/</g,'&lt;');
-    html += `<textarea class=\"input-note\" id=\"noteInput\" rows=\"3\" placeholder=\"Optional\">${val}</textarea>`;
+    html += `<textarea class="input-note" id="noteInput" rows="3" placeholder="Optional">${val}</textarea>`;
   }
   html += `</section>`;
 
   // Follow-up for code-switch languages
   if(q.key === 'code_switch' && tags.code_switch === 'Yes'){
     const f = q.follow;
-    html += `<section class=\"card\">\n<h3 class=\"q-title\">${f.label}</h3><div class=\"btns\">` + f.options.map(v=>{
+    html += `<section class="card">\n<h3 class="q-title">${f.label}</h3><div class="btns">` + f.options.map(v=>{
       const chosen = (tags[f.key]||[]).includes(v) ? 'selected' : '';
-      return `<button class=\"btn ${chosen}\" data-k=\"${f.key}\" data-v=\"${v}\">${v}</button>`;
+      return `<button class="btn ${chosen}" data-k="${f.key}" data-v="${v}">${v}</button>`;
     }).join('') + `</div></section>`;
   }
 
@@ -227,7 +255,15 @@ async function initApp(){
 
   await loadClipAndStart();
 
+  // merged: keep both viewport resize handling and first-interaction playback kick
   window.addEventListener('resize', updateVideoHeight);
+  const video = document.getElementById('video') || document.getElementById('videoPlayer');
+  function startPlayback(){
+    if (!video) return;
+    video.play().catch(()=>{});
+  }
+  document.addEventListener('click', startPlayback, { once:true });
+  document.addEventListener('touchstart', startPlayback, { once:true });
 
   // controls
   const back = document.getElementById('backBtn');
@@ -239,13 +275,13 @@ async function initApp(){
 
   if(back) back.addEventListener('click', ()=> prevStep());
   if(skip) skip.addEventListener('click', ()=> nextStep());
-  if(flag) flag.addEventListener('click', ()=>{ tags.flagged = !tags.flagged; enqueueCurrent(); alert(tags.flagged ? '🚩 Flagged' : 'Flag removed'); });
+  if(flag) flag.addEventListener('click', ()=>{ tags.flagged = !tags.flagged; enqueueCurrent(); notify(tags.flagged ? '🚩 Flagged' : 'Flag removed'); });
   if(save) save.addEventListener('click', ()=>{
     // simple validation: required keys
     const required = ['topic','speaker_count','code_switch','environment','face_visible','lip_visible','gestures_visible'];
     const missing = required.filter(k=> !tags[k] || (Array.isArray(tags[k]) && tags[k].length===0));
     if(missing.length){
-      alert('Missing: ' + missing.join(', '));
+      notify('Missing: ' + missing.join(', '));
       return;
     }
     enqueueCurrent();
