@@ -55,6 +55,34 @@ function toggleTheme(){
   applyTheme(document.documentElement.classList.contains('dark') ? 'light' : 'dark');
 }
 
+// ====== NOTIFY ======
+function notify(msg, timeout = 3000){
+  let box = document.getElementById('notify');
+  if(!box){
+    box = document.createElement('div');
+    box.id = 'notify';
+    box.style.position = 'fixed';
+    box.style.bottom = '1rem';
+    box.style.left = '50%';
+    box.style.transform = 'translateX(-50%)';
+    box.style.background = 'var(--card)';
+    box.style.color = 'var(--fg)';
+    box.style.border = '1px solid var(--border)';
+    box.style.padding = '.6rem .9rem';
+    box.style.borderRadius = '10px';
+    box.style.boxShadow = '0 2px 6px rgba(0,0,0,0.2)';
+    box.style.pointerEvents = 'none';
+    box.style.opacity = '0';
+    box.style.transition = 'opacity .3s';
+    box.style.zIndex = '1000';
+    document.body.appendChild(box);
+  }
+  box.textContent = msg;
+  box.style.opacity = '1';
+  clearTimeout(notify._t);
+  notify._t = setTimeout(()=>{ box.style.opacity = '0'; }, timeout);
+}
+
 // ====== STORAGE ======
 function loadQueue(){ try{ return JSON.parse(localStorage.getItem(STORAGE_KEY)||"[]"); }catch{ return []; } }
 function saveQueue(q){ localStorage.setItem(STORAGE_KEY, JSON.stringify(q)); }
@@ -229,13 +257,13 @@ async function initApp(){
 
   if(back) back.addEventListener('click', ()=> prevStep());
   if(skip) skip.addEventListener('click', ()=> nextStep());
-  if(flag) flag.addEventListener('click', ()=>{ tags.flagged = !tags.flagged; enqueueCurrent(); alert(tags.flagged ? '🚩 Flagged' : 'Flag removed'); });
+  if(flag) flag.addEventListener('click', ()=>{ tags.flagged = !tags.flagged; enqueueCurrent(); notify(tags.flagged ? '🚩 Flagged' : 'Flag removed'); });
   if(save) save.addEventListener('click', ()=>{
     // simple validation: required keys
     const required = ['topic','speaker_count','code_switch','environment','face_visible','lip_visible','gestures_visible'];
     const missing = required.filter(k=> !tags[k] || (Array.isArray(tags[k]) && tags[k].length===0));
     if(missing.length){
-      alert('Missing: ' + missing.join(', '));
+      notify('Missing: ' + missing.join(', '));
       return;
     }
     enqueueCurrent();
