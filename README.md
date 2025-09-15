@@ -1,34 +1,36 @@
-### 🏗 Repo Structure (for Vercel)
+# Annotate
+
+Mobile-friendly annotation app for short social video clips. Frontend is static, backend runs as Vercel Python serverless functions with optional Supabase + Bunny CDN integration.
+
+## Repo Structure
 
 ```
 annotate/
-│  vercel.json               # Vercel routes + build settings
-│  requirements.txt          # Python deps (FastAPI, Uvicorn)
-│
-├─ api/                      # Serverless API functions
-│    ├─ clip.py               # GET a clip + transcript
-│    ├─ submit.py             # POST annotation/meta to Supabase (later)
-│    └─ _utils.py             # shared helpers (load JSON, etc.)
-│
-├─ public/                   # Static assets served as-is
-│    ├─ styles.css
-│    ├─ video-utils.js       # shared video loader with fallback
-│    ├─ meta-v2.js           # Reddit-style handler
-│    ├─ config.js            # loads runtime env vars
-│    ├─ env.example.js       # template for env settings
-│    └─ sample.mp4           # test clip
-│
-├─ meta-v2/                  # Reddit-style UI (video + scrollable tags)
-│    └─ index.html
-└─ (legacy files removed)
+  vercel.json               # Vercel routes + build settings
+  requirements.txt          # Python deps (FastAPI, Uvicorn)
+
+  api/                      # Serverless API functions
+    clip.py                 # GET a clip + transcript
+    submit.py               # POST annotation/meta to Supabase
+    _utils.py               # shared helpers (load JSON, etc.)
+
+  public/                   # Static assets served as-is
+    styles.css
+    video-utils.js          # shared video loader with fallback
+    hls-player.js           # HLS support (not required for MP4)
+    meta-v2.js              # Tagging UI logic
+    config.js               # loads runtime env vars
+    env.example.js          # template for env settings
+    sample.mp4              # test clip
+    playlist.json           # sample playlist fallback
+
+  meta-v2/                  # UI shell (video + scrollable tags)
+    index.html
 ```
 
+`meta-v2` serves as the metadata UI and is exposed at the root path.
 
-`meta-v2` now serves as the sole metadata UI and is exposed at the root path.
-
----
-
-### 📄 vercel.json
+## vercel.json
 
 ```json
 {
@@ -40,26 +42,27 @@ annotate/
   ],
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/$1.py" },
+    { "src": "/public/(.*)", "dest": "/public/$1" },
     { "src": "/(.*)", "dest": "/meta-v2/index.html" }
   ]
 }
 ```
 
----
-
-### Bunny CDN configuration
+## Bunny CDN configuration
 
 The frontend looks for `window.BUNNY_BASE` when constructing clip URLs. The helper script `public/config.js` populates this value from `public/env.js` at runtime:
-
 
 1. Copy `public/env.example.js` to `public/env.js`.
 2. Set `BUNNY_BASE` to your Bunny pull zone, e.g. `https://MY_PULL_ZONE.b-cdn.net/keep/`.
 
 If not provided, the app warns in the console and falls back to local sample media.
 
----
+Backend also accepts Bunny base URL via any of:
+- `BUNNY_KEEP_URL` (preferred)
+- `BUNNY_BASE`
+- `BUNNY_PULL_BASE`
 
-### 📄 requirements.txt
+## Requirements
 
 ```
 fastapi
@@ -68,158 +71,73 @@ python-multipart
 requests
 ```
 
----
+## API Summary
 
-### 📄 api/clip.py
+### GET /api/clip
 
-```python
-from fastapi import FastAPI
-import json, os, random, re, requests
+Returns a JSON payload with a playable `video_url` plus optional `transcript` array.
 
-app = FastAPI()
-BUNNY_KEEP_URL = os.environ.get("BUNNY_KEEP_URL")
+If Supabase is configured, the endpoint:
+- Reads the `keep` table for file names (configurable via `SUPABASE_KEEP_TABLE` and `SUPABASE_FILE_COL`).
+- Returns the first file not yet assigned to an annotator (tracked in `clip_assignments`).
+- Records the assignment (annotator id + timestamp) before responding.
 
-@app.get("/api/clip")
-async def get_clip():
-    """Return demo clip metadata with Bunny CDN fallback."""
-    transcript = []
+Fallbacks:
+- If Supabase isn’t configured or fails, tries to scrape a Bunny directory listing.
+- Else returns the bundled sample clip.
 
-    if BUNNY_KEEP_URL:
-        try:
-            resp = requests.get(BUNNY_KEEP_URL, timeout=5)
-            resp.raise_for_status()
-            files = re.findall(r'href="([^"?]+\.mp4)"', resp.text)
-            if files:
-                choice = random.choice(files)
-                url = choice if choice.startswith("http") else BUNNY_KEEP_URL.rstrip("/") + "/" + choice
-                return {"video_url": url, "transcript": transcript}
-        except Exception:
-            pass
+Environment variables:
+- `NEXT_PUBLIC_SUPABASE_URL` or `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_SERVICE_KEY` or `SUPABASE_ANON_KEY`
+- `SUPABASE_KEEP_TABLE` (default `keep`)
+- `SUPABASE_FILE_COL` (default `file_name`)
+- `SUPABASE_ASSIGN_TABLE` (default `clip_assignments`)
+- `SUPABASE_ASSIGN_FILE_COL` (default `file_name`)
+- `SUPABASE_ASSIGN_USER_COL` (default `assigned_to`)
+- `SUPABASE_ASSIGN_TIME_COL` (default `assigned_at`)
+- `BUNNY_KEEP_URL` or `BUNNY_BASE` or `BUNNY_PULL_BASE`
 
-    sample_json = os.path.join(os.path.dirname(__file__), "..", "public", "sample.json")
-    if os.path.exists(sample_json):
-        with open(sample_json, "r", encoding="utf-8") as f:
-            transcript = json.load(f)
-    return {"video_url": "/public/sample.mp4", "transcript": transcript}
-```
+Tip: Frontend now sends an `annotator` id, derived per-device, when requesting `/api/clip`.
 
----
+### POST /api/submit
 
-### 📄 api/submit.py
+Accepts an annotation payload and persists to Supabase if configured. The table and JSON column can be configured via:
+- `SUPABASE_SUBMIT_TABLE` (default `annotations`)
+- `SUPABASE_SUBMIT_JSON_COL` (default `data`)
 
-```python
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-import json
+The request may include `?annotator=<id>` to attach to the record. The handler also tries to copy `clip_id` and `src` from the payload into their own columns if present.
 
-app = FastAPI()
+Suggested schema:
+- `annotations` table with columns:
+  - `data` JSONB
+  - `annotator` text (optional)
+  - `received_at` timestamptz default now() (optional)
+  - `clip_id` text (optional)
+  - `video_url` text (optional)
 
-@app.post("/api/submit")
-async def submit_annotations(req: Request):
-    data = await req.json()
-    print("✅ Annotation submitted:", data)
-    # 🚀 LATER: Save to Supabase here
-    return JSONResponse({"status": "ok", "message": "Annotation received"})
-```
+## Deployment
 
----
+1. Ensure `vercel.json` matches this repo.
+2. Set environment variables in Vercel Project Settings.
+3. Deploy via Vercel (CLI or dashboard).
 
-### 📄 meta-v2/index.html
+After deploy:
+- Annotators can visit the domain and get live updates.
 
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Metadata Tagging - V2</title>
-  <link rel="stylesheet" href="/public/styles.css">
-</head>
-<body>
-  <!-- Tagging UI omitted for brevity -->
-  <script src="/public/env.js"></script>
-  <script src="/public/config.js"></script>
-  <script src="/public/video-utils.js"></script>
-  <script src="/public/meta.js"></script>
-</body>
-</html>
-```
+## Scripts
 
----
+- `scripts/download_keep_files.py` pulls file names from Supabase and downloads each from Bunny Storage. Requires: `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `BUNNY_STORAGE_ZONE`, `BUNNY_STORAGE_PASSWORD`, and optional `FILTERED_FOLDER`.
+- `scripts/split_segments.py` splits diarized JSON segments to target lengths (demo).
 
-### 📄 public/meta.js
+## Preventing duplicate clip assignments
 
-```js
-const tags = {
-  accent_notes: [],
-  emotion: []
-};
+Create a Supabase `clip_assignments` table with columns:
 
-function setTag(key, value, btn){
-  tags[key] = value;
-  document.querySelectorAll(`[data-set-tag="${key}"]`).forEach(b => {
-    b.classList.toggle('selected', b === btn);
-  });
-}
+| column        | purpose                                     |
+| ------------- | ------------------------------------------- |
+| `file_name`   | name of the clip from the `keep` table      |
+| `assigned_to` | identifier for the annotator                |
+| `assigned_at` | timestamp of the assignment                 |
 
-// additional helpers handle multi-select toggles and submission
-```
+Requesting `/api/clip?annotator=alice` returns the first clip not yet assigned and records the assignment before responding.
 
----
-
-### ✅ Instructions for Codex
-
-1️⃣ **Create `vercel.json`** exactly as above.  
-2️⃣ **Move all Flask code to `/api` folder** (replace Flask with FastAPI).  
-3️⃣ **Move current JS/CSS to `/public`**.  
-4️⃣ **Update all API calls in the JS** to use `/api/clip` & `/api/submit`.
-5️⃣ **Delete Flask backend** – Vercel will now run `api/*.py` serverless.  
-6️⃣ **Ensure `requirements.txt`** lists FastAPI.
-7️⃣ Commit + push → Vercel auto-builds → live test link ready.
-
----
-
-✅ **After Codex push, you just:**
-- Run `vercel` (or connect repo to Vercel dashboard)
-- Annotators can hit `meta.dialectdata.com` → instantly live updates
-
----
-
-### 🐇 Fetching clips from Supabase and Bunny
-
-`scripts/download_keep_files.py` pulls file names from the `keep` table in Supabase and downloads each file from Bunny Storage.
-
-Required environment variables:
-
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `SUPABASE_SERVICE_KEY`
-- `BUNNY_STORAGE_ZONE`
-- `BUNNY_STORAGE_PASSWORD`
-- `FILTERED_FOLDER` (optional path inside the storage zone)
-
-Run the script with:
-
-```
-python scripts/download_keep_files.py
-```
-
-### 🚫 Preventing duplicate clip assignments
-
-`/api/clip` can optionally track which videos have been given out so two
-annotators don't receive the same file. Create a Supabase table (default
-`clip_assignments`) with columns:
-
-| column | purpose |
-| --- | --- |
-| `file_name` | name of the clip from the `keep` table |
-| `assigned_to` | identifier for the annotator |
-| `assigned_at` | timestamp of the assignment |
-
-Environment variables (all optional) customise the column names:
-
-- `SUPABASE_ASSIGN_TABLE`
-- `SUPABASE_ASSIGN_FILE_COL`
-- `SUPABASE_ASSIGN_USER_COL`
-- `SUPABASE_ASSIGN_TIME_COL`
-
-Requesting `/api/clip?annotator=alice` returns the first clip not yet
-assigned and records the assignment before responding.

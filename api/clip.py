@@ -6,9 +6,18 @@ import requests
 
 app = FastAPI()
 
-BUNNY_KEEP_URL = os.environ.get("BUNNY_KEEP_URL")
-SUPABASE_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_ANON_KEY")
+# Accept multiple env var names for flexibility
+BUNNY_KEEP_URL = (
+    os.environ.get("BUNNY_KEEP_URL")
+    or os.environ.get("BUNNY_BASE")
+    or os.environ.get("BUNNY_PULL_BASE")
+)
+SUPABASE_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL") or os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = (
+    os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    or os.environ.get("SUPABASE_SERVICE_KEY")
+    or os.environ.get("SUPABASE_ANON_KEY")
+)
 SUPABASE_TABLE = os.environ.get("SUPABASE_KEEP_TABLE", "keep")
 SUPABASE_FILE_COL = os.environ.get("SUPABASE_FILE_COL", "file_name")
 ASSIGN_TABLE = os.environ.get("SUPABASE_ASSIGN_TABLE", "clip_assignments")
@@ -31,21 +40,26 @@ async def get_clip(annotator: str = Query("anonymous")):
 
     if BUNNY_KEEP_URL:
         if SUPABASE_URL and SUPABASE_KEY:
-            headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+            headers = {
+                "apikey": SUPABASE_KEY,
+                "Authorization": f"Bearer {SUPABASE_KEY}",
+                "Accept": "application/json",
+            }
             keep_endpoint = f"{SUPABASE_URL}/rest/v1/{SUPABASE_TABLE}?select={SUPABASE_FILE_COL}"
 
             try:
-                keep_resp = requests.get(keep_endpoint, headers=headers, timeout=5)
+                keep_resp = requests.get(keep_endpoint, headers=headers, timeout=10)
                 keep_resp.raise_for_status()
                 keep_rows = keep_resp.json()
-            except Exception:
+            except Exception as e:
+                print("[clip] Supabase keep fetch failed:", repr(e))
                 keep_rows = []
 
             # Try to find first unassigned clip
             if keep_rows:
                 try:
                     assign_endpoint = f"{SUPABASE_URL}/rest/v1/{ASSIGN_TABLE}?select={ASSIGN_FILE_COL}"
-                    assign_resp = requests.get(assign_endpoint, headers=headers, timeout=5)
+                    assign_resp = requests.get(assign_endpoint, headers=headers, timeout=10)
                     assign_resp.raise_for_status()
                     assigned = {r.get(ASSIGN_FILE_COL) for r in assign_resp.json()}
 
@@ -56,31 +70,37 @@ async def get_clip(annotator: str = Query("anonymous")):
                             chosen = fname
                             break
 
+                    if not chosen and keep_rows:
+                        # if all appear assigned, pick a random one
+                        chosen = random.choice(keep_rows).get(SUPABASE_FILE_COL)
+
                     if chosen:
-                        video_url = BUNNY_KEEP_URL.rstrip("/") + "/" + chosen
+                        video_url = BUNNY_KEEP_URL.rstrip("/") + "/" + str(chosen).lstrip("/")
                         payload = {
                             ASSIGN_FILE_COL: chosen,
                             ASSIGN_USER_COL: annotator,
                             ASSIGN_TIME_COL: datetime.utcnow().isoformat(),
                         }
                         try:
-                            requests.post(assign_endpoint, headers=headers, json=payload, timeout=5)
-                        except Exception:
-                            pass
+                            post_headers = dict(headers)
+                            post_headers.update({"Prefer": "return=representation", "Content-Type": "application/json"})
+                            requests.post(assign_endpoint, headers=post_headers, json=payload, timeout=10)
+                        except Exception as e:
+                            print("[clip] Supabase assignment insert failed:", repr(e))
                         return {"video_url": video_url, "transcript": transcript_data}
-                except Exception:
-                    pass
+                except Exception as e:
+                    print("[clip] Supabase assignment check failed:", repr(e))
 
             # Fall back to random selection from keep table
             if keep_rows:
                 file_name = random.choice(keep_rows).get(SUPABASE_FILE_COL)
                 if file_name:
-                    video_url = BUNNY_KEEP_URL.rstrip("/") + "/" + file_name
+                    video_url = BUNNY_KEEP_URL.rstrip("/") + "/" + str(file_name).lstrip("/")
                     return {"video_url": video_url, "transcript": transcript_data}
 
         # Fallback: scrape directory listing
         try:
-            resp = requests.get(BUNNY_KEEP_URL, timeout=5)
+            resp = requests.get(BUNNY_KEEP_URL, timeout=10)
             resp.raise_for_status()
             # Bunny links may include query parameters (e.g. for security tokens).
             # Capture the entire URL up to the closing quote so we keep any
@@ -89,12 +109,12 @@ async def get_clip(annotator: str = Query("anonymous")):
             if files:
                 choice = random.choice(files)
                 if not choice.startswith("http"):
-                    video_url = BUNNY_KEEP_URL.rstrip("/") + "/" + choice
+                    video_url = BUNNY_KEEP_URL.rstrip("/") + "/" + choice.lstrip("/")
                 else:
                     video_url = choice
                 return {"video_url": video_url, "transcript": transcript_data}
-        except Exception:
-            pass
+        except Exception as e:
+            print("[clip] Bunny listing scrape failed:", repr(e))
 
     sample_json = os.path.join(os.path.dirname(__file__), "..", "public", "sample.json")
     if os.path.exists(sample_json):

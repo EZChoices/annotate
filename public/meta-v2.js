@@ -107,7 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.classList.toggle('dark');
   });
   const flag = document.getElementById('flagBtn');
-  if(flag) flag.addEventListener('click', () => { tags.flagged = true; alert('🚩 Clip flagged'); });
+  if(flag) flag.addEventListener('click', () => { tags.flagged = true; alert('Clip flagged'); });
   const submit = document.getElementById('submitBtn');
   if(submit) submit.addEventListener('click', submitAnnotation);
 
@@ -119,3 +119,4 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
+
