@@ -161,6 +161,7 @@
       const base = location.origin;
       function getAnnot(){ try{ const k='dd_annotator_id'; return localStorage.getItem(k)||'anonymous'; }catch{ return 'anonymous'; } }
       const id = getAnnot();
+      if(new URLSearchParams(location.search).get('links')==='0') return;
       c.innerHTML = `Quick Links: 
         <a href="${base}/">Meta V2</a> · 
         <a href="${base}/stage2">Stage 2</a> · 

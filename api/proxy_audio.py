@@ -14,18 +14,23 @@ TO_EXT = os.environ.get("AUDIO_PROXY_EXT", ".opus")
 
 def allowed_host(url: str) -> bool:
     try:
-        host = urlparse(url).hostname or ""
+        host = (urlparse(url).hostname or "").lower()
     except Exception:
         return False
     allowed = set([h.strip().lower() for h in (ALLOWED_PROXY_HOSTS or "").split(",") if h.strip()])
+    bunny_host = None
     if BUNNY_KEEP_URL:
         try:
-            bunny_host = urlparse(BUNNY_KEEP_URL).hostname
-            if bunny_host:
-                allowed.add(bunny_host.lower())
+            bunny_host = (urlparse(BUNNY_KEEP_URL).hostname or "").lower()
         except Exception:
-            pass
-    return host.lower() in allowed if allowed else True  # if no allowlist set, allow
+            bunny_host = None
+    # Default: if no explicit allowlist provided, restrict to Bunny host only (if available)
+    if not allowed:
+        if bunny_host:
+            allowed.add(bunny_host)
+        else:
+            return False
+    return host in allowed
 
 
 @app.get("/api/proxy_audio")
@@ -75,4 +80,3 @@ async def proxy_audio(req: Request, src: str | None = None, file: str | None = N
     resp.headers["Accept-Ranges"] = "bytes"
     resp.headers["Cache-Control"] = "public, max-age=60"
     return resp
-

@@ -21,7 +21,8 @@ const EAQ = {
     translationCues: [],
     codeSwitchCues: [],
     eventsCues: [],
-    diarSegments: []
+    diarSegments: [],
+    startedAt: 0
   }
 };
 
@@ -92,13 +93,13 @@ async function enqueueAndSync(){
       transcript_ctm: null,
       translation_vtt: EAQ.state.translationVTT,
       code_switch_vtt: EAQ.state.codeSwitchVTT || '',
-      code_switch_spans_json: '',
+      code_switch_spans_json: codeSwitchJson(EAQ.state.codeSwitchCues||[]).json,
       events_vtt: (function(){ const ev = qs('eventsVTT'); if(ev && ev.value.trim()) return ev.value; return (EAQ.state.eventsCues||[]).length ? VTT.stringify(EAQ.state.eventsCues) : ''; })()
     },
     summary: {
-      contains_code_switch: !!EAQ.state.codeSwitchVTT.trim(),
-      code_switch_languages: [],
-      cs_total_duration_sec: 0,
+      contains_code_switch: (EAQ.state.codeSwitchCues||[]).length > 0,
+      code_switch_languages: Array.from(codeSwitchJson(EAQ.state.codeSwitchCues||[]).langs),
+      cs_total_duration_sec: codeSwitchJson(EAQ.state.codeSwitchCues||[]).total,
       non_arabic_token_ratio_est: 0
     },
     qa: {
@@ -106,13 +107,14 @@ async function enqueueAndSync(){
       second_annotator_id: null,
       adjudicator_id: null,
       gold_check: 'pass',
-      time_spent_sec: 0
+      time_spent_sec: Math.max(0, Math.round((Date.now() - (EAQ.state.startedAt||Date.now()))/1000))
     },
     client_meta: { device: navigator.userAgent }
   };
 
   await EAIDB.enqueue(payload);
   trySyncWithBackoff();
+  try{ if('serviceWorker' in navigator && 'SyncManager' in window){ const reg = await navigator.serviceWorker.ready; await reg.sync.register('ea-sync'); } }catch{}
 }
 
 async function trySyncOnce(){
@@ -142,6 +144,7 @@ function bindUI(){
       loadAudio();
       await loadPrefillForCurrent();
       prefetchNext();
+      EAQ.state.startedAt = Date.now();
       show('screen_transcript');
     }catch{
       qs('downloadStatus').textContent = 'Failed to load tasks. Using offline queue.';
@@ -197,6 +200,7 @@ function bindUI(){
     loadAudio();
     await loadPrefillForCurrent();
     prefetchNext();
+    EAQ.state.startedAt = Date.now();
     show('screen_transcript');
   });
 }
@@ -205,6 +209,7 @@ window.addEventListener('load', ()=>{
   EAQ.state.annotator = getAnnotatorId();
   bindUI();
   window.addEventListener('online', ()=>{ trySyncWithBackoff(); });
+  if('serviceWorker' in navigator){ navigator.serviceWorker.addEventListener('message', (ev)=>{ if(ev && ev.data && ev.data.type==='ea-sync'){ trySyncWithBackoff(); } }); }
   // Bind basic editing controls
   const a = qs('audio');
   qs('rewindBtn').addEventListener('click', ()=>{ if(a) a.currentTime = Math.max(0, a.currentTime - 3); });
@@ -272,6 +277,18 @@ window.addEventListener('load', ()=>{
   if(zo) zo.addEventListener('click', ()=> Wave.setZoom(1.25));
   if(sl) sl.addEventListener('click', ()=> Wave.scroll(-0.1));
   if(sr) sr.addEventListener('click', ()=> Wave.scroll(0.1));
+  const clr = qs('clearLocal');
+  if(clr){
+    clr.addEventListener('click', async ()=>{
+      try{ const db = indexedDB.deleteDatabase('ea_stage2_db'); }catch{}
+      try{ localStorage.removeItem('ea_stage2_annotator_id'); }catch{}
+      try{
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k=> caches.delete(k)));
+      }catch{}
+      alert('Local data cleared.');
+    });
+  }
 });
 
 // Prefill loader and alignment helpers
@@ -321,6 +338,18 @@ function rttmStringify(segments, recId){
       return `SPEAKER ${id} 1 ${tbeg} ${tdur} <NA> <NA> ${spk} <NA> <NA>`;
     }).join('\n');
   }catch{ return ''; }
+}
+
+function codeSwitchJson(cues){
+  const map = { 'EN':'eng', 'FR':'fra', 'OTHER':'other' };
+  let total = 0; const langs = new Set();
+  const items = (cues||[]).map(c=>{
+    const s = +c.start || 0, e = +c.end || 0; const dur = Math.max(0, e - s); total += dur;
+    const lang = map[(c.text||'').trim().toUpperCase()] || 'other';
+    langs.add(lang);
+    return { start:s, end:e, lang };
+  });
+  return { json: JSON.stringify(items), total: Math.round(total*1000)/1000, langs };
 }
 
 function parseRTTM(text){
