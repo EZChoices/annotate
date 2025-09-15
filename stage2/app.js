@@ -19,7 +19,9 @@ const EAQ = {
     codeSwitchVTT: '',
     transcriptCues: [],
     translationCues: [],
-    codeSwitchCues: []
+    codeSwitchCues: [],
+    eventsCues: [],
+    diarSegments: []
   }
 };
 
@@ -33,7 +35,7 @@ function getAnnotatorId(){
 }
 
 function qs(id){ return document.getElementById(id); }
-function show(id){ ['screen_welcome','screen_transcript','screen_translation','screen_codeswitch','screen_review'].forEach(x=> qs(x).classList.toggle('hide', x!==id)); }
+function show(id){ ['screen_welcome','screen_transcript','screen_translation','screen_codeswitch','screen_pii','screen_diar','screen_review'].forEach(x=> qs(x).classList.toggle('hide', x!==id)); }
 
 async function loadManifest(){
   const annot = encodeURIComponent(EAQ.state.annotator);
@@ -60,6 +62,12 @@ function loadAudio(){
   a.src = it.media && it.media.audio_proxy_url ? it.media.audio_proxy_url : '/public/sample.mp4';
   a.play().catch(()=>{});
   const wave = qs('wave'); if(wave){ Wave.attach(wave); Wave.load(a.src); }
+  const tl = qs('timeline');
+  if(tl){
+    const attachTl = ()=> Timeline.attach(tl, a.duration||0, EAQ.state.transcriptCues, (cues)=>{ EAQ.state.transcriptCues = VTT.normalize(cues); qs('transcriptVTT').value = VTT.stringify(EAQ.state.transcriptCues); alignTranslationToTranscript(); });
+    if(isFinite(a.duration) && a.duration>0){ attachTl(); }
+    else { a.addEventListener('loadedmetadata', attachTl, { once:true }); }
+  }
 }
 
 function basicValidation(){
@@ -155,14 +163,36 @@ function bindUI(){
     const errs = basicValidation();
     const el = qs('errorsList');
     el.textContent = errs.length ? ('Errors: ' + errs.join(', ')) : 'Looks good.';
-    show('screen_review');
+    show('screen_pii');
   });
+  // PII/events buttons
+  const evtBtns = document.querySelectorAll('[data-evt]');
+  const openEvt = new Map();
+  function now(){ const a=qs('audio'); return a && a.currentTime || 0; }
+  evtBtns.forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const k = b.getAttribute('data-evt');
+      if(!openEvt.has(k)){
+        openEvt.set(k, now());
+        b.classList.add('selected');
+      } else {
+        const s = openEvt.get(k); openEvt.delete(k);
+        b.classList.remove('selected');
+        EAQ.state.eventsCues.push({ start:s, end:now(), text:k });
+        EAQ.state.eventsCues = VTT.normalize(EAQ.state.eventsCues);
+        const box = qs('eventsVTT'); if(box) box.value = VTT.stringify(EAQ.state.eventsCues);
+      }
+    });
+  });
+  const piiNext = qs('piiNext'); if(piiNext) piiNext.addEventListener('click', ()=>{ show('screen_diar'); });
+  const diarNext = qs('diarNext'); if(diarNext) diarNext.addEventListener('click', ()=>{ show('screen_review'); });
   qs('submitBtn').addEventListener('click', async ()=>{
     await enqueueAndSync();
     EAQ.state.idx = (EAQ.state.idx + 1) % Math.max(1, EAQ.state.manifest.items.length);
     qs('transcriptVTT').value = '';
     qs('translationVTT').value = '';
     qs('codeSwitchVTT').value = '';
+    const ev = qs('eventsVTT'); if(ev) ev.value = '';
     loadAudio();
     await loadPrefillForCurrent();
     prefetchNext();
@@ -256,6 +286,10 @@ async function loadPrefillForCurrent(){
   }
   // Align counts
   alignTranslationToTranscript();
+  // Diarization prefill (RTTM)
+  if(it.prefill && it.prefill.diarization_rttm_url){
+    try{ const t = await fetch(it.prefill.diarization_rttm_url).then(r=> r.text()); EAQ.state.diarSegments = parseRTTM(t); renderDiarList(); } catch{ EAQ.state.diarSegments = []; renderDiarList(); }
+  } else { EAQ.state.diarSegments = []; renderDiarList(); }
 }
 
 function alignTranslationToTranscript(){
@@ -274,4 +308,42 @@ function alignTranslationToTranscript(){
   for(let i=0;i<tr.length;i++){ if(tl[i]){ tl[i].start = tr[i].start; tl[i].end = tr[i].end; } }
   EAQ.state.translationCues = tl;
   qs('translationVTT').value = VTT.stringify(tl);
+}
+
+function parseRTTM(text){
+  const out = [];
+  const lines = (text||'').split(/\r?\n/);
+  for(const ln of lines){
+    const t = ln.trim(); if(!t || t.startsWith('#')) continue;
+    const parts = t.split(/\s+/);
+    if(parts[0] !== 'SPEAKER') continue;
+    const tbeg = parseFloat(parts[3]||'0'), tdur = parseFloat(parts[4]||'0');
+    const spk = parts[7] || 'spk';
+    out.push({ start: tbeg, end: tbeg+tdur, speaker: spk });
+  }
+  return out.sort((a,b)=> a.start-b.start);
+}
+
+function renderDiarList(){
+  const el = qs('diarList'); if(!el) return;
+  const rows = (EAQ.state.diarSegments||[]).map((s,i)=>{
+    return `<div style="display:flex;gap:.5rem;align-items:center;margin:.25rem 0">`+
+      `<code>#${i+1}</code>`+
+      `<button data-d="-" data-i="${i}">-50ms</button>`+
+      `<button data-d="+" data-i="${i}">+50ms</button>`+
+      `<span>start=${s.start.toFixed(2)} end=${s.end.toFixed(2)} spk=${s.speaker}</span>`+
+    `</div>`;
+  }).join('');
+  el.innerHTML = rows || '<em>No diarization loaded.</em>';
+  el.querySelectorAll('button[data-i]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const i = parseInt(btn.getAttribute('data-i'),10);
+      const sign = btn.getAttribute('data-d') === '+' ? 1 : -1;
+      const delta = 0.05 * sign; // 50ms
+      const seg = EAQ.state.diarSegments[i];
+      const newStart = Math.max(0, seg.start + delta);
+      if(Math.abs(newStart - seg.start) <= 0.5){ seg.start = newStart; }
+      renderDiarList();
+    });
+  });
 }

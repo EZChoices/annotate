@@ -39,6 +39,7 @@
         <button id="rewindBtn" class="secondary">Rewind 3s</button>
         <button id="undoBtn" class="secondary">Undo</button>
       </div>
+      <div id="timeline" style="height:32px;border:1px solid var(--border);border-radius:6px;position:relative;background:var(--card)"></div>
       <label>Cues (WebVTT)</label>
       <textarea id="transcriptVTT" class="vtt" placeholder="WEBVTT\n\n00:00.000 --> 00:02.000\nHello"></textarea>
       <div class="controls">
@@ -72,6 +73,32 @@
       </div>
     </div>
 
+    <div class="screen hide" id="screen_pii">
+      <h3>Optional PII / Safety Events</h3>
+      <div class="controls">
+        <button class="secondary" data-evt="pii_name">PII: Name</button>
+        <button class="secondary" data-evt="pii_phone">PII: Phone</button>
+        <button class="secondary" data-evt="minor_face">Minor Face</button>
+        <button class="secondary" data-evt="political_slogan">Political</button>
+        <button class="secondary" data-evt="religious_content">Religious</button>
+        <button class="secondary" data-evt="explicit">Explicit</button>
+      </div>
+      <label>Events (WebVTT)</label>
+      <textarea id="eventsVTT" class="vtt" placeholder="WEBVTT\n\n00:01.000 --> 00:03.200\npii_name"></textarea>
+      <div class="controls">
+        <button id="piiNext" class="primary">Continue</button>
+      </div>
+    </div>
+
+    <div class="screen hide" id="screen_diar">
+      <h3>Diarization (Optional)</h3>
+      <p class="notice">Nudge boundaries up to 500ms. Prefill loads from keep table if provided.</p>
+      <div id="diarList" class="notice"></div>
+      <div class="controls">
+        <button id="diarNext" class="primary">Continue</button>
+      </div>
+    </div>
+
     <div class="screen hide" id="screen_review">
       <h3>Review & Submit</h3>
       <div id="errorsList" class="notice"></div>
@@ -85,6 +112,7 @@
   <script src="/public/env.js"></script>
   <script src="/public/config.js"></script>
   <script src="/public/vtt.js"></script>
+  <script src="/public/timeline.js"></script>
   <script src="/public/waveform.js"></script>
   <script src="/stage2/app.js"></script>
   <script>
