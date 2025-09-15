@@ -13,12 +13,17 @@ annotate/
     clip.py                 # GET a clip + transcript
     submit.py               # POST annotation/meta to Supabase
     _utils.py               # shared helpers (load JSON, etc.)
+    tasks.py                # Stage 2: GET task manifest (Keep category)
+    annotations.py          # Stage 2: POST single/batch annotation payloads
 
   public/                   # Static assets served as-is
     styles.css
     video-utils.js          # shared video loader with fallback
     hls-player.js           # HLS support (not required for MP4)
     meta-v2.js              # Tagging UI logic
+    idb.js                  # Stage 2 offline queue
+    sw.js                   # Stage 2 service worker
+    manifest.webmanifest    # Stage 2 PWA manifest
     config.js               # loads runtime env vars
     env.example.js          # template for env settings
     sample.mp4              # test clip
@@ -26,6 +31,9 @@ annotate/
 
   meta-v2/                  # UI shell (video + scrollable tags)
     index.html
+  stage2/                   # Stage 2 deep-annotation PWA
+    index.html              # One-task-per-screen UI
+    app.js                  # Flow, offline queue, syncing
 ```
 
 `meta-v2` serves as the metadata UI and is exposed at the root path.
@@ -124,6 +132,25 @@ Suggested schema:
 After deploy:
 - Annotators can visit the domain and get live updates.
 
+## Stage 2 (Deep Annotation)
+
+PWA lives at `/stage2`. It preloads a task manifest from Supabase (Keep category) and supports offline queueing with IndexedDB and a service worker.
+
+Endpoints:
+- `GET /api/tasks?stage=2&annotator_id=ID&limit=10` → returns manifest and records assignments in `clip_assignments_stage2`.
+- `POST /api/annotations` and `POST /api/annotations/batch` → store JSON payloads in `annotations_stage2` (configurable).
+
+Environment variables:
+- Supabase connection: `SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_URL`, plus `SUPABASE_SERVICE_ROLE_KEY` (recommended) or `SUPABASE_SERVICE_KEY`/`SUPABASE_ANON_KEY`.
+- Keep table/columns: `SUPABASE_KEEP_TABLE` (default `keep`), `SUPABASE_FILE_COL` (default `file_name`).
+- Optional prefill column names to include if present: `SUPABASE_KEEP_DIA_RTTM_COL`, `SUPABASE_KEEP_TR_VTT_COL`, `SUPABASE_KEEP_TR_CTM_COL`, `SUPABASE_KEEP_TL_VTT_COL`, `SUPABASE_KEEP_CS_VTT_COL`.
+- Stage 2 assignment table/columns: `SUPABASE_ASSIGN_STAGE2_TABLE` (default `clip_assignments_stage2`), `SUPABASE_ASSIGN_STAGE2_FILE_COL` (default `file_name`), `SUPABASE_ASSIGN_STAGE2_USER_COL` (default `assigned_to`), `SUPABASE_ASSIGN_STAGE2_TIME_COL` (default `assigned_at`).
+- Stage 2 annotations tables: `SUPABASE_STAGE2_TABLE` (default `annotations_stage2`), `SUPABASE_STAGE2_BATCH_TABLE` (optional, default same table).
+
+Notes:
+- Set the same env vars for both Preview and Production in Vercel.
+- Ensure Bunny pull zone (`BUNNY_KEEP_URL`) points to the Keep category.
+
 ## Scripts
 
 - `scripts/download_keep_files.py` pulls file names from Supabase and downloads each from Bunny Storage. Requires: `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `BUNNY_STORAGE_ZONE`, `BUNNY_STORAGE_PASSWORD`, and optional `FILTERED_FOLDER`.
@@ -140,4 +167,3 @@ Create a Supabase `clip_assignments` table with columns:
 | `assigned_at` | timestamp of the assignment                 |
 
 Requesting `/api/clip?annotator=alice` returns the first clip not yet assigned and records the assignment before responding.
-
