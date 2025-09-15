@@ -1,0 +1,10 @@
+{
+  "name": "EchoAtlas Stage 2",
+  "short_name": "EA Stage2",
+  "start_url": "/stage2",
+  "display": "standalone",
+  "background_color": "#101010",
+  "theme_color": "#101010",
+  "icons": []
+}
+
