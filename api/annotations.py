@@ -31,6 +31,16 @@ def _supabase_headers() -> Dict[str, str]:
 @app.post("/api/annotations")
 async def post_annotation(req: Request, annotator: str = Query("anonymous")):
     payload = await req.json()
+    # Minimal validation
+    errors = []
+    if not isinstance(payload, dict):
+        errors.append("payload must be an object")
+    else:
+        if not payload.get("asset_id"):
+            errors.append("asset_id required")
+        if not isinstance(payload.get("files"), dict):
+            errors.append("files must be an object")
+
     record = {
         "data": payload,
         "received_at": datetime.utcnow().isoformat(),
@@ -47,7 +57,7 @@ async def post_annotation(req: Request, annotator: str = Query("anonymous")):
                 warn = f"Supabase insert failed: {resp.status_code}"
         except Exception as e:
             warn = f"Supabase exception: {repr(e)}"
-    return JSONResponse({"status": "ok", "saved": saved, "warning": warn})
+    return JSONResponse({"status": "ok", "saved": saved, "warning": warn, "validation_errors": errors})
 
 
 @app.post("/api/annotations/batch")
