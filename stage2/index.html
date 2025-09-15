@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EchoAtlas Stage 2 — Deep Annotation</title>
+  <link rel="manifest" href="/public/manifest.webmanifest">
+  <link rel="stylesheet" href="/public/styles.css">
+  <style>
+    .hide{display:none}
+    .screen{max-width:720px;margin:0 auto}
+    .controls{display:flex;gap:.5rem;margin:.5rem 0}
+    textarea.vtt{width:100%;min-height:140px}
+    .notice{background:var(--card);border:1px solid var(--border);padding:.6rem .9rem;border-radius:10px}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="screen" id="screen_welcome">
+      <h2>Verify transcript, translation, and mark code-switches.</h2>
+      <p class="notice" id="offlineNotice" class="hide">You're offline. Work is saved locally and will sync automatically.</p>
+      <div id="downloadStatus" class="notice">Ready. Tap Start to load tasks.</div>
+      <button id="startBtn" class="primary">Start</button>
+    </div>
+
+    <div class="screen hide" id="screen_transcript">
+      <h3>Transcript — keep cues 0.6–6.0s, no overlaps</h3>
+      <audio id="audio" controls preload="auto"></audio>
+      <div class="controls">
+        <button id="splitBtn" class="secondary">Split</button>
+        <button id="mergeBtn" class="secondary">Merge</button>
+        <button id="rewindBtn" class="secondary">Rewind 3s</button>
+        <button id="undoBtn" class="secondary">Undo</button>
+      </div>
+      <label>Cues (WebVTT)</label>
+      <textarea id="transcriptVTT" class="vtt" placeholder="WEBVTT\n\n00:00.000 --> 00:02.000\nHello"></textarea>
+      <div class="controls">
+        <button id="transcriptNext" class="primary">Approve Transcript</button>
+      </div>
+    </div>
+
+    <div class="screen hide" id="screen_translation">
+      <h3>Translation — one translation per cue</h3>
+      <label>Translation (WebVTT)</label>
+      <textarea id="translationVTT" class="vtt" placeholder="WEBVTT\n\n00:00.000 --> 00:02.000\nHello"></textarea>
+      <div class="controls">
+        <button id="translationNext" class="primary">Approve Translation</button>
+      </div>
+    </div>
+
+    <div class="screen hide" id="screen_codeswitch">
+      <h3>Code-Switch — press while the switch lasts</h3>
+      <div class="controls">
+        <button id="btnEN" class="secondary">EN</button>
+        <button id="btnFR" class="secondary">FR</button>
+        <button id="btnOther" class="secondary">Other</button>
+        <button id="nudgeMinus" class="secondary">-200ms</button>
+        <button id="nudgePlus" class="secondary">+200ms</button>
+        <button id="csUndo" class="secondary">Undo</button>
+      </div>
+      <label>Code-Switch Spans (WebVTT)</label>
+      <textarea id="codeSwitchVTT" class="vtt" placeholder="WEBVTT\n\n00:03.200 --> 00:04.000\nEN"></textarea>
+      <div class="controls">
+        <button id="csNext" class="primary">Continue</button>
+      </div>
+    </div>
+
+    <div class="screen hide" id="screen_review">
+      <h3>Review & Submit</h3>
+      <div id="errorsList" class="notice"></div>
+      <div class="controls">
+        <button id="submitBtn" class="primary">Submit & Next</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/public/idb.js"></script>
+  <script src="/public/env.js"></script>
+  <script src="/public/config.js"></script>
+  <script src="/stage2/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/public/sw.js').catch(()=>{});
+    }
+  </script>
+</body>
+</html>
+

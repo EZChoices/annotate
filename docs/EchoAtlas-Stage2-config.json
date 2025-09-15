@@ -1,0 +1,106 @@
+{
+  "project": {
+    "name": "EchoAtlas-Stage2-DeepAnnotation",
+    "version": "2025-09-15",
+    "owner": "Dialect Data",
+    "purpose": "Low-bandwidth, mobile-first deep annotation for transcript/translation verification and time-coded code-switch spans; optional diarization & PII events.",
+    "buyer_targets": ["Mistral Saba (FR)", "regional labs", "eval customers"]
+  },
+  "stages": {
+    "stage0_rights_provenance": {
+      "source": "excel_offline",
+      "status": "external",
+      "required_outputs": [
+        "rights_ledger.jsonl",
+        "consent_or_license_docs",
+        "stage0_validated=true"
+      ],
+      "fields_must_exist_per_clip": [
+        "asset_id","collection_mode","source_platform","source_url",
+        "license_or_consent_ref","gdpr_lawful_basis","takedown_supported"
+      ],
+      "hard_blocks": [
+        "instagram_scrape_without_permission",
+        "missing_consent_for_special_category",
+        "license_unknown_for_licensed_creator"
+      ]
+    },
+    "stage1_fast_meta_quality": {
+      "source": "excel_offline",
+      "status": "external",
+      "note": "Do not show in PWA. Dialect/topic/env/visual flags are captured offline.",
+      "required_outputs": [
+        "clip_meta.jsonl",
+        "stage1_validated=true"
+      ]
+    },
+    "stage2_deep_annotation": {
+      "source": "pwa_online_offline",
+      "status": "this_app",
+      "goals": [
+        "Verify/correct transcript (segment-level)",
+        "Verify/correct translation aligned to transcript",
+        "Capture time-coded code-switch spans (Arabic <-> EN/FR/Other)",
+        "Optional: tweak diarization boundaries for obvious errors",
+        "Optional: mark PII/safety events (time-coded)"
+      ],
+      "success_criteria": {
+        "per_clip": [
+          "transcript_vtt or ctm present",
+          "translation_vtt present if translation locale is required",
+          "code_switch_vtt or spans_json present if CS detected",
+          "qa.gold_check != 'fail'"
+        ],
+        "batch_level": [
+          "irr.krippendorff_alpha_hasCS >= 0.67",
+          "gold.span_F1_at_300ms >= 0.85"
+        ]
+      }
+    }
+  },
+  "pwa_config": {
+    "offline_first": true,
+    "media": {
+      "audio_proxy": {
+        "codec": "opus",
+        "sample_rate_hz": 16000,
+        "bitrate_kbps": 12,
+        "channels": 1,
+        "rationale": "Low bandwidth mobile use; intelligible speech at 12–20 kbps."
+      },
+      "video": {
+        "delivery": "HLS",
+        "rungs": [
+          {"height": 144, "target_bitrate_kbps": 120},
+          {"height": 240, "target_bitrate_kbps": 240}
+        ],
+        "audio_only_fallback": true
+      }
+    },
+    "caching": {
+      "service_worker": true,
+      "prefetch_next_clip": true,
+      "storage": "IndexedDB",
+      "max_cache_mb": 300,
+      "eviction_policy": "LRU"
+    },
+    "ui_mode": "one-task-per-screen",
+    "accessibility": {
+      "large_tap_targets": true,
+      "haptic_feedback": true,
+      "reduced_motion": true
+    }
+  },
+  "task_flow": [],
+  "input_manifest_schema": {},
+  "annotation_payload_schema": {},
+  "formats": {},
+  "code_switch_rules": {},
+  "ui": {},
+  "validation": {},
+  "qa_and_gold": {},
+  "sync": {},
+  "exports": {},
+  "security_privacy": {}
+}
+
