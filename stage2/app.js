@@ -68,6 +68,10 @@ function loadAudio(){
     const attachTl = ()=> Timeline.attach(tl, a.duration||0, EAQ.state.transcriptCues, (cues)=>{ EAQ.state.transcriptCues = VTT.normalize(cues); qs('transcriptVTT').value = VTT.stringify(EAQ.state.transcriptCues); alignTranslationToTranscript(); });
     if(isFinite(a.duration) && a.duration>0){ attachTl(); }
     else { a.addEventListener('loadedmetadata', attachTl, { once:true }); }
+    // paint overlays from CS and Events
+    setInterval(()=>{
+      Timeline.setOverlays(EAQ.state.codeSwitchCues||[], EAQ.state.eventsCues||[]);
+    }, 600);
   }
 }
 
@@ -313,6 +317,8 @@ async function loadPrefillForCurrent(){
 function alignTranslationToTranscript(){
   const tr = EAQ.state.transcriptCues || [];
   let tl = EAQ.state.translationCues || [];
+  const lock = (function(){ const el = document.getElementById('lockTranslation'); return !el || el.checked; })();
+  if(!lock){ return; }
   if(tl.length === 0 && tr.length > 0){
     tl = tr.map(c=> ({ start:c.start, end:c.end, text:'' }));
   }

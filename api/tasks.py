@@ -37,6 +37,11 @@ KEEP_AUDIO_COL = os.environ.get("SUPABASE_KEEP_AUDIO_COL")
 AUDIO_PROXY_BASE = os.environ.get("AUDIO_PROXY_BASE")
 AUDIO_PROXY_EXT = os.environ.get("AUDIO_PROXY_EXT", ".opus")
 
+# Gold injection (optional)
+GOLD_RATE = float(os.environ.get("GOLD_INJECTION_RATE", "0") or 0)
+GOLD_TABLE = os.environ.get("SUPABASE_GOLD_TABLE")
+GOLD_FILE_COL = os.environ.get("SUPABASE_GOLD_FILE_COL", FILE_COL)
+
 
 def _supabase_headers() -> Dict[str, str]:
     return {
@@ -99,6 +104,17 @@ async def get_tasks(
                 random.shuffle(pool)
                 chosen.extend(pool[: max(0, limit - len(chosen))])
 
+            # Optionally fetch gold items
+            gold_rows: List[Dict[str, Any]] = []
+            if GOLD_TABLE and GOLD_RATE > 0:
+                try:
+                    gold_ep = f"{SUPABASE_URL}/rest/v1/{GOLD_TABLE}?select={GOLD_FILE_COL}&limit={max(1,limit)}"
+                    gold_resp = requests.get(gold_ep, headers=headers, timeout=15)
+                    if gold_resp.ok:
+                        gold_rows = gold_resp.json()
+                except Exception:
+                    gold_rows = []
+
             # Record assignments for chosen
             if chosen:
                 assign_rows = [
@@ -118,7 +134,19 @@ async def get_tasks(
                     print("[tasks] stage2 assignment insert failed:", repr(e))
 
             base = BUNNY_KEEP_URL.rstrip("/")
-            for r in chosen:
+            for idx, r in enumerate(chosen):
+                # Gold injection: replace some items by probability
+                is_gold = False
+                if gold_rows and GOLD_RATE > 0:
+                    try:
+                        import random as _rnd
+                        if _rnd.random() < GOLD_RATE:
+                            gr = _rnd.choice(gold_rows)
+                            if gr and gr.get(GOLD_FILE_COL):
+                                r = {GOLD_FILE_COL: gr.get(GOLD_FILE_COL)}
+                                is_gold = True
+                    except Exception:
+                        pass
                 fname = r.get(FILE_COL)
                 if not fname:
                     continue
@@ -146,6 +174,7 @@ async def get_tasks(
                             "translation_vtt_url": r.get(PREFILL_TL_VTT) if PREFILL_TL_VTT else None,
                             "code_switch_vtt_url": r.get(PREFILL_CS_VTT) if PREFILL_CS_VTT else None,
                         },
+                        "is_gold": is_gold,
                         "stage0_status": "validated",
                         "stage1_status": "validated",
                         "language_hint": "ar",
