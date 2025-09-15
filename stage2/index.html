@@ -105,6 +105,9 @@
       <div class="controls">
         <button id="submitBtn" class="primary">Submit & Next</button>
       </div>
+      <div class="controls">
+        <button id="clearLocal" class="secondary">Clear Local Data</button>
+      </div>
     </div>
   </div>
 
@@ -124,6 +127,7 @@
       const annotKey = 'ea_stage2_annotator_id';
       let id = 'anonymous';
       try { id = localStorage.getItem(annotKey) || 'anonymous'; } catch{}
+      if(new URLSearchParams(location.search).get('links')==='0') return;
       c.innerHTML = `Quick Links: 
         <a href="${base}/">Meta V2</a> · 
         <a href="${base}/stage2">Stage 2</a> · 

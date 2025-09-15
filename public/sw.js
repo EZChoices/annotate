@@ -42,3 +42,11 @@ self.addEventListener('fetch', (e)=>{
   );
 });
 
+self.addEventListener('sync', (e)=>{
+  if(e.tag === 'ea-sync'){
+    e.waitUntil((async()=>{
+      const clientsList = await self.clients.matchAll({ includeUncontrolled:true });
+      for(const cl of clientsList){ cl.postMessage({ type:'ea-sync' }); }
+    })());
+  }
+});
