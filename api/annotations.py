@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Query
 from fastapi.responses import JSONResponse
 from typing import Any, Dict, List
 import os
@@ -29,11 +29,12 @@ def _supabase_headers() -> Dict[str, str]:
 
 
 @app.post("/api/annotations")
-async def post_annotation(req: Request):
+async def post_annotation(req: Request, annotator: str = Query("anonymous")):
     payload = await req.json()
     record = {
         "data": payload,
         "received_at": datetime.utcnow().isoformat(),
+        "annotator": annotator,
     }
     saved = False
     warn = None
@@ -50,7 +51,7 @@ async def post_annotation(req: Request):
 
 
 @app.post("/api/annotations/batch")
-async def post_annotations_batch(req: Request):
+async def post_annotations_batch(req: Request, annotator: str = Query("anonymous")):
     body = await req.json()
     items: List[Dict[str, Any]] = body if isinstance(body, list) else body.get("items") or []
     saved = False
@@ -58,7 +59,10 @@ async def post_annotations_batch(req: Request):
     if SUPABASE_URL and SUPABASE_KEY and items:
         try:
             endpoint = f"{SUPABASE_URL}/rest/v1/{TABLE_BATCH}"
-            records = [{"data": it, "received_at": datetime.utcnow().isoformat()} for it in items]
+            records = [
+                {"data": it, "received_at": datetime.utcnow().isoformat(), "annotator": annotator}
+                for it in items
+            ]
             resp = requests.post(endpoint, headers=_supabase_headers(), json=records, timeout=30)
             saved = resp.status_code // 100 == 2
             if not saved:
@@ -66,4 +70,3 @@ async def post_annotations_batch(req: Request):
         except Exception as e:
             warn = f"Supabase exception: {repr(e)}"
     return JSONResponse({"status": "ok", "saved": saved, "count": len(items), "warning": warn})
-
