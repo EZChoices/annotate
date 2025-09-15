@@ -16,7 +16,10 @@ const EAQ = {
     idx: 0,
     transcriptVTT: '',
     translationVTT: '',
-    codeSwitchVTT: ''
+    codeSwitchVTT: '',
+    transcriptCues: [],
+    translationCues: [],
+    codeSwitchCues: []
   }
 };
 
@@ -56,6 +59,7 @@ function loadAudio(){
   const a = qs('audio'); if(!a) return;
   a.src = it.media && it.media.audio_proxy_url ? it.media.audio_proxy_url : '/public/sample.mp4';
   a.play().catch(()=>{});
+  const wave = qs('wave'); if(wave){ Wave.attach(wave); Wave.load(a.src); }
 }
 
 function basicValidation(){
@@ -136,14 +140,17 @@ function bindUI(){
 
   qs('transcriptNext').addEventListener('click', ()=>{
     EAQ.state.transcriptVTT = qs('transcriptVTT').value;
+    EAQ.state.transcriptCues = VTT.normalize(VTT.parse(EAQ.state.transcriptVTT));
     show('screen_translation');
   });
   qs('translationNext').addEventListener('click', ()=>{
     EAQ.state.translationVTT = qs('translationVTT').value;
+    EAQ.state.translationCues = VTT.normalize(VTT.parse(EAQ.state.translationVTT));
     show('screen_codeswitch');
   });
   qs('csNext').addEventListener('click', ()=>{
     EAQ.state.codeSwitchVTT = qs('codeSwitchVTT').value;
+    EAQ.state.codeSwitchCues = VTT.normalize(VTT.parse(EAQ.state.codeSwitchVTT));
     const errs = basicValidation();
     const el = qs('errorsList');
     el.textContent = errs.length ? ('Errors: ' + errs.join(', ')) : 'Looks good.';
@@ -165,5 +172,57 @@ window.addEventListener('load', ()=>{
   EAQ.state.annotator = getAnnotatorId();
   bindUI();
   window.addEventListener('online', ()=>{ trySyncWithBackoff(); });
+  // Bind basic editing controls
+  const a = qs('audio');
+  qs('rewindBtn').addEventListener('click', ()=>{ if(a) a.currentTime = Math.max(0, a.currentTime - 3); });
+  qs('splitBtn').addEventListener('click', ()=>{
+    if(!a) return; const t = a.currentTime; const cues = EAQ.state.transcriptCues.length ? EAQ.state.transcriptCues : VTT.parse(qs('transcriptVTT').value);
+    for(let i=0;i<cues.length;i++){
+      const c = cues[i];
+      if(t > c.start && t < c.end && (t - c.start) >= EAQ.SPEC.cueMin && (c.end - t) >= EAQ.SPEC.cueMin){
+        const left = { start:c.start, end:t, text:c.text };
+        const right = { start:t, end:c.end, text:c.text };
+        cues.splice(i,1,left,right);
+        EAQ.state.transcriptCues = VTT.normalize(cues);
+        qs('transcriptVTT').value = VTT.stringify(EAQ.state.transcriptCues);
+        break;
+      }
+    }
+  });
+  qs('mergeBtn').addEventListener('click', ()=>{
+    const cues = EAQ.state.transcriptCues.length ? EAQ.state.transcriptCues : VTT.parse(qs('transcriptVTT').value);
+    for(let i=0;i<cues.length-1;i++){
+      const cur = cues[i], nxt = cues[i+1];
+      if(Math.abs(cur.end - nxt.start) < 0.25){
+        const merged = { start: cur.start, end: nxt.end, text: `${cur.text}\n${nxt.text}`.trim() };
+        cues.splice(i,2,merged);
+        EAQ.state.transcriptCues = VTT.normalize(cues);
+        qs('transcriptVTT').value = VTT.stringify(EAQ.state.transcriptCues);
+        break;
+      }
+    }
+  });
+  // Code-switch quick-mark buttons
+  let pressStart = null, pressLang = null;
+  function startPress(lang){ if(!a) return; pressLang = lang; pressStart = a.currentTime; }
+  function endPress(){ if(!a || pressStart==null || !pressLang) return; const end = a.currentTime; if(end-pressStart >= EAQ.SPEC.csMinSec){ EAQ.state.codeSwitchCues.push({ start: pressStart, end, text: pressLang }); EAQ.state.codeSwitchCues = VTT.normalize(EAQ.state.codeSwitchCues); qs('codeSwitchVTT').value = VTT.stringify(EAQ.state.codeSwitchCues); } pressStart=null; pressLang=null; }
+  qs('btnEN').addEventListener('mousedown', ()=> startPress('EN'));
+  qs('btnEN').addEventListener('touchstart', ()=> startPress('EN'));
+  qs('btnEN').addEventListener('mouseup', endPress);
+  qs('btnEN').addEventListener('touchend', endPress);
+  qs('btnFR').addEventListener('mousedown', ()=> startPress('FR'));
+  qs('btnFR').addEventListener('touchstart', ()=> startPress('FR'));
+  qs('btnFR').addEventListener('mouseup', endPress);
+  qs('btnFR').addEventListener('touchend', endPress);
+  qs('btnOther').addEventListener('mousedown', ()=> startPress('Other'));
+  qs('btnOther').addEventListener('touchstart', ()=> startPress('Other'));
+  qs('btnOther').addEventListener('mouseup', endPress);
+  qs('btnOther').addEventListener('touchend', endPress);
+  qs('nudgeMinus').addEventListener('click', ()=>{
+    const cues = EAQ.state.codeSwitchCues; if(!cues.length) return; cues[cues.length-1].start = Math.max(0, cues[cues.length-1].start - 0.2); qs('codeSwitchVTT').value = VTT.stringify(VTT.normalize(cues));
+  });
+  qs('nudgePlus').addEventListener('click', ()=>{
+    const cues = EAQ.state.codeSwitchCues; if(!cues.length) return; cues[cues.length-1].end = cues[cues.length-1].end + 0.2; qs('codeSwitchVTT').value = VTT.stringify(VTT.normalize(cues));
+  });
+  qs('csUndo').addEventListener('click', ()=>{ EAQ.state.codeSwitchCues.pop(); qs('codeSwitchVTT').value = VTT.stringify(VTT.normalize(EAQ.state.codeSwitchCues)); });
 });
-

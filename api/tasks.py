@@ -30,6 +30,11 @@ ASSIGN2_FILE_COL = os.environ.get("SUPABASE_ASSIGN_STAGE2_FILE_COL", "file_name"
 ASSIGN2_USER_COL = os.environ.get("SUPABASE_ASSIGN_STAGE2_USER_COL", "assigned_to")
 ASSIGN2_TIME_COL = os.environ.get("SUPABASE_ASSIGN_STAGE2_TIME_COL", "assigned_at")
 BUNNY_KEEP_URL = os.environ.get("BUNNY_KEEP_URL") or os.environ.get("BUNNY_BASE") or os.environ.get("BUNNY_PULL_BASE")
+KEEP_AUDIO_COL = os.environ.get("SUPABASE_KEEP_AUDIO_COL")
+
+# Optional static audio proxy builder if column not present
+AUDIO_PROXY_BASE = os.environ.get("AUDIO_PROXY_BASE")
+AUDIO_PROXY_EXT = os.environ.get("AUDIO_PROXY_EXT", ".opus")
 
 
 def _supabase_headers() -> Dict[str, str]:
@@ -62,6 +67,8 @@ async def get_tasks(
                 keep_endpoint += f",{PREFILL_TL_VTT}"
             if PREFILL_CS_VTT:
                 keep_endpoint += f",{PREFILL_CS_VTT}"
+            if KEEP_AUDIO_COL:
+                keep_endpoint += f",{KEEP_AUDIO_COL}"
 
             headers = _supabase_headers()
             keep_resp = requests.get(keep_endpoint, headers=headers, timeout=20)
@@ -115,11 +122,17 @@ async def get_tasks(
                 if not fname:
                     continue
                 media_url = f"{base}/{str(fname).lstrip('/')}"
+                audio_url = None
+                if KEEP_AUDIO_COL and r.get(KEEP_AUDIO_COL):
+                    audio_url = r.get(KEEP_AUDIO_COL)
+                elif AUDIO_PROXY_BASE:
+                    name_no_ext = str(fname).rsplit('.', 1)[0]
+                    audio_url = AUDIO_PROXY_BASE.rstrip('/') + '/' + name_no_ext + (AUDIO_PROXY_EXT if AUDIO_PROXY_EXT.startswith('.') else ('.' + AUDIO_PROXY_EXT))
                 items.append(
                     {
                         "asset_id": fname,
                         "media": {
-                            "audio_proxy_url": media_url,
+                            "audio_proxy_url": audio_url or media_url,
                             "video_hls_url": media_url if media_url.endswith(".m3u8") else None,
                             "poster_url": None,
                         },
