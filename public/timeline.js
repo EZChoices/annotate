@@ -3,7 +3,7 @@
 // Simple transcript timeline with draggable boundaries
 const Timeline = (function(){
   const api = {};
-  let root, duration = 0, cues = [], onChange = null;
+  let root, duration = 0, cues = [], onChange = null, overlays = { cs: [], events: [] };
 
   function pct(t){ return `${Math.max(0, Math.min(1, duration? (t/duration):0)) * 100}%`; }
 
@@ -23,6 +23,20 @@ const Timeline = (function(){
       frag.appendChild(seg);
     }
     root.appendChild(frag);
+    // overlays: code-switch (blue), events (orange)
+    function paintOverlay(list, cls){
+      (list||[]).forEach(o=>{
+        const seg = document.createElement('div');
+        seg.className = `tl-seg ${cls}`;
+        seg.style.left = pct(o.start);
+        seg.style.width = `calc(${pct(o.end)} - ${pct(o.start)})`;
+        seg.style.background = cls === 'cs' ? 'rgba(43,124,255,0.25)' : 'rgba(230,140,30,0.25)';
+        seg.style.borderColor = cls === 'cs' ? 'var(--accent)' : '#e68c1e';
+        root.appendChild(seg);
+      });
+    }
+    paintOverlay(overlays.cs, 'cs');
+    paintOverlay(overlays.events, 'evt');
   }
 
   function onPointerDown(e){
@@ -57,8 +71,8 @@ const Timeline = (function(){
 
   api.attach = function(el, dur, curCues, onChangeCb){ root = el; duration = dur||0; cues = (curCues||[]).map(c=> ({...c})); onChange = onChangeCb; root.addEventListener('mousedown', onPointerDown); root.addEventListener('touchstart', onPointerDown, {passive:false}); render(); };
   api.update = function(dur, curCues){ duration = dur||duration; cues = (curCues||cues).map(c=> ({...c})); render(); };
+  api.setOverlays = function(cs, evt){ overlays.cs = (cs||[]); overlays.events = (evt||[]); render(); };
 
   return api;
 })();
 window.Timeline = Timeline;
-

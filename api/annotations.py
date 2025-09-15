@@ -38,8 +38,34 @@ async def post_annotation(req: Request, annotator: str = Query("anonymous")):
     else:
         if not payload.get("asset_id"):
             errors.append("asset_id required")
-        if not isinstance(payload.get("files"), dict):
+        files = payload.get("files")
+        if not isinstance(files, dict):
             errors.append("files must be an object")
+        else:
+            # Stage2 file expectations (strings, may be empty)
+            for k in [
+                "transcript_vtt",
+                "translation_vtt",
+                "code_switch_vtt",
+                "code_switch_spans_json",
+            ]:
+                if k not in files:
+                    errors.append(f"files.{k} missing")
+            for k in [
+                "diarization_rttm",
+                "transcript_ctm",
+                "events_vtt",
+            ]:
+                if k in files and files[k] is not None and not isinstance(files[k], str):
+                    errors.append(f"files.{k} must be string or null")
+        qa = payload.get("qa")
+        if not isinstance(qa, dict):
+            errors.append("qa must be an object")
+        else:
+            if not qa.get("annotator_id"):
+                errors.append("qa.annotator_id required")
+            if qa.get("gold_check") not in ("pass", "fail", None):
+                errors.append("qa.gold_check must be 'pass' or 'fail'")
 
     record = {
         "data": payload,
