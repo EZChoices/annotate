@@ -131,6 +131,7 @@ function bindUI(){
     try{
       await loadManifest();
       loadAudio();
+      await loadPrefillForCurrent();
       prefetchNext();
       show('screen_transcript');
     }catch{
@@ -163,6 +164,7 @@ function bindUI(){
     qs('translationVTT').value = '';
     qs('codeSwitchVTT').value = '';
     loadAudio();
+    await loadPrefillForCurrent();
     prefetchNext();
     show('screen_transcript');
   });
@@ -225,4 +227,51 @@ window.addEventListener('load', ()=>{
     const cues = EAQ.state.codeSwitchCues; if(!cues.length) return; cues[cues.length-1].end = cues[cues.length-1].end + 0.2; qs('codeSwitchVTT').value = VTT.stringify(VTT.normalize(cues));
   });
   qs('csUndo').addEventListener('click', ()=>{ EAQ.state.codeSwitchCues.pop(); qs('codeSwitchVTT').value = VTT.stringify(VTT.normalize(EAQ.state.codeSwitchCues)); });
+  const wave = qs('wave');
+  if(wave){
+    function seekFromEvent(ev){
+      const rect = wave.getBoundingClientRect();
+      const x = (ev.touches ? ev.touches[0].clientX : ev.clientX) - rect.left;
+      if(a && a.duration){ a.currentTime = Wave.timeAtX(x, a.duration); }
+    }
+    wave.addEventListener('click', seekFromEvent);
+  }
+  const zi = qs('zoomIn'), zo = qs('zoomOut'), sl = qs('scrollLeft'), sr = qs('scrollRight');
+  if(zi) zi.addEventListener('click', ()=> Wave.setZoom(0.8));
+  if(zo) zo.addEventListener('click', ()=> Wave.setZoom(1.25));
+  if(sl) sl.addEventListener('click', ()=> Wave.scroll(-0.1));
+  if(sr) sr.addEventListener('click', ()=> Wave.scroll(0.1));
 });
+
+// Prefill loader and alignment helpers
+async function loadPrefillForCurrent(){
+  const it = currentItem(); if(!it) return;
+  // Transcript
+  if(it.prefill && it.prefill.transcript_vtt_url){
+    try{ const t = await fetch(it.prefill.transcript_vtt_url).then(r=> r.text()); EAQ.state.transcriptVTT = t; qs('transcriptVTT').value = t; EAQ.state.transcriptCues = VTT.normalize(VTT.parse(t)); } catch{}
+  }
+  // Translation
+  if(it.prefill && it.prefill.translation_vtt_url){
+    try{ const t = await fetch(it.prefill.translation_vtt_url).then(r=> r.text()); EAQ.state.translationVTT = t; qs('translationVTT').value = t; EAQ.state.translationCues = VTT.normalize(VTT.parse(t)); } catch{}
+  }
+  // Align counts
+  alignTranslationToTranscript();
+}
+
+function alignTranslationToTranscript(){
+  const tr = EAQ.state.transcriptCues || [];
+  let tl = EAQ.state.translationCues || [];
+  if(tl.length === 0 && tr.length > 0){
+    tl = tr.map(c=> ({ start:c.start, end:c.end, text:'' }));
+  }
+  // Adjust counts by duplicating or merging adjacent
+  while(tl.length < tr.length){ tl.push({ start: tr[tl.length].start, end: tr[tl.length].end, text: '' }); }
+  while(tl.length > tr.length && tl.length>1){
+    const a = tl[tl.length-2], b = tl[tl.length-1];
+    tl.splice(tl.length-2, 2, { start:a.start, end:b.end, text:`${a.text}\n${b.text}`.trim() });
+  }
+  // Copy timings from transcript to keep locked
+  for(let i=0;i<tr.length;i++){ if(tl[i]){ tl[i].start = tr[i].start; tl[i].end = tr[i].end; } }
+  EAQ.state.translationCues = tl;
+  qs('translationVTT').value = VTT.stringify(tl);
+}

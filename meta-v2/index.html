@@ -153,6 +153,21 @@
   <script src="/public/config.js"></script>
   <script src="/public/video-utils.js"></script>
   <script src="/public/meta-v2.js"></script>
+  <script>
+    // Quick Links footer to switch UIs and hit APIs quickly
+    (function(){
+      const c = document.createElement('div');
+      c.className = 'notice';
+      const base = location.origin;
+      function getAnnot(){ try{ const k='dd_annotator_id'; return localStorage.getItem(k)||'anonymous'; }catch{ return 'anonymous'; } }
+      const id = getAnnot();
+      c.innerHTML = `Quick Links: 
+        <a href="${base}/">Meta V2</a> · 
+        <a href="${base}/stage2">Stage 2</a> · 
+        <a href="${base}/api/tasks?stage=2&annotator_id=${encodeURIComponent(id)}&limit=5" target="_blank">Tasks API</a> · 
+        <a href="${base}/api/clip?annotator=${encodeURIComponent(id)}" target="_blank">Clip API</a>`;
+      document.body.appendChild(c);
+    })();
+  </script>
 </body>
 </html>
-
