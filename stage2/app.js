@@ -87,12 +87,13 @@ async function enqueueAndSync(){
   const payload = {
     asset_id: it.asset_id,
     files: {
-      diarization_rttm: null,
+      diarization_rttm: rttmStringify(EAQ.state.diarSegments||[], it.asset_id || 'rec'),
       transcript_vtt: EAQ.state.transcriptVTT,
       transcript_ctm: null,
       translation_vtt: EAQ.state.translationVTT,
       code_switch_vtt: EAQ.state.codeSwitchVTT || '',
-      code_switch_spans_json: ''
+      code_switch_spans_json: '',
+      events_vtt: (function(){ const ev = qs('eventsVTT'); if(ev && ev.value.trim()) return ev.value; return (EAQ.state.eventsCues||[]).length ? VTT.stringify(EAQ.state.eventsCues) : ''; })()
     },
     summary: {
       contains_code_switch: !!EAQ.state.codeSwitchVTT.trim(),
@@ -308,6 +309,18 @@ function alignTranslationToTranscript(){
   for(let i=0;i<tr.length;i++){ if(tl[i]){ tl[i].start = tr[i].start; tl[i].end = tr[i].end; } }
   EAQ.state.translationCues = tl;
   qs('translationVTT').value = VTT.stringify(tl);
+}
+
+function rttmStringify(segments, recId){
+  try{
+    const id = (recId || 'rec').toString().replace(/\s+/g,'_');
+    return (segments||[]).map(s=>{
+      const tbeg = Math.max(0, +s.start || 0).toFixed(3);
+      const tdur = Math.max(0, (+s.end || 0) - (+s.start || 0)).toFixed(3);
+      const spk = (s.speaker || 'spk').toString().replace(/\s+/g,'_');
+      return `SPEAKER ${id} 1 ${tbeg} ${tdur} <NA> <NA> ${spk} <NA> <NA>`;
+    }).join('\n');
+  }catch{ return ''; }
 }
 
 function parseRTTM(text){

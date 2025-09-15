@@ -5,6 +5,7 @@ import os
 import requests
 import random
 from datetime import datetime
+from urllib.parse import quote
 
 app = FastAPI()
 
@@ -122,7 +123,9 @@ async def get_tasks(
                 if not fname:
                     continue
                 media_url = f"{base}/{str(fname).lstrip('/')}"
-                audio_url = None
+                # Default to internal audio proxy so we control headers/caching
+                audio_url = f"/api/proxy_audio?file={quote(str(fname))}"
+                # If you insist on direct audio URL from table, uncomment below priority
                 if KEEP_AUDIO_COL and r.get(KEEP_AUDIO_COL):
                     audio_url = r.get(KEEP_AUDIO_COL)
                 elif AUDIO_PROXY_BASE:

@@ -167,3 +167,13 @@ Create a Supabase `clip_assignments` table with columns:
 | `assigned_at` | timestamp of the assignment                 |
 
 Requesting `/api/clip?annotator=alice` returns the first clip not yet assigned and records the assignment before responding.
+
+## Additional Endpoints
+
+- `GET /api/proxy_audio?file=<keep_file_name>` streams audio via the built-in proxy with byte-range support. It maps the source extension (e.g. `.mp4`) to the desired audio extension (e.g. `.opus`) using env vars. You can also pass a full `src` URL when needed.
+
+Audio proxy env:
+- `ALLOWED_PROXY_HOSTS` (comma-separated) to restrict which upstream hosts can be fetched
+- `AUDIO_PROXY_FROM_EXT` (default `.mp4`)
+- `AUDIO_PROXY_EXT` (default `.opus`)
+- `AUDIO_PROXY_BASE` (optional, if you want to build direct audio URLs instead of using the proxy)
