@@ -2,7 +2,7 @@
 
 This doc explains design decisions and roadmap:
 - Scripts for batch sorting and data prep.
-- Backend: Flask API serving audio & JSON.
+- Backend: FastAPI serverless functions on Vercel serving JSON and selecting clips.
 - Frontend: Lightweight HTML/JS for phones.
 
 ## Roadmap

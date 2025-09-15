@@ -7,7 +7,8 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 TARGET_MAX_LEN = 7.0  # hard max chunk length
 TARGET_MIN_LEN = 5.0  # ideal chunk length range
-PUNCTUATION = ["،", ".", "؟", "!"]
+PUNCTUATION = [".", ",", "?", "!"]
+
 
 def split_segment(seg):
     start = seg["start"]
@@ -28,7 +29,7 @@ def split_segment(seg):
 
     for word in words:
         chunk_words.append(word)
-        elapsed = duration * (len(" ".join(chunk_words)) / len(text))
+        elapsed = duration * (len(" ".join(chunk_words)) / max(1, len(text)))
 
         # If we hit punctuation and chunk is > TARGET_MIN_LEN or segment is almost done
         if any(p in word for p in PUNCTUATION) and elapsed >= TARGET_MIN_LEN:
@@ -37,7 +38,7 @@ def split_segment(seg):
             parts.append({
                 "start": chunk_start,
                 "end": chunk_end,
-                "speaker": seg["speaker"],
+                "speaker": seg.get("speaker"),
                 "text": chunk_text
             })
             chunk_start = chunk_end
@@ -49,7 +50,7 @@ def split_segment(seg):
         parts.append({
             "start": chunk_start,
             "end": end,
-            "speaker": seg["speaker"],
+            "speaker": seg.get("speaker"),
             "text": chunk_text
         })
 
@@ -63,8 +64,8 @@ def split_segment(seg):
                 final_parts.append({
                     "start": cur_start,
                     "end": cur_end,
-                    "speaker": p["speaker"],
-                    "text": p["text"]
+                    "speaker": p.get("speaker"),
+                    "text": p.get("text")
                 })
                 cur_start = cur_end
         else:
@@ -72,21 +73,25 @@ def split_segment(seg):
 
     return final_parts
 
+
 # === PROCESS ONE SAMPLE JSON ===
 for jf in SAMPLES_DIR.glob("*.json"):
     with open(jf, "r", encoding="utf-8") as f:
         data = json.load(f)
 
     new_segments = []
-    for seg in data["segments"]:
+    for seg in data.get("segments", []):
         new_segments.extend(split_segment(seg))
 
     data["segments"] = new_segments
+    if "metadata" not in data:
+        data["metadata"] = {}
     data["metadata"]["segment_count"] = len(new_segments)
-    data["metadata"]["tool_version"] += "_split_test"
+    data["metadata"]["tool_version"] = str(data["metadata"].get("tool_version", "")) + "_split_test"
 
     out_path = OUT_DIR / jf.name
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
-print("✅ Segment splitting complete — check samples/split_test/")
+print("Segment splitting complete — check samples/split_test/")
+

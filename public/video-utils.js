@@ -1,4 +1,13 @@
 // Kept minimal for backward compat; primary player now in hls-player.js
+function getAnnotatorId(){
+  try{
+    const KEY = 'dd_annotator_id';
+    let id = localStorage.getItem(KEY);
+    if(!id){ id = Math.random().toString(36).slice(2,10); localStorage.setItem(KEY, id); }
+    return id;
+  }catch{ return 'anonymous'; }
+}
+
 async function loadSampleVideo(
   video,
   local = '/public/sample.mp4',
@@ -6,8 +15,9 @@ async function loadSampleVideo(
 ){
   if(!video) return;
   try{
-    // Cache-bust so the backend can serve a different clip each time
-    const res = await fetch(`/api/clip?rand=${Date.now()}`, {cache:'no-store'});
+    // Cache-bust and include annotator so backend can track assignments
+    const annot = encodeURIComponent(getAnnotatorId());
+    const res = await fetch(`/api/clip?annotator=${annot}&rand=${Date.now()}`, {cache:'no-store'});
     if(res.ok){
       const data = await res.json();
       // Only use clip if backend returned a real file, not the bundled sample
