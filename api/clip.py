@@ -120,4 +120,8 @@ async def get_clip(annotator: str = Query("anonymous")):
     if os.path.exists(sample_json):
         with open(sample_json, "r", encoding="utf-8") as f:
             transcript_data = json.load(f)
-    return {"video_url": "/public/sample.mp4", "transcript": transcript_data}
+    # discourage caching at the edge
+    return JSONResponse(
+        {"video_url": "/public/sample.mp4", "transcript": transcript_data},
+        headers={"Cache-Control": "no-store, no-cache, max-age=0, must-revalidate"},
+    )

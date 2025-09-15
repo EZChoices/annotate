@@ -177,4 +177,4 @@ async def get_tasks(
         ]
 
     manifest: Dict[str, Any] = {"annotator_id": annotator_id, "stage": stage, "items": items}
-    return JSONResponse(manifest)
+    return JSONResponse(manifest, headers={"Cache-Control": "no-store, no-cache, max-age=0, must-revalidate"})
