@@ -18,6 +18,8 @@ SUPABASE_KEY = (
 )
 KEEP_TABLE = os.environ.get("SUPABASE_KEEP_TABLE", "keep")
 FILE_COL = os.environ.get("SUPABASE_FILE_COL", "file_name")
+DECISION_COL = os.environ.get("SUPABASE_DECISION_COL", "decision")
+KEEP_VALUE = os.environ.get("SUPABASE_KEEP_VALUE", "keep")
 # Optional prefill column names in the keep table
 PREFILL_DIA = os.environ.get("SUPABASE_KEEP_DIA_RTTM_COL")
 PREFILL_TR_VTT = os.environ.get("SUPABASE_KEEP_TR_VTT_COL")
@@ -62,7 +64,7 @@ async def get_tasks(
 
     if BUNNY_KEEP_URL and SUPABASE_URL and SUPABASE_KEY:
         try:
-            keep_endpoint = f"{SUPABASE_URL}/rest/v1/{KEEP_TABLE}?select={FILE_COL}"
+keekeep_endpoint = f"{SUPABASE_URL}/rest/v1/{KEEP_TABLE}?{DECISION_COL}=eq.{KEEP_VALUE}&select={FILE_COL}"
             if PREFILL_DIA:
                 keep_endpoint += f",{PREFILL_DIA}"
             if PREFILL_TR_VTT:
