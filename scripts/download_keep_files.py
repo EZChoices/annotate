@@ -9,6 +9,9 @@ BUNNY_STORAGE_ZONE = os.environ.get("BUNNY_STORAGE_ZONE")
 BUNNY_STORAGE_PASSWORD = os.environ.get("BUNNY_STORAGE_PASSWORD")
 FILTERED_FOLDER = os.environ.get("FILTERED_FOLDER", "")
 DOWNLOAD_DIR = os.environ.get("DOWNLOAD_DIR", "downloads")
+SUPABASE_DECISION_COL = os.environ.get("SUPABASE_DECISION_COL", "decision")
+SUPABASE_KEEP_VALUE = os.environ.get("SUPABASE_KEEP_VALUE", "keep")
+
 SUPABASE_TABLE = os.environ.get("SUPABASE_KEEP_TABLE", "keep")
 SUPABASE_FILE_COL = os.environ.get("SUPABASE_FILE_COL", "file_name")
 
@@ -26,9 +29,10 @@ def _require(var: str, value: str) -> str:
 def fetch_keep_file_names() -> List[str]:
     """Return list of file names from the Supabase `keep` table."""
     url = _require("NEXT_PUBLIC_SUPABASE_URL", SUPABASE_URL)
-    key = _require("SUPABASE_SERVICE_KEY", SUPABASE_SERVICE_KEY)
+    endpoint = f"{url}/rest/v1/{SUPABASE_TABLE}?{SUPABASE_DECISION_COL}=eq.{SUPABASE_KEEP_VALUE}&select={SUPABASE_FILE_COL}"
 
-    endpoint = f"{url}/rest/v1/{SUPABASE_TABLE}?select={SUPABASE_FILE_COL}"
+
+    
     headers = {"apikey": key, "Authorization": f"Bearer {key}"}
     resp = requests.get(endpoint, headers=headers, timeout=10)
     resp.raise_for_status()
