@@ -8,7 +8,8 @@ const EAQ = {
     cueMin: 0.6,
     cueMax: 6.0,
     csMinSec: 0.4,
-    backoffMs: [1000,2000,5000,10000,30000]
+    backoffMs: [1000,2000,5000,10000,30000],
+    emotionMinSec: 1.5
   },
   state: {
     annotator: null,
@@ -22,6 +23,9 @@ const EAQ = {
     codeSwitchCues: [],
     eventsCues: [],
     diarSegments: [],
+    speakerProfiles: [],
+    emotionVTT: '',
+    emotionCues: [],
     startedAt: 0
   }
 };
@@ -36,7 +40,16 @@ function getAnnotatorId(){
 }
 
 function qs(id){ return document.getElementById(id); }
-function show(id){ ['screen_welcome','screen_transcript','screen_translation','screen_codeswitch','screen_pii','screen_diar','screen_review'].forEach(x=> qs(x).classList.toggle('hide', x!==id)); }
+function escapeHtml(str){
+  return String(str||'').replace(/[&<>"']/g, (s)=>({
+    '&':'&amp;',
+    '<':'&lt;',
+    '>':'&gt;',
+    '"':'&quot;',
+    "'":"&#39;"
+  })[s]);
+}
+function show(id){ ['screen_welcome','screen_transcript','screen_translation','screen_codeswitch','screen_speaker','screen_emotion','screen_pii','screen_diar','screen_review'].forEach(x=> qs(x).classList.toggle('hide', x!==id)); }
 
 async function loadManifest(){
   const annot = encodeURIComponent(EAQ.state.annotator);
@@ -98,7 +111,9 @@ async function enqueueAndSync(){
       translation_vtt: EAQ.state.translationVTT,
       code_switch_vtt: EAQ.state.codeSwitchVTT || '',
       code_switch_spans_json: codeSwitchJson(EAQ.state.codeSwitchCues||[]).json,
-      events_vtt: (function(){ const ev = qs('eventsVTT'); if(ev && ev.value.trim()) return ev.value; return (EAQ.state.eventsCues||[]).length ? VTT.stringify(EAQ.state.eventsCues) : ''; })()
+      events_vtt: (function(){ const ev = qs('eventsVTT'); if(ev && ev.value.trim()) return ev.value; return (EAQ.state.eventsCues||[]).length ? VTT.stringify(EAQ.state.eventsCues) : ''; })(),
+      emotion_vtt: EAQ.state.emotionVTT || '',
+      speaker_profiles_json: (function(){ try{ return JSON.stringify(EAQ.state.speakerProfiles||[]); }catch{ return '[]'; } })()
     },
     summary: {
       contains_code_switch: (EAQ.state.codeSwitchCues||[]).length > 0,
@@ -171,8 +186,53 @@ function bindUI(){
     const errs = basicValidation();
     const el = qs('errorsList');
     el.textContent = errs.length ? ('Errors: ' + errs.join(', ')) : 'Looks good.';
-    show('screen_pii');
+    show('screen_speaker');
   });
+  const speakerNext = qs('speakerNext');
+  if(speakerNext){
+    speakerNext.addEventListener('click', ()=>{
+      const container = qs('speakerCards');
+      const cards = container ? Array.from(container.querySelectorAll('[data-speaker-card]')) : [];
+      const profiles = cards.map((card, idx)=>{
+        const speakerId = card.getAttribute('data-speaker-id') || `spk${idx+1}`;
+        const displayLabel = card.getAttribute('data-display-label') || `S${idx+1}`;
+        const genderSel = card.querySelector('select[name="apparent_gender"]');
+        const ageSel = card.querySelector('select[name="apparent_age_band"]');
+        const dialectSel = card.querySelector('select[name="dialect_subregion"]');
+        const apparent_gender = genderSel ? (genderSel.value || 'unknown') : 'unknown';
+        const apparent_age_band = ageSel ? (ageSel.value || 'unknown') : 'unknown';
+        const dialect_subregion = dialectSel ? (dialectSel.value || 'unknown') : 'unknown';
+        const existing = Array.isArray(EAQ.state.speakerProfiles) ? EAQ.state.speakerProfiles.find(p=> p && p.speaker_id === speakerId) : null;
+        return Object.assign({}, existing||{}, {
+          speaker_id: speakerId,
+          display_label: displayLabel,
+          apparent_gender,
+          apparent_age_band,
+          dialect_subregion
+        });
+      });
+      EAQ.state.speakerProfiles = profiles;
+      show('screen_emotion');
+    });
+  }
+  const emotionNext = qs('emotionNext');
+  if(emotionNext){
+    emotionNext.addEventListener('click', ()=>{
+      const box = qs('emotionVTT');
+      const text = box ? box.value : '';
+      EAQ.state.emotionVTT = text || '';
+      if(text && text.trim()){
+        try{ EAQ.state.emotionCues = VTT.normalize(VTT.parse(text)); }
+        catch{ EAQ.state.emotionCues = []; }
+      } else if((EAQ.state.emotionCues||[]).length){
+        EAQ.state.emotionVTT = VTT.stringify(VTT.normalize(EAQ.state.emotionCues));
+        if(box) box.value = EAQ.state.emotionVTT;
+      } else {
+        EAQ.state.emotionCues = [];
+      }
+      show('screen_pii');
+    });
+  }
   // PII/events buttons
   const evtBtns = document.querySelectorAll('[data-evt]');
   const openEvt = new Map();
@@ -201,6 +261,11 @@ function bindUI(){
     qs('translationVTT').value = '';
     qs('codeSwitchVTT').value = '';
     const ev = qs('eventsVTT'); if(ev) ev.value = '';
+    const emoBox = qs('emotionVTT'); if(emoBox) emoBox.value = '';
+    EAQ.state.emotionVTT = '';
+    EAQ.state.emotionCues = [];
+    EAQ.state.speakerProfiles = [];
+    const speakerCards = qs('speakerCards'); if(speakerCards) speakerCards.innerHTML = '';
     loadAudio();
     await loadPrefillForCurrent();
     prefetchNext();
@@ -267,6 +332,54 @@ window.addEventListener('load', ()=>{
     const cues = EAQ.state.codeSwitchCues; if(!cues.length) return; cues[cues.length-1].end = cues[cues.length-1].end + 0.2; qs('codeSwitchVTT').value = VTT.stringify(VTT.normalize(cues));
   });
   qs('csUndo').addEventListener('click', ()=>{ EAQ.state.codeSwitchCues.pop(); qs('codeSwitchVTT').value = VTT.stringify(VTT.normalize(EAQ.state.codeSwitchCues)); });
+  // Emotion quick-mark buttons
+  let emoStart = null, emoLabel = null;
+  function startEmotion(label){ if(!a) return; emoLabel = label; emoStart = a.currentTime; }
+  function endEmotion(){
+    if(!a || emoStart==null || !emoLabel) return;
+    const end = a.currentTime;
+    const min = EAQ.SPEC.emotionMinSec || 1.5;
+    if(end - emoStart >= min){
+      if(!Array.isArray(EAQ.state.emotionCues)) EAQ.state.emotionCues = [];
+      EAQ.state.emotionCues.push({ start: emoStart, end, text: emoLabel });
+      EAQ.state.emotionCues = VTT.normalize(EAQ.state.emotionCues);
+      const out = VTT.stringify(EAQ.state.emotionCues);
+      EAQ.state.emotionVTT = out;
+      const box = qs('emotionVTT'); if(box) box.value = out;
+    }
+    emoStart = null; emoLabel = null;
+  }
+  const emotionButtons = [
+    ['btnNeutral','neutral'],
+    ['btnHappy','happy'],
+    ['btnAngry','angry'],
+    ['btnSad','sad'],
+    ['btnExcited','excited'],
+    ['btnOtherEmo','other']
+  ];
+  emotionButtons.forEach(([id,label])=>{
+    const btn = qs(id);
+    if(!btn) return;
+    const start = ()=> startEmotion(label);
+    const end = ()=> endEmotion();
+    btn.addEventListener('mousedown', start);
+    btn.addEventListener('touchstart', start);
+    btn.addEventListener('mouseup', end);
+    btn.addEventListener('mouseleave', ()=>{ if(emoLabel===label) endEmotion(); });
+    btn.addEventListener('touchend', end);
+    btn.addEventListener('touchcancel', end);
+  });
+  const emoUndo = qs('emoUndo');
+  if(emoUndo){
+    emoUndo.addEventListener('click', ()=>{
+      if(!Array.isArray(EAQ.state.emotionCues)) EAQ.state.emotionCues = [];
+      EAQ.state.emotionCues.pop();
+      EAQ.state.emotionCues = VTT.normalize(EAQ.state.emotionCues);
+      const out = EAQ.state.emotionCues.length ? VTT.stringify(EAQ.state.emotionCues) : '';
+      EAQ.state.emotionVTT = out;
+      const box = qs('emotionVTT'); if(box) box.value = out;
+    });
+  }
   const wave = qs('wave');
   if(wave){
     function seekFromEvent(ev){
@@ -298,20 +411,104 @@ window.addEventListener('load', ()=>{
 // Prefill loader and alignment helpers
 async function loadPrefillForCurrent(){
   const it = currentItem(); if(!it) return;
+  const emotionBox = qs('emotionVTT'); if(emotionBox) emotionBox.value = '';
+  EAQ.state.emotionVTT = '';
+  EAQ.state.emotionCues = [];
+  EAQ.state.speakerProfiles = [];
+  const speakerContainer = qs('speakerCards');
+  if(speakerContainer) speakerContainer.innerHTML = '<em>Loading speaker attributes...</em>';
+  const prefill = it.prefill || {};
   // Transcript
-  if(it.prefill && it.prefill.transcript_vtt_url){
-    try{ const t = await fetch(it.prefill.transcript_vtt_url).then(r=> r.text()); EAQ.state.transcriptVTT = t; qs('transcriptVTT').value = t; EAQ.state.transcriptCues = VTT.normalize(VTT.parse(t)); } catch{}
+  if(prefill.transcript_vtt_url){
+    try{ const t = await fetch(prefill.transcript_vtt_url).then(r=> r.text()); EAQ.state.transcriptVTT = t; qs('transcriptVTT').value = t; EAQ.state.transcriptCues = VTT.normalize(VTT.parse(t)); } catch{}
+  } else if(typeof prefill.transcript_vtt === 'string' && prefill.transcript_vtt.trim()){
+    EAQ.state.transcriptVTT = prefill.transcript_vtt;
+    qs('transcriptVTT').value = prefill.transcript_vtt;
+    try{ EAQ.state.transcriptCues = VTT.normalize(VTT.parse(prefill.transcript_vtt)); }catch{}
   }
   // Translation
-  if(it.prefill && it.prefill.translation_vtt_url){
-    try{ const t = await fetch(it.prefill.translation_vtt_url).then(r=> r.text()); EAQ.state.translationVTT = t; qs('translationVTT').value = t; EAQ.state.translationCues = VTT.normalize(VTT.parse(t)); } catch{}
+  if(prefill.translation_vtt_url){
+    try{ const t = await fetch(prefill.translation_vtt_url).then(r=> r.text()); EAQ.state.translationVTT = t; qs('translationVTT').value = t; EAQ.state.translationCues = VTT.normalize(VTT.parse(t)); } catch{}
+  } else if(typeof prefill.translation_vtt === 'string' && prefill.translation_vtt.trim()){
+    EAQ.state.translationVTT = prefill.translation_vtt;
+    qs('translationVTT').value = prefill.translation_vtt;
+    try{ EAQ.state.translationCues = VTT.normalize(VTT.parse(prefill.translation_vtt)); }catch{}
   }
   // Align counts
   alignTranslationToTranscript();
+  // Speaker profiles prefill
+  const allowedGenders = new Set(['male','female','nonbinary','unknown']);
+  const allowedAges = new Set(['child','teen','young_adult','adult','elderly','unknown']);
+  const allowedDialects = new Set(['unknown','levant','gulf','egypt','maghreb','mesopotamia','sudan','arabian_peninsula','horn_of_africa','other']);
+  const normalizeProfile = (entry, idx, fallback)=>{
+    const data = entry && typeof entry === 'object' ? entry : {};
+    const normEnum = (val, fallbackVal)=>{
+      if(val==null) return fallbackVal;
+      const str = String(val).trim();
+      if(!str) return fallbackVal;
+      return str.toLowerCase().replace(/[\s-]+/g,'_');
+    };
+    const speakerIdRaw = data.speaker_id || data.diarization_speaker || data.speaker || fallback || `spk${idx+1}`;
+    const genderNorm = normEnum(data.apparent_gender, 'unknown');
+    const ageNorm = normEnum(data.apparent_age_band, 'unknown');
+    const dialectNorm = normEnum(data.dialect_subregion, 'unknown');
+    return Object.assign({}, data, {
+      speaker_id: String(speakerIdRaw || `spk${idx+1}`),
+      display_label: String(data.display_label || data.label || `S${idx+1}`),
+      apparent_gender: allowedGenders.has(genderNorm) ? genderNorm : 'unknown',
+      apparent_age_band: allowedAges.has(ageNorm) ? ageNorm : 'unknown',
+      dialect_subregion: allowedDialects.has(dialectNorm) ? dialectNorm : 'unknown'
+    });
+  };
+  let speakerPrefillRaw = null;
+  if(prefill.speaker_profiles_json_url){
+    try{ speakerPrefillRaw = await fetch(prefill.speaker_profiles_json_url).then(r=> r.text()); }
+    catch{}
+  } else if(prefill.speaker_profiles_json){
+    speakerPrefillRaw = prefill.speaker_profiles_json;
+  }
+  if(speakerPrefillRaw!=null){
+    let parsed = speakerPrefillRaw;
+    if(typeof parsed === 'string'){
+      try{ parsed = JSON.parse(parsed); }
+      catch{ parsed = []; }
+    }
+    if(Array.isArray(parsed)){
+      EAQ.state.speakerProfiles = parsed.map((p, idx)=> normalizeProfile(p, idx, p && (p.speaker_id || p.diarization_speaker || p.speaker)));
+    } else if(parsed && typeof parsed === 'object'){
+      const keys = Object.keys(parsed);
+      EAQ.state.speakerProfiles = keys.map((key, idx)=> normalizeProfile(parsed[key], idx, key));
+    }
+  }
   // Diarization prefill (RTTM)
-  if(it.prefill && it.prefill.diarization_rttm_url){
-    try{ const t = await fetch(it.prefill.diarization_rttm_url).then(r=> r.text()); EAQ.state.diarSegments = parseRTTM(t); renderDiarList(); } catch{ EAQ.state.diarSegments = []; renderDiarList(); }
+  if(prefill.diarization_rttm_url){
+    try{ const t = await fetch(prefill.diarization_rttm_url).then(r=> r.text()); EAQ.state.diarSegments = parseRTTM(t); renderDiarList(); }
+    catch{ EAQ.state.diarSegments = []; renderDiarList(); }
+  } else if(prefill.diarization_rttm){
+    try{ EAQ.state.diarSegments = parseRTTM(prefill.diarization_rttm); }
+    catch{ EAQ.state.diarSegments = []; }
+    renderDiarList();
   } else { EAQ.state.diarSegments = []; renderDiarList(); }
+  // Emotion prefill
+  let emotionText = null;
+  if(prefill.emotion_vtt_url){
+    try{ emotionText = await fetch(prefill.emotion_vtt_url).then(r=> r.text()); }
+    catch{}
+  } else if(typeof prefill.emotion_vtt === 'string'){
+    emotionText = prefill.emotion_vtt;
+  }
+  if(typeof emotionText === 'string'){
+    EAQ.state.emotionVTT = emotionText;
+    if(emotionBox) emotionBox.value = emotionText;
+    if(emotionText.trim()){
+      try{ EAQ.state.emotionCues = VTT.normalize(VTT.parse(emotionText)); }
+      catch{ EAQ.state.emotionCues = []; }
+    }
+  } else {
+    EAQ.state.emotionVTT = '';
+    EAQ.state.emotionCues = [];
+    if(emotionBox) emotionBox.value = '';
+  }
 }
 
 function alignTranslationToTranscript(){
@@ -394,4 +591,109 @@ function renderDiarList(){
       renderDiarList();
     });
   });
+  renderSpeakerCards();
+}
+
+function renderSpeakerCards(){
+  const container = qs('speakerCards');
+  if(!container) return;
+  const segments = Array.isArray(EAQ.state.diarSegments) ? EAQ.state.diarSegments : [];
+  const seen = [];
+  const seenSet = new Set();
+  for(const seg of segments){
+    const speakerId = seg && seg.speaker ? String(seg.speaker) : 'spk';
+    if(!seenSet.has(speakerId)){
+      seenSet.add(speakerId);
+      seen.push(speakerId);
+    }
+  }
+  if(!seen.length){
+    container.innerHTML = '<em>No diarization loaded. Speaker attributes unavailable.</em>';
+    EAQ.state.speakerProfiles = [];
+    return;
+  }
+  const genderOptions = [
+    { value: '', label: 'Select apparent gender', disabled: true },
+    { value: 'male', label: 'Male' },
+    { value: 'female', label: 'Female' },
+    { value: 'nonbinary', label: 'Non-binary' },
+    { value: 'unknown', label: 'Unknown' }
+  ];
+  const ageOptions = [
+    { value: '', label: 'Select age band', disabled: true },
+    { value: 'child', label: 'Child' },
+    { value: 'teen', label: 'Teen' },
+    { value: 'young_adult', label: 'Young Adult' },
+    { value: 'adult', label: 'Adult' },
+    { value: 'elderly', label: 'Elderly' },
+    { value: 'unknown', label: 'Unknown' }
+  ];
+  const dialectOptions = [
+    { value: '', label: 'Select dialect sub-region', disabled: true },
+    { value: 'unknown', label: 'Unknown' },
+    { value: 'levant', label: 'Levant' },
+    { value: 'gulf', label: 'Gulf' },
+    { value: 'egypt', label: 'Egypt' },
+    { value: 'maghreb', label: 'Maghreb' },
+    { value: 'mesopotamia', label: 'Mesopotamia' },
+    { value: 'sudan', label: 'Sudan' },
+    { value: 'arabian_peninsula', label: 'Arabian Peninsula' },
+    { value: 'horn_of_africa', label: 'Horn of Africa' },
+    { value: 'other', label: 'Other' }
+  ];
+  const allowedGenderVals = new Set(genderOptions.map(o=>o.value).filter(v=>v));
+  const allowedAgeVals = new Set(ageOptions.map(o=>o.value).filter(v=>v));
+  const allowedDialectVals = new Set(dialectOptions.map(o=>o.value).filter(v=>v));
+  const normalizeValue = (val, fallback, allowed)=>{
+    if(val==null) return fallback;
+    const str = String(val).trim();
+    if(!str) return fallback;
+    const normalized = str.toLowerCase().replace(/[\s-]+/g,'_');
+    if(allowed && !allowed.has(normalized)) return fallback;
+    return normalized;
+  };
+  const existing = Array.isArray(EAQ.state.speakerProfiles) ? EAQ.state.speakerProfiles : [];
+  const normalized = seen.map((speakerId, idx)=>{
+    const found = existing.find((p)=> p && p.speaker_id === speakerId) || {};
+    const display = String(found.display_label || `S${idx+1}`);
+    const genderSel = normalizeValue(found.apparent_gender, 'unknown', allowedGenderVals);
+    const ageSel = normalizeValue(found.apparent_age_band, 'unknown', allowedAgeVals);
+    const dialectSel = normalizeValue(found.dialect_subregion, 'unknown', allowedDialectVals);
+    return Object.assign({}, found, {
+      speaker_id: String(speakerId),
+      display_label: display,
+      apparent_gender: genderSel,
+      apparent_age_band: ageSel,
+      dialect_subregion: dialectSel
+    });
+  });
+  EAQ.state.speakerProfiles = normalized;
+  function renderOptions(list, selected){
+    return list.map((opt)=>{
+      const attrs = [
+        `value="${escapeHtml(opt.value)}"`
+      ];
+      if(opt.disabled){ attrs.push('disabled'); }
+      const isSelected = opt.value ? opt.value === selected : !selected;
+      if(isSelected){ attrs.push('selected'); }
+      return `<option ${attrs.join(' ')}>${escapeHtml(opt.label)}</option>`;
+    }).join('');
+  }
+  const cards = normalized.map((profile, idx)=>{
+    const display = String(profile.display_label || `S${idx+1}`);
+    const speakerId = String(profile.speaker_id || `spk${idx+1}`);
+    const genderSel = normalizeValue(profile.apparent_gender, 'unknown', allowedGenderVals);
+    const ageSel = normalizeValue(profile.apparent_age_band, 'unknown', allowedAgeVals);
+    const dialectSel = normalizeValue(profile.dialect_subregion, 'unknown', allowedDialectVals);
+    const genderOptionsHtml = renderOptions(genderOptions, genderSel);
+    const ageOptionsHtml = renderOptions(ageOptions, ageSel);
+    const dialectOptionsHtml = renderOptions(dialectOptions, dialectSel);
+    return `<div class="notice" data-speaker-card data-speaker-id="${escapeHtml(speakerId)}" data-display-label="${escapeHtml(display)}" style="margin-bottom:1rem;">`+
+      `<h4 style="margin:0 0 .5rem 0;">${escapeHtml(display)} <small style="font-weight:normal;color:var(--text-muted,inherit);">(Diar speaker: ${escapeHtml(speakerId)})</small></h4>`+
+      `<label style="display:block;margin-bottom:.5rem;">Apparent gender <select name="apparent_gender">${genderOptionsHtml}</select></label>`+
+      `<label style="display:block;margin-bottom:.5rem;">Apparent age band <select name="apparent_age_band">${ageOptionsHtml}</select></label>`+
+      `<label style="display:block;margin-bottom:.5rem;">Dialect sub-region <select name="dialect_subregion">${dialectOptionsHtml}</select></label>`+
+    `</div>`;
+  }).join('');
+  container.innerHTML = cards;
 }
