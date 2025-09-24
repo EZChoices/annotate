@@ -22,9 +22,16 @@ const EAQ = {
     codeSwitchCues: [],
     eventsCues: [],
     diarSegments: [],
+    speakerProfiles: [],
+    emotionCues: [],
+    emotionVTT: '',
     startedAt: 0
   }
 };
+
+const SPEAKER_GENDERS = ['male','female','nonbinary','unknown'];
+const SPEAKER_AGE_BANDS = ['child','teen','young_adult','adult','elderly','unknown'];
+const SPEAKER_DIALECTS = ['Levantine','Iraqi','Gulf','Yemeni','Egyptian','Maghrebi','MSA','Mixed','Other','Unknown'];
 
 function getAnnotatorId(){
   try{
@@ -36,7 +43,7 @@ function getAnnotatorId(){
 }
 
 function qs(id){ return document.getElementById(id); }
-function show(id){ ['screen_welcome','screen_transcript','screen_translation','screen_codeswitch','screen_pii','screen_diar','screen_review'].forEach(x=> qs(x).classList.toggle('hide', x!==id)); }
+function show(id){ ['screen_welcome','screen_transcript','screen_translation','screen_codeswitch','screen_speaker','screen_emotion','screen_pii','screen_diar','screen_review'].forEach(x=> qs(x).classList.toggle('hide', x!==id)); }
 
 async function loadManifest(){
   const annot = encodeURIComponent(EAQ.state.annotator);
@@ -60,6 +67,7 @@ async function prefetchNext(){
 function loadAudio(){
   const it = currentItem(); if(!it) return;
   const a = qs('audio'); if(!a) return;
+  EAQ.audio = a;
   a.src = it.media && it.media.audio_proxy_url ? it.media.audio_proxy_url : '/public/sample.mp4';
   a.play().catch(()=>{});
   const wave = qs('wave'); if(wave){ Wave.attach(wave); Wave.load(a.src); }
@@ -98,7 +106,9 @@ async function enqueueAndSync(){
       translation_vtt: EAQ.state.translationVTT,
       code_switch_vtt: EAQ.state.codeSwitchVTT || '',
       code_switch_spans_json: codeSwitchJson(EAQ.state.codeSwitchCues||[]).json,
-      events_vtt: (function(){ const ev = qs('eventsVTT'); if(ev && ev.value.trim()) return ev.value; return (EAQ.state.eventsCues||[]).length ? VTT.stringify(EAQ.state.eventsCues) : ''; })()
+      events_vtt: (function(){ const ev = qs('eventsVTT'); if(ev && ev.value.trim()) return ev.value; return (EAQ.state.eventsCues||[]).length ? VTT.stringify(EAQ.state.eventsCues) : ''; })(),
+      emotion_vtt: EAQ.state.emotionVTT || '',
+      speaker_profiles_json: JSON.stringify(EAQ.state.speakerProfiles||[])
     },
     summary: {
       contains_code_switch: (EAQ.state.codeSwitchCues||[]).length > 0,
@@ -171,8 +181,90 @@ function bindUI(){
     const errs = basicValidation();
     const el = qs('errorsList');
     el.textContent = errs.length ? ('Errors: ' + errs.join(', ')) : 'Looks good.';
-    show('screen_pii');
+    show('screen_speaker');
   });
+  const speakerNext = qs('speakerNext');
+  if(speakerNext){
+    speakerNext.addEventListener('click', ()=>{
+      const container = qs('speakerCards');
+      const profiles = [];
+      if(container){
+        container.querySelectorAll('.card').forEach(card=>{
+          const speakerId = card.getAttribute('data-speaker');
+          if(!speakerId) return;
+          const genderSel = card.querySelector('select[data-field="apparent_gender"]');
+          const ageSel = card.querySelector('select[data-field="apparent_age_band"]');
+          const dialectSel = card.querySelector('select[data-field="dialect_subregion"]');
+          profiles.push({
+            speaker_id: speakerId,
+            apparent_gender: genderSel ? genderSel.value : 'unknown',
+            apparent_age_band: ageSel ? ageSel.value : 'unknown',
+            dialect_subregion: dialectSel ? dialectSel.value : 'Unknown'
+          });
+        });
+      }
+      profiles.sort((a,b)=> (a.speaker_id||'').localeCompare(b.speaker_id||'', undefined, { numeric: true, sensitivity: 'base' }));
+      EAQ.state.speakerProfiles = profiles;
+      show('screen_emotion');
+    });
+  }
+
+  const emotionButtons = [
+    { ids: ['btn_neutral','btnNeutral'], label: 'neutral' },
+    { ids: ['btn_happy','btnHappy'], label: 'happy' },
+    { ids: ['btn_angry','btnAngry'], label: 'angry' },
+    { ids: ['btn_sad','btnSad'], label: 'sad' },
+    { ids: ['btn_excited','btnExcited'], label: 'excited' },
+    { ids: ['btn_other','btnOtherEmo'], label: 'other' }
+  ];
+  let emotionActive = null;
+  function emotionStart(label){
+    if(!EAQ.audio) return;
+    emotionActive = { label, start: EAQ.audio.currentTime || 0 };
+  }
+  function emotionEnd(){
+    if(!EAQ.audio || !emotionActive) return;
+    const end = EAQ.audio.currentTime || 0;
+    const start = emotionActive.start;
+    const label = emotionActive.label;
+    emotionActive = null;
+    if((end - start) < 1.5) return;
+    EAQ.state.emotionCues.push({ start, end, label });
+    rebuildEmotionState();
+  }
+  emotionButtons.forEach(({ids,label})=>{
+    let bound = false;
+    for(const id of ids){
+      if(bound) break;
+      const btn = qs(id);
+      if(!btn) continue;
+      btn.addEventListener('mousedown', ()=> emotionStart(label));
+      btn.addEventListener('mouseup', emotionEnd);
+      btn.addEventListener('mouseleave', emotionEnd);
+      btn.addEventListener('touchstart', (ev)=>{ ev.preventDefault(); emotionStart(label); });
+      btn.addEventListener('touchend', (ev)=>{ ev.preventDefault(); emotionEnd(); });
+      btn.addEventListener('touchcancel', (ev)=>{ ev.preventDefault(); emotionEnd(); });
+      bound = true;
+    }
+  });
+  const emoUndo = qs('emoUndo');
+  if(emoUndo){
+    emoUndo.addEventListener('click', ()=>{
+      EAQ.state.emotionCues.pop();
+      rebuildEmotionState();
+    });
+  }
+  const emotionNext = qs('emotionNext');
+  if(emotionNext){
+    emotionNext.addEventListener('click', ()=>{
+      const box = qs('emotionVTT');
+      EAQ.state.emotionVTT = box ? (box.value||'').trim() : '';
+      if(EAQ.state.emotionVTT.toUpperCase() === 'WEBVTT'){ EAQ.state.emotionVTT = 'WEBVTT\n\n'; }
+      EAQ.state.emotionCues = parseEmotionVTT(EAQ.state.emotionVTT);
+      EAQ.state.emotionCues.sort((a,b)=> a.start - b.start || a.end - b.end);
+      show('screen_pii');
+    });
+  }
   // PII/events buttons
   const evtBtns = document.querySelectorAll('[data-evt]');
   const openEvt = new Map();
@@ -216,6 +308,7 @@ window.addEventListener('load', ()=>{
   if('serviceWorker' in navigator){ navigator.serviceWorker.addEventListener('message', (ev)=>{ if(ev && ev.data && ev.data.type==='ea-sync'){ trySyncWithBackoff(); } }); }
   // Bind basic editing controls
   const a = qs('audio');
+  EAQ.audio = a;
   qs('rewindBtn').addEventListener('click', ()=>{ if(a) a.currentTime = Math.max(0, a.currentTime - 3); });
   qs('splitBtn').addEventListener('click', ()=>{
     if(!a) return; const t = a.currentTime; const cues = EAQ.state.transcriptCues.length ? EAQ.state.transcriptCues : VTT.parse(qs('transcriptVTT').value);
@@ -298,6 +391,11 @@ window.addEventListener('load', ()=>{
 // Prefill loader and alignment helpers
 async function loadPrefillForCurrent(){
   const it = currentItem(); if(!it) return;
+  const emotionBox = qs('emotionVTT');
+  EAQ.state.speakerProfiles = [];
+  EAQ.state.emotionCues = [];
+  EAQ.state.emotionVTT = '';
+  if(emotionBox) emotionBox.value = '';
   // Transcript
   if(it.prefill && it.prefill.transcript_vtt_url){
     try{ const t = await fetch(it.prefill.transcript_vtt_url).then(r=> r.text()); EAQ.state.transcriptVTT = t; qs('transcriptVTT').value = t; EAQ.state.transcriptCues = VTT.normalize(VTT.parse(t)); } catch{}
@@ -308,10 +406,52 @@ async function loadPrefillForCurrent(){
   }
   // Align counts
   alignTranslationToTranscript();
+  // Speaker profiles prefill
+  if(it.prefill && it.prefill.speaker_profiles_json){
+    try{
+      const parsed = JSON.parse(it.prefill.speaker_profiles_json);
+      if(Array.isArray(parsed)){
+        EAQ.state.speakerProfiles = parsed.map(p=>({
+          speaker_id: (p && p.speaker_id != null ? String(p.speaker_id) : '').trim(),
+          apparent_gender: (function(){
+            const raw = (p && p.apparent_gender != null ? String(p.apparent_gender) : '').trim().toLowerCase();
+            return SPEAKER_GENDERS.includes(raw) ? raw : 'unknown';
+          })(),
+          apparent_age_band: (function(){
+            const raw = (p && p.apparent_age_band != null ? String(p.apparent_age_band) : '').trim().toLowerCase();
+            return SPEAKER_AGE_BANDS.includes(raw) ? raw : 'unknown';
+          })(),
+          dialect_subregion: (function(){
+            const raw = (p && p.dialect_subregion != null ? String(p.dialect_subregion) : '').trim();
+            if(!raw) return 'Unknown';
+            const match = SPEAKER_DIALECTS.find(d=> d.toLowerCase() === raw.toLowerCase());
+            return match || 'Unknown';
+          })()
+        })).filter(p=> p.speaker_id);
+      }
+    }catch{}
+  }
+  // Emotion cues prefill
+  let emotionPrefillLoaded = false;
+  if(it.prefill && it.prefill.emotion_vtt){
+    try{
+      EAQ.state.emotionVTT = it.prefill.emotion_vtt;
+      EAQ.state.emotionCues = parseEmotionVTT(EAQ.state.emotionVTT);
+      EAQ.state.emotionCues.sort((a,b)=> a.start - b.start || a.end - b.end);
+      emotionPrefillLoaded = true;
+    }catch{}
+  }
+  if(!emotionPrefillLoaded){
+    EAQ.state.emotionCues = [];
+    EAQ.state.emotionVTT = '';
+  }
+  rebuildEmotionState();
   // Diarization prefill (RTTM)
   if(it.prefill && it.prefill.diarization_rttm_url){
-    try{ const t = await fetch(it.prefill.diarization_rttm_url).then(r=> r.text()); EAQ.state.diarSegments = parseRTTM(t); renderDiarList(); } catch{ EAQ.state.diarSegments = []; renderDiarList(); }
-  } else { EAQ.state.diarSegments = []; renderDiarList(); }
+    try{ const t = await fetch(it.prefill.diarization_rttm_url).then(r=> r.text()); EAQ.state.diarSegments = parseRTTM(t); }
+    catch{ EAQ.state.diarSegments = []; }
+  } else { EAQ.state.diarSegments = []; }
+  renderDiarList();
 }
 
 function alignTranslationToTranscript(){
@@ -394,4 +534,120 @@ function renderDiarList(){
       renderDiarList();
     });
   });
+  renderSpeakerCards();
+}
+
+function renderSpeakerCards(){
+  const container = qs('speakerCards');
+  if(!container) return;
+  const existing = [];
+  container.querySelectorAll('.card').forEach(card=>{
+    const speakerId = card.getAttribute('data-speaker');
+    if(!speakerId) return;
+    const genderSel = card.querySelector('select[data-field="apparent_gender"]');
+    const ageSel = card.querySelector('select[data-field="apparent_age_band"]');
+    const dialectSel = card.querySelector('select[data-field="dialect_subregion"]');
+    existing.push({
+      speaker_id: speakerId,
+      apparent_gender: genderSel ? genderSel.value : 'unknown',
+      apparent_age_band: ageSel ? ageSel.value : 'unknown',
+      dialect_subregion: dialectSel ? dialectSel.value : 'Unknown'
+    });
+  });
+  if(existing.length){
+    const merged = new Map((EAQ.state.speakerProfiles||[]).map(p=> [p.speaker_id, p]));
+    existing.forEach(p=> merged.set(p.speaker_id, p));
+    EAQ.state.speakerProfiles = Array.from(merged.values()).sort((a,b)=> (a.speaker_id||'').localeCompare(b.speaker_id||'', undefined, { numeric:true, sensitivity:'base' }));
+  }
+  container.innerHTML = '';
+  const segments = EAQ.state.diarSegments || [];
+  const speakers = Array.from(new Set(segments.map(seg=> (seg.speaker || '').toString().trim()))).filter(Boolean);
+  speakers.sort((a,b)=> a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+  if(speakers.length === 0){
+    const empty = document.createElement('p');
+    empty.className = 'notice';
+    empty.textContent = 'No diarized speakers available.';
+    container.appendChild(empty);
+    return;
+  }
+  const saved = new Map((EAQ.state.speakerProfiles||[]).map(p=> [p.speaker_id, p]));
+  const genderOptions = SPEAKER_GENDERS.map(value=> ({
+    value,
+    label: value === 'nonbinary' ? 'Non-binary' : value.charAt(0).toUpperCase() + value.slice(1)
+  }));
+  const ageOptions = SPEAKER_AGE_BANDS.map(value=> ({
+    value,
+    label: value.split('_').map(part=> part.charAt(0).toUpperCase() + part.slice(1)).join(' ')
+  }));
+  const dialectOptions = SPEAKER_DIALECTS.map(value=> ({ value, label: value }));
+
+  function buildField(labelText, options, selectedValue, field){
+    const wrap = document.createElement('label');
+    wrap.style.display = 'block';
+    wrap.style.margin = '0.4rem 0';
+    const labelNode = document.createElement('span');
+    labelNode.textContent = labelText + ' ';
+    const select = document.createElement('select');
+    select.setAttribute('data-field', field);
+    options.forEach(opt=>{
+      const option = document.createElement('option');
+      option.value = opt.value;
+      option.textContent = opt.label;
+      select.appendChild(option);
+    });
+    const values = options.map(o=>o.value);
+    const valueToSet = values.includes(selectedValue) ? selectedValue : values[values.length-1];
+    select.value = valueToSet;
+    wrap.appendChild(labelNode);
+    wrap.appendChild(select);
+    return wrap;
+  }
+
+  speakers.forEach(id=>{
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.setAttribute('data-speaker', id);
+    const title = document.createElement('h4');
+    title.textContent = `Speaker ${id}`;
+    card.appendChild(title);
+    const pref = saved.get(id) || {};
+    card.appendChild(buildField('Apparent gender:', genderOptions, (pref.apparent_gender||'unknown'), 'apparent_gender'));
+    card.appendChild(buildField('Apparent age band:', ageOptions, (pref.apparent_age_band||'unknown'), 'apparent_age_band'));
+    card.appendChild(buildField('Dialect subregion:', dialectOptions, (pref.dialect_subregion||'Unknown'), 'dialect_subregion'));
+    container.appendChild(card);
+  });
+}
+
+function emotionCuesToVTT(cues){
+  const items = (cues||[]).map(c=> ({
+    start: Math.max(0, +c.start || 0),
+    end: Math.max(Math.max(0, +c.start || 0), +c.end || 0),
+    text: (c.label||'').trim()
+  }));
+  return VTT.stringify(items);
+}
+
+function rebuildEmotionState(){
+  const cues = (EAQ.state.emotionCues||[]).map(c=>{
+    const start = Math.max(0, +c.start || 0);
+    const end = Math.max(start, +c.end || 0);
+    return { start, end, label: (c.label||'').trim() };
+  });
+  cues.sort((a,b)=> a.start - b.start || a.end - b.end);
+  EAQ.state.emotionCues = cues;
+  EAQ.state.emotionVTT = emotionCuesToVTT(cues);
+  const box = qs('emotionVTT'); if(box) box.value = EAQ.state.emotionVTT;
+}
+
+function parseEmotionVTT(text){
+  try{
+    const cues = VTT.parse(text||'');
+    return cues.map(c=>{
+      const start = Math.max(0, c.start||0);
+      const end = Math.max(start, Math.max(0, c.end||0));
+      return { start, end, label: (c.text||'').trim() };
+    });
+  }catch{
+    return [];
+  }
 }
