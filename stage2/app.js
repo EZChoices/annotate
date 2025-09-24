@@ -30,6 +30,10 @@ const EAQ = {
   }
 };
 
+const SPEAKER_GENDERS = ['male','female','nonbinary','unknown'];
+const SPEAKER_AGE_BANDS = ['child','teen','young_adult','adult','elderly','unknown'];
+const SPEAKER_DIALECTS = ['Levantine','Iraqi','Gulf','Yemeni','Egyptian','Maghrebi','MSA','Mixed','Other','Unknown'];
+
 function getAnnotatorId(){
   try{
     const k = 'ea_stage2_annotator_id';
@@ -40,6 +44,7 @@ function getAnnotatorId(){
 }
 
 function qs(id){ return document.getElementById(id); }
+
 function escapeHtml(str){
   return String(str||'').replace(/[&<>"']/g, (s)=>({
     '&':'&amp;',
@@ -49,7 +54,11 @@ function escapeHtml(str){
     "'":"&#39;"
   })[s]);
 }
-function show(id){ ['screen_welcome','screen_transcript','screen_translation','screen_codeswitch','screen_speaker','screen_emotion','screen_pii','screen_diar','screen_review'].forEach(x=> qs(x).classList.toggle('hide', x!==id)); }
+
+function show(id){
+  ['screen_welcome','screen_transcript','screen_translation','screen_codeswitch','screen_speaker','screen_emotion','screen_pii','screen_diar','screen_review']
+    .forEach(x=> qs(x).classList.toggle('hide', x!==id));
+}
 
 async function loadManifest(){
   const annot = encodeURIComponent(EAQ.state.annotator);
@@ -73,12 +82,17 @@ async function prefetchNext(){
 function loadAudio(){
   const it = currentItem(); if(!it) return;
   const a = qs('audio'); if(!a) return;
+  EAQ.audio = a;
   a.src = it.media && it.media.audio_proxy_url ? it.media.audio_proxy_url : '/public/sample.mp4';
   a.play().catch(()=>{});
   const wave = qs('wave'); if(wave){ Wave.attach(wave); Wave.load(a.src); }
   const tl = qs('timeline');
   if(tl){
-    const attachTl = ()=> Timeline.attach(tl, a.duration||0, EAQ.state.transcriptCues, (cues)=>{ EAQ.state.transcriptCues = VTT.normalize(cues); qs('transcriptVTT').value = VTT.stringify(EAQ.state.transcriptCues); alignTranslationToTranscript(); });
+    const attachTl = ()=> Timeline.attach(tl, a.duration||0, EAQ.state.transcriptCues, (cues)=>{
+      EAQ.state.transcriptCues = VTT.normalize(cues);
+      qs('transcriptVTT').value = VTT.stringify(EAQ.state.transcriptCues);
+      alignTranslationToTranscript();
+    });
     if(isFinite(a.duration) && a.duration>0){ attachTl(); }
     else { a.addEventListener('loadedmetadata', attachTl, { once:true }); }
     // paint overlays from CS and Events
@@ -92,10 +106,8 @@ function basicValidation(){
   const errs = [];
   if(!EAQ.state.transcriptVTT.trim()) errs.push('Transcript VTT is empty');
   if(!EAQ.state.translationVTT.trim()) errs.push('Translation VTT is empty');
-  // simple parse check: must contain WEBVTT header
   if(!/^WEBVTT/m.test(EAQ.state.transcriptVTT)) errs.push('Transcript VTT missing WEBVTT');
   if(!/^WEBVTT/m.test(EAQ.state.translationVTT)) errs.push('Translation VTT missing WEBVTT');
-  // code-switch optional; if provided, must have WEBVTT
   if(EAQ.state.codeSwitchVTT.trim() && !/^WEBVTT/m.test(EAQ.state.codeSwitchVTT)) errs.push('Code-switch VTT missing WEBVTT');
   return errs;
 }
@@ -111,7 +123,11 @@ async function enqueueAndSync(){
       translation_vtt: EAQ.state.translationVTT,
       code_switch_vtt: EAQ.state.codeSwitchVTT || '',
       code_switch_spans_json: codeSwitchJson(EAQ.state.codeSwitchCues||[]).json,
-      events_vtt: (function(){ const ev = qs('eventsVTT'); if(ev && ev.value.trim()) return ev.value; return (EAQ.state.eventsCues||[]).length ? VTT.stringify(EAQ.state.eventsCues) : ''; })(),
+      events_vtt: (function(){
+        const ev = qs('eventsVTT');
+        if(ev && ev.value.trim()) return ev.value;
+        return (EAQ.state.eventsCues||[]).length ? VTT.stringify(EAQ.state.eventsCues) : '';
+      })(),
       emotion_vtt: EAQ.state.emotionVTT || '',
       speaker_profiles_json: (function(){ try{ return JSON.stringify(EAQ.state.speakerProfiles||[]); }catch{ return '[]'; } })()
     },
@@ -133,14 +149,23 @@ async function enqueueAndSync(){
 
   await EAIDB.enqueue(payload);
   trySyncWithBackoff();
-  try{ if('serviceWorker' in navigator && 'SyncManager' in window){ const reg = await navigator.serviceWorker.ready; await reg.sync.register('ea-sync'); } }catch{}
+  try{
+    if('serviceWorker' in navigator && 'SyncManager' in window){
+      const reg = await navigator.serviceWorker.ready;
+      await reg.sync.register('ea-sync');
+    }
+  }catch{}
 }
 
 async function trySyncOnce(){
   const items = await EAIDB.peekBatch(10);
   if(items.length===0) return true;
   try{
-    const res = await fetch('/api/annotations/batch', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(items)});
+    const res = await fetch('/api/annotations/batch', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(items)
+    });
     const ok = res.ok;
     if(ok){ await EAIDB.removeBatch(items.map(x=>x._id)); }
     return ok;
@@ -175,11 +200,13 @@ function bindUI(){
     EAQ.state.transcriptCues = VTT.normalize(VTT.parse(EAQ.state.transcriptVTT));
     show('screen_translation');
   });
+
   qs('translationNext').addEventListener('click', ()=>{
     EAQ.state.translationVTT = qs('translationVTT').value;
     EAQ.state.translationCues = VTT.normalize(VTT.parse(EAQ.state.translationVTT));
     show('screen_codeswitch');
   });
+
   qs('csNext').addEventListener('click', ()=>{
     EAQ.state.codeSwitchVTT = qs('codeSwitchVTT').value;
     EAQ.state.codeSwitchCues = VTT.normalize(VTT.parse(EAQ.state.codeSwitchVTT));
@@ -188,6 +215,7 @@ function bindUI(){
     el.textContent = errs.length ? ('Errors: ' + errs.join(', ')) : 'Looks good.';
     show('screen_speaker');
   });
+
   const speakerNext = qs('speakerNext');
   if(speakerNext){
     speakerNext.addEventListener('click', ()=>{
@@ -215,6 +243,7 @@ function bindUI(){
       show('screen_emotion');
     });
   }
+
   const emotionNext = qs('emotionNext');
   if(emotionNext){
     emotionNext.addEventListener('click', ()=>{
@@ -233,6 +262,7 @@ function bindUI(){
       show('screen_pii');
     });
   }
+
   // PII/events buttons
   const evtBtns = document.querySelectorAll('[data-evt]');
   const openEvt = new Map();
@@ -252,8 +282,10 @@ function bindUI(){
       }
     });
   });
+
   const piiNext = qs('piiNext'); if(piiNext) piiNext.addEventListener('click', ()=>{ show('screen_diar'); });
   const diarNext = qs('diarNext'); if(diarNext) diarNext.addEventListener('click', ()=>{ show('screen_review'); });
+
   qs('submitBtn').addEventListener('click', async ()=>{
     await enqueueAndSync();
     EAQ.state.idx = (EAQ.state.idx + 1) % Math.max(1, EAQ.state.manifest.items.length);
@@ -278,12 +310,19 @@ window.addEventListener('load', ()=>{
   EAQ.state.annotator = getAnnotatorId();
   bindUI();
   window.addEventListener('online', ()=>{ trySyncWithBackoff(); });
-  if('serviceWorker' in navigator){ navigator.serviceWorker.addEventListener('message', (ev)=>{ if(ev && ev.data && ev.data.type==='ea-sync'){ trySyncWithBackoff(); } }); }
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.addEventListener('message', (ev)=>{
+      if(ev && ev.data && ev.data.type==='ea-sync'){ trySyncWithBackoff(); }
+    });
+  }
   // Bind basic editing controls
   const a = qs('audio');
+  EAQ.audio = a;
   qs('rewindBtn').addEventListener('click', ()=>{ if(a) a.currentTime = Math.max(0, a.currentTime - 3); });
   qs('splitBtn').addEventListener('click', ()=>{
-    if(!a) return; const t = a.currentTime; const cues = EAQ.state.transcriptCues.length ? EAQ.state.transcriptCues : VTT.parse(qs('transcriptVTT').value);
+    if(!a) return;
+    const t = a.currentTime;
+    const cues = EAQ.state.transcriptCues.length ? EAQ.state.transcriptCues : VTT.parse(qs('transcriptVTT').value);
     for(let i=0;i<cues.length;i++){
       const c = cues[i];
       if(t > c.start && t < c.end && (t - c.start) >= EAQ.SPEC.cueMin && (c.end - t) >= EAQ.SPEC.cueMin){
@@ -309,10 +348,20 @@ window.addEventListener('load', ()=>{
       }
     }
   });
+
   // Code-switch quick-mark buttons
   let pressStart = null, pressLang = null;
   function startPress(lang){ if(!a) return; pressLang = lang; pressStart = a.currentTime; }
-  function endPress(){ if(!a || pressStart==null || !pressLang) return; const end = a.currentTime; if(end-pressStart >= EAQ.SPEC.csMinSec){ EAQ.state.codeSwitchCues.push({ start: pressStart, end, text: pressLang }); EAQ.state.codeSwitchCues = VTT.normalize(EAQ.state.codeSwitchCues); qs('codeSwitchVTT').value = VTT.stringify(EAQ.state.codeSwitchCues); } pressStart=null; pressLang=null; }
+  function endPress(){
+    if(!a || pressStart==null || !pressLang) return;
+    const end = a.currentTime;
+    if(end-pressStart >= EAQ.SPEC.csMinSec){
+      EAQ.state.codeSwitchCues.push({ start: pressStart, end, text: pressLang });
+      EAQ.state.codeSwitchCues = VTT.normalize(EAQ.state.codeSwitchCues);
+      qs('codeSwitchVTT').value = VTT.stringify(EAQ.state.codeSwitchCues);
+    }
+    pressStart=null; pressLang=null;
+  }
   qs('btnEN').addEventListener('mousedown', ()=> startPress('EN'));
   qs('btnEN').addEventListener('touchstart', ()=> startPress('EN'));
   qs('btnEN').addEventListener('mouseup', endPress);
@@ -326,12 +375,20 @@ window.addEventListener('load', ()=>{
   qs('btnOther').addEventListener('mouseup', endPress);
   qs('btnOther').addEventListener('touchend', endPress);
   qs('nudgeMinus').addEventListener('click', ()=>{
-    const cues = EAQ.state.codeSwitchCues; if(!cues.length) return; cues[cues.length-1].start = Math.max(0, cues[cues.length-1].start - 0.2); qs('codeSwitchVTT').value = VTT.stringify(VTT.normalize(cues));
+    const cues = EAQ.state.codeSwitchCues; if(!cues.length) return;
+    cues[cues.length-1].start = Math.max(0, cues[cues.length-1].start - 0.2);
+    qs('codeSwitchVTT').value = VTT.stringify(VTT.normalize(cues));
   });
   qs('nudgePlus').addEventListener('click', ()=>{
-    const cues = EAQ.state.codeSwitchCues; if(!cues.length) return; cues[cues.length-1].end = cues[cues.length-1].end + 0.2; qs('codeSwitchVTT').value = VTT.stringify(VTT.normalize(cues));
+    const cues = EAQ.state.codeSwitchCues; if(!cues.length) return;
+    cues[cues.length-1].end = cues[cues.length-1].end + 0.2;
+    qs('codeSwitchVTT').value = VTT.stringify(VTT.normalize(cues));
   });
-  qs('csUndo').addEventListener('click', ()=>{ EAQ.state.codeSwitchCues.pop(); qs('codeSwitchVTT').value = VTT.stringify(VTT.normalize(EAQ.state.codeSwitchCues)); });
+  qs('csUndo').addEventListener('click', ()=>{
+    EAQ.state.codeSwitchCues.pop();
+    qs('codeSwitchVTT').value = VTT.stringify(VTT.normalize(EAQ.state.codeSwitchCues));
+  });
+
   // Emotion quick-mark buttons
   let emoStart = null, emoLabel = null;
   function startEmotion(label){ if(!a) return; emoLabel = label; emoStart = a.currentTime; }
@@ -380,6 +437,7 @@ window.addEventListener('load', ()=>{
       const box = qs('emotionVTT'); if(box) box.value = out;
     });
   }
+
   const wave = qs('wave');
   if(wave){
     function seekFromEvent(ev){
@@ -394,6 +452,7 @@ window.addEventListener('load', ()=>{
   if(zo) zo.addEventListener('click', ()=> Wave.setZoom(1.25));
   if(sl) sl.addEventListener('click', ()=> Wave.scroll(-0.1));
   if(sr) sr.addEventListener('click', ()=> Wave.scroll(0.1));
+
   const clr = qs('clearLocal');
   if(clr){
     clr.addEventListener('click', async ()=>{
@@ -418,28 +477,43 @@ async function loadPrefillForCurrent(){
   const speakerContainer = qs('speakerCards');
   if(speakerContainer) speakerContainer.innerHTML = '<em>Loading speaker attributes...</em>';
   const prefill = it.prefill || {};
+
   // Transcript
   if(prefill.transcript_vtt_url){
-    try{ const t = await fetch(prefill.transcript_vtt_url).then(r=> r.text()); EAQ.state.transcriptVTT = t; qs('transcriptVTT').value = t; EAQ.state.transcriptCues = VTT.normalize(VTT.parse(t)); } catch{}
+    try{
+      const t = await fetch(prefill.transcript_vtt_url).then(r=> r.text());
+      EAQ.state.transcriptVTT = t;
+      qs('transcriptVTT').value = t;
+      EAQ.state.transcriptCues = VTT.normalize(VTT.parse(t));
+    } catch{}
   } else if(typeof prefill.transcript_vtt === 'string' && prefill.transcript_vtt.trim()){
     EAQ.state.transcriptVTT = prefill.transcript_vtt;
     qs('transcriptVTT').value = prefill.transcript_vtt;
     try{ EAQ.state.transcriptCues = VTT.normalize(VTT.parse(prefill.transcript_vtt)); }catch{}
   }
+
   // Translation
   if(prefill.translation_vtt_url){
-    try{ const t = await fetch(prefill.translation_vtt_url).then(r=> r.text()); EAQ.state.translationVTT = t; qs('translationVTT').value = t; EAQ.state.translationCues = VTT.normalize(VTT.parse(t)); } catch{}
+    try{
+      const t = await fetch(prefill.translation_vtt_url).then(r=> r.text());
+      EAQ.state.translationVTT = t;
+      qs('translationVTT').value = t;
+      EAQ.state.translationCues = VTT.normalize(VTT.parse(t));
+    } catch{}
   } else if(typeof prefill.translation_vtt === 'string' && prefill.translation_vtt.trim()){
     EAQ.state.translationVTT = prefill.translation_vtt;
     qs('translationVTT').value = prefill.translation_vtt;
     try{ EAQ.state.translationCues = VTT.normalize(VTT.parse(prefill.translation_vtt)); }catch{}
   }
+
   // Align counts
   alignTranslationToTranscript();
-  // Speaker profiles prefill
+
+  // Speaker profiles prefill (robust)
   const allowedGenders = new Set(['male','female','nonbinary','unknown']);
   const allowedAges = new Set(['child','teen','young_adult','adult','elderly','unknown']);
   const allowedDialects = new Set(['unknown','levant','gulf','egypt','maghreb','mesopotamia','sudan','arabian_peninsula','horn_of_africa','other']);
+
   const normalizeProfile = (entry, idx, fallback)=>{
     const data = entry && typeof entry === 'object' ? entry : {};
     const normEnum = (val, fallbackVal)=>{
@@ -460,6 +534,7 @@ async function loadPrefillForCurrent(){
       dialect_subregion: allowedDialects.has(dialectNorm) ? dialectNorm : 'unknown'
     });
   };
+
   let speakerPrefillRaw = null;
   if(prefill.speaker_profiles_json_url){
     try{ speakerPrefillRaw = await fetch(prefill.speaker_profiles_json_url).then(r=> r.text()); }
@@ -480,15 +555,27 @@ async function loadPrefillForCurrent(){
       EAQ.state.speakerProfiles = keys.map((key, idx)=> normalizeProfile(parsed[key], idx, key));
     }
   }
+
   // Diarization prefill (RTTM)
   if(prefill.diarization_rttm_url){
-    try{ const t = await fetch(prefill.diarization_rttm_url).then(r=> r.text()); EAQ.state.diarSegments = parseRTTM(t); renderDiarList(); }
-    catch{ EAQ.state.diarSegments = []; renderDiarList(); }
+    try{
+      const t = await fetch(prefill.diarization_rttm_url).then(r=> r.text());
+      EAQ.state.diarSegments = parseRTTM(t);
+      renderDiarList();
+    }
+    catch{
+      EAQ.state.diarSegments = [];
+      renderDiarList();
+    }
   } else if(prefill.diarization_rttm){
     try{ EAQ.state.diarSegments = parseRTTM(prefill.diarization_rttm); }
     catch{ EAQ.state.diarSegments = []; }
     renderDiarList();
-  } else { EAQ.state.diarSegments = []; renderDiarList(); }
+  } else {
+    EAQ.state.diarSegments = [];
+    renderDiarList();
+  }
+
   // Emotion prefill
   let emotionText = null;
   if(prefill.emotion_vtt_url){
@@ -597,6 +684,7 @@ function renderDiarList(){
 function renderSpeakerCards(){
   const container = qs('speakerCards');
   if(!container) return;
+
   const segments = Array.isArray(EAQ.state.diarSegments) ? EAQ.state.diarSegments : [];
   const seen = [];
   const seenSet = new Set();
@@ -612,6 +700,7 @@ function renderSpeakerCards(){
     EAQ.state.speakerProfiles = [];
     return;
   }
+
   const genderOptions = [
     { value: '', label: 'Select apparent gender', disabled: true },
     { value: 'male', label: 'Male' },
@@ -644,6 +733,7 @@ function renderSpeakerCards(){
   const allowedGenderVals = new Set(genderOptions.map(o=>o.value).filter(v=>v));
   const allowedAgeVals = new Set(ageOptions.map(o=>o.value).filter(v=>v));
   const allowedDialectVals = new Set(dialectOptions.map(o=>o.value).filter(v=>v));
+
   const normalizeValue = (val, fallback, allowed)=>{
     if(val==null) return fallback;
     const str = String(val).trim();
@@ -652,6 +742,7 @@ function renderSpeakerCards(){
     if(allowed && !allowed.has(normalized)) return fallback;
     return normalized;
   };
+
   const existing = Array.isArray(EAQ.state.speakerProfiles) ? EAQ.state.speakerProfiles : [];
   const normalized = seen.map((speakerId, idx)=>{
     const found = existing.find((p)=> p && p.speaker_id === speakerId) || {};
@@ -668,6 +759,7 @@ function renderSpeakerCards(){
     });
   });
   EAQ.state.speakerProfiles = normalized;
+
   function renderOptions(list, selected){
     return list.map((opt)=>{
       const attrs = [
@@ -679,6 +771,7 @@ function renderSpeakerCards(){
       return `<option ${attrs.join(' ')}>${escapeHtml(opt.label)}</option>`;
     }).join('');
   }
+
   const cards = normalized.map((profile, idx)=>{
     const display = String(profile.display_label || `S${idx+1}`);
     const speakerId = String(profile.speaker_id || `spk${idx+1}`);
@@ -696,4 +789,39 @@ function renderSpeakerCards(){
     `</div>`;
   }).join('');
   container.innerHTML = cards;
+}
+
+function emotionCuesToVTT(cues){
+  const items = (cues||[]).map(c=> ({
+    start: Math.max(0, +c.start || 0),
+    end: Math.max(Math.max(0, +c.start || 0), +c.end || 0),
+    text: (c.label ?? c.text ?? '').trim()
+  }));
+  return VTT.stringify(items);
+}
+
+function rebuildEmotionState(){
+  const cues = (EAQ.state.emotionCues||[]).map(c=>{
+    const start = Math.max(0, +c.start || 0);
+    const end = Math.max(start, +c.end || 0);
+    const label = (c.label ?? c.text ?? '').trim();
+    return { start, end, label };
+  });
+  cues.sort((a,b)=> a.start - b.start || a.end - b.end);
+  EAQ.state.emotionCues = cues;
+  EAQ.state.emotionVTT = emotionCuesToVTT(cues);
+  const box = qs('emotionVTT'); if(box) box.value = EAQ.state.emotionVTT;
+}
+
+function parseEmotionVTT(text){
+  try{
+    const cues = VTT.parse(text||'');
+    return cues.map(c=>{
+      const start = Math.max(0, c.start||0);
+      const end = Math.max(start, Math.max(0, c.end||0));
+      return { start, end, label: (c.text||'').trim() };
+    });
+  }catch{
+    return [];
+  }
 }
