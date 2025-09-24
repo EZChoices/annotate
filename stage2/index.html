@@ -72,8 +72,33 @@
       <div class="controls">
         <button id="csNext" class="primary">Continue</button>
       </div>
+    </d
+      
+          <div class="screen hide" id="screen_speaker">
+      <h3>Speaker Attributes (per speaker)</h3>
+      <div id="speakerCards"></div>
+      <div class="controls">
+        <button id="speakerNext" class="primary">Continue</button>
+      </div>
     </div>
 
+    <div class="screen hide" id="screen_emotion">
+      <h3>Emotion (optional)</h3>
+      <div class="controls">
+        <button id="btnNeutral" class="secondary">Neutral</button>
+        <button id="btnHappy" class="secondary">Happy</button>
+        <button id="btnAngry" class="secondary">Angry</button>
+        <button id="btnSad" class="secondary">Sad</button>
+        <button id="btnExcited" class="secondary">Excited</button>
+        <button id="btnOtherEmo" class="secondary">Other</button>
+        <button id="emoUndo" class="secondary">Undo</button>
+      </div>
+      <label>Emotion Spans (WebVTT)</label>
+      <textarea id="emotionVTT" class="vtt" placeholder="WEBVTT\n\n00:00.000 --> 00:01.500\nneutral\n"></textarea>
+      <div class="controls">
+        <button id="emotionNext" class="primary">Continue</button>
+      </div>
+    </div>
     <div class="screen hide" id="screen_pii">
       <h3>Optional PII / Safety Events</h3>
       <div class="controls">
