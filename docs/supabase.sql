@@ -12,7 +12,9 @@
 -- Optional audio proxy col:
 --   audio_proxy_url text
 ALTER TABLE IF EXISTS public.keep
-  ADD COLUMN IF NOT EXISTS audio_proxy_url text;
+  ADD COLUMN IF NOT EXISTS audio_proxy_url text,
+  ADD COLUMN IF NOT EXISTS translation_vtt_url text,
+  ADD COLUMN IF NOT EXISTS code_switch_vtt_url text;
 
 -- Optional separate audio proxies table (if preferred over column on keep)
 CREATE TABLE IF NOT EXISTS public.audio_proxies (
