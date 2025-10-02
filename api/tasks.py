@@ -64,7 +64,7 @@ async def get_tasks(
 
     if BUNNY_KEEP_URL and SUPABASE_URL and SUPABASE_KEY:
         try:
-keep_endpoint"{SU = fPABASE_URL}/rest/v1/{KEEP_TABLE}?{DECISION_COL}=eq.{KEEP_VALUE}&select={FILE_COL}"
+           keep_endpoint = f"{SUPABASE_URL}/rest/v1/{KEEP_TABLE}?{DECISION_COL}=eq.{KEEP_VALUE}&select={FILE_COL}"
             if PREFILL_DIA:
                 keep_endpoint += f",{PREFILL_DIA}"
             if PREFILL_TR_VTT:
