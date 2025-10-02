@@ -59,12 +59,11 @@ async def get_tasks(
     annotator_id: str = "anonymous",
     limit: int = Query(10, ge=1, le=200),
 ):
-    # Build manifest from Supabase keep table, assigning items to annotator in stage2 assignments table
     items: List[Dict[str, Any]] = []
 
     if BUNNY_KEEP_URL and SUPABASE_URL and SUPABASE_KEY:
         try:
-        keep_endpoint = f"{SUPABASE_URL}/rest/v1/{KEEP_TABLE}?{DECISION_COL}=eq.{KEEP_VALUE}&select={FILE_COL}"
+            keep_endpoint = f"{SUPABASE_URL}/rest/v1/{KEEP_TABLE}?{DECISION_COL}=eq.{KEEP_VALUE}&select={FILE_COL}"
             if PREFILL_DIA:
                 keep_endpoint += f",{PREFILL_DIA}"
             if PREFILL_TR_VTT:
@@ -83,7 +82,6 @@ async def get_tasks(
             keep_resp.raise_for_status()
             rows = keep_resp.json()
 
-            # Fetch assigned files for stage2
             assign_endpoint = f"{SUPABASE_URL}/rest/v1/{ASSIGN2_TABLE}?select={ASSIGN2_FILE_COL},{ASSIGN2_USER_COL}"
             assigned_resp = requests.get(assign_endpoint, headers=headers, timeout=20)
             assigned_resp.raise_for_status()
@@ -94,30 +92,25 @@ async def get_tasks(
                 if len(chosen) >= limit:
                     break
                 fname = r.get(FILE_COL)
-                if not fname:
-                    continue
-                if fname in assigned:
+                if not fname or fname in assigned:
                     continue
                 chosen.append(r)
 
-            # If not enough unassigned, top up with random (may overlap) to fill the requested limit
             if len(chosen) < limit and rows:
                 pool = [r for r in rows if r not in chosen]
                 random.shuffle(pool)
                 chosen.extend(pool[: max(0, limit - len(chosen))])
 
-            # Optionally fetch gold items
             gold_rows: List[Dict[str, Any]] = []
             if GOLD_TABLE and GOLD_RATE > 0:
                 try:
-                    gold_ep = f"{SUPABASE_URL}/rest/v1/{GOLD_TABLE}?select={GOLD_FILE_COL}&limit={max(1,limit)}"
+                    gold_ep = f"{SUPABASE_URL}/rest/v1/{GOLD_TABLE}?select={GOLD_FILE_COL}&limit={max(1, limit)}"
                     gold_resp = requests.get(gold_ep, headers=headers, timeout=15)
                     if gold_resp.ok:
                         gold_rows = gold_resp.json()
                 except Exception:
                     gold_rows = []
 
-            # Record assignments for chosen
             if chosen:
                 assign_rows = [
                     {
@@ -130,14 +123,23 @@ async def get_tasks(
                 ]
                 try:
                     post_headers = dict(headers)
-                    post_headers.update({"Content-Type": "application/json", "Prefer": "return=representation"})
-                    requests.post(f"{SUPABASE_URL}/rest/v1/{ASSIGN2_TABLE}", headers=post_headers, json=assign_rows, timeout=20)
+                    post_headers.update(
+                        {
+                            "Content-Type": "application/json",
+                            "Prefer": "return=representation",
+                        }
+                    )
+                    requests.post(
+                        f"{SUPABASE_URL}/rest/v1/{ASSIGN2_TABLE}",
+                        headers=post_headers,
+                        json=assign_rows,
+                        timeout=20,
+                    )
                 except Exception as e:
                     print("[tasks] stage2 assignment insert failed:", repr(e))
 
             base = BUNNY_KEEP_URL.rstrip("/")
             for idx, r in enumerate(chosen):
-                # Gold injection: replace some items by probability
                 is_gold = False
                 if gold_rows and GOLD_RATE > 0:
                     try:
@@ -153,14 +155,21 @@ async def get_tasks(
                 if not fname:
                     continue
                 media_url = f"{base}/{str(fname).lstrip('/')}"
-                # Default to internal audio proxy so we control headers/caching
                 audio_url = f"/api/proxy_audio?file={quote(str(fname))}"
-                # If you insist on direct audio URL from table, uncomment below priority
                 if KEEP_AUDIO_COL and r.get(KEEP_AUDIO_COL):
                     audio_url = r.get(KEEP_AUDIO_COL)
                 elif AUDIO_PROXY_BASE:
                     name_no_ext = str(fname).rsplit('.', 1)[0]
-                    audio_url = AUDIO_PROXY_BASE.rstrip('/') + '/' + name_no_ext + (AUDIO_PROXY_EXT if AUDIO_PROXY_EXT.startswith('.') else ('.' + AUDIO_PROXY_EXT))
+                    audio_url = (
+                        AUDIO_PROXY_BASE.rstrip("/")
+                        + "/"
+                        + name_no_ext
+                        + (
+                            AUDIO_PROXY_EXT
+                            if AUDIO_PROXY_EXT.startswith(".")
+                            else ("." + AUDIO_PROXY_EXT)
+                        )
+                    )
                 items.append(
                     {
                         "asset_id": fname,
@@ -187,12 +196,15 @@ async def get_tasks(
             print("[tasks] Supabase keep fetch failed:", repr(e))
 
     if not items:
-        # Local fallback: minimal sample
         media_url = "/public/sample.mp4"
         items = [
             {
                 "asset_id": "sample-001",
-                "media": {"audio_proxy_url": media_url, "video_hls_url": None, "poster_url": None},
+                "media": {
+                    "audio_proxy_url": media_url,
+                    "video_hls_url": None,
+                    "poster_url": None,
+                },
                 "prefill": {
                     "diarization_rttm_url": None,
                     "transcript_vtt_url": None,
@@ -208,4 +220,7 @@ async def get_tasks(
         ]
 
     manifest: Dict[str, Any] = {"annotator_id": annotator_id, "stage": stage, "items": items}
-    return JSONResponse(manifest, headers={"Cache-Control": "no-store, no-cache, max-age=0, must-revalidate"})
+    return JSONResponse(
+        manifest,
+        headers={"Cache-Control": "no-store, no-cache, max-age=0, must-revalidate"},
+    )
