@@ -18,6 +18,8 @@ def allowed_host(url: str) -> bool:
         host = (urlparse(url).hostname or "").lower()
     except Exception:
         return False
+    if host == "dialect-data-videos.b-cdn.net":
+        return True
     allowed = set([h.strip().lower() for h in (ALLOWED_PROXY_HOSTS or "").split(",") if h.strip()])
     bunny_host = None
     if BUNNY_KEEP_URL:
