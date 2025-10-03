@@ -66,6 +66,10 @@ async function loadManifest(){
   const res = await fetch(url, {cache:'no-store'});
   if(!res.ok) throw new Error('tasks fetch');
   EAQ.state.manifest = await res.json();
+  const prefill = await loadPrefillForCurrent();
+  if(prefill){
+    await loadTranslationAndCodeSwitch(prefill);
+  }
 }
 
 function currentItem(){
@@ -186,7 +190,6 @@ function bindUI(){
     try{
       await loadManifest();
       loadAudio();
-      await loadPrefillForCurrent();
       prefetchNext();
       EAQ.state.startedAt = Date.now();
       show('screen_transcript');
@@ -299,7 +302,10 @@ function bindUI(){
     EAQ.state.speakerProfiles = [];
     const speakerCards = qs('speakerCards'); if(speakerCards) speakerCards.innerHTML = '';
     loadAudio();
-    await loadPrefillForCurrent();
+    const prefill = await loadPrefillForCurrent();
+    if(prefill){
+      await loadTranslationAndCodeSwitch(prefill);
+    }
     prefetchNext();
     EAQ.state.startedAt = Date.now();
     show('screen_transcript');
@@ -477,6 +483,12 @@ async function loadPrefillForCurrent(){
   const speakerContainer = qs('speakerCards');
   if(speakerContainer) speakerContainer.innerHTML = '<em>Loading speaker attributes...</em>';
   const prefill = it.prefill || {};
+  const translationBox = qs('translationVTT'); if(translationBox) translationBox.value = '';
+  const csBox = qs('codeSwitchVTT'); if(csBox) csBox.value = '';
+  EAQ.state.translationVTT = '';
+  EAQ.state.translationCues = [];
+  EAQ.state.codeSwitchVTT = '';
+  EAQ.state.codeSwitchCues = [];
 
   // Transcript
   if(prefill.transcript_vtt_url){
@@ -491,23 +503,6 @@ async function loadPrefillForCurrent(){
     qs('transcriptVTT').value = prefill.transcript_vtt;
     try{ EAQ.state.transcriptCues = VTT.normalize(VTT.parse(prefill.transcript_vtt)); }catch{}
   }
-
-  // Translation
-  if(prefill.translation_vtt_url){
-    try{
-      const t = await fetch(prefill.translation_vtt_url).then(r=> r.text());
-      EAQ.state.translationVTT = t;
-      qs('translationVTT').value = t;
-      EAQ.state.translationCues = VTT.normalize(VTT.parse(t));
-    } catch{}
-  } else if(typeof prefill.translation_vtt === 'string' && prefill.translation_vtt.trim()){
-    EAQ.state.translationVTT = prefill.translation_vtt;
-    qs('translationVTT').value = prefill.translation_vtt;
-    try{ EAQ.state.translationCues = VTT.normalize(VTT.parse(prefill.translation_vtt)); }catch{}
-  }
-
-  // Align counts
-  alignTranslationToTranscript();
 
   // Speaker profiles prefill (robust)
   const allowedGenders = new Set(['male','female','nonbinary','unknown']);
@@ -595,6 +590,113 @@ async function loadPrefillForCurrent(){
     EAQ.state.emotionVTT = '';
     EAQ.state.emotionCues = [];
     if(emotionBox) emotionBox.value = '';
+  }
+  return prefill;
+}
+
+function setPrefillNotice(message){
+  const screen = qs('screen_transcript');
+  if(!screen) return;
+  let notice = document.getElementById('prefillNotice');
+  if(!notice){
+    notice = document.createElement('div');
+    notice.id = 'prefillNotice';
+    notice.className = 'notice hide';
+    notice.style.marginTop = '.5rem';
+    const timeline = qs('timeline');
+    if(timeline && timeline.parentNode){
+      timeline.insertAdjacentElement('afterend', notice);
+    } else {
+      screen.insertBefore(notice, screen.firstChild || null);
+    }
+  }
+  if(message){
+    notice.textContent = message;
+    notice.classList.remove('hide');
+    notice.classList.add('error');
+  } else {
+    notice.textContent = '';
+    notice.classList.add('hide');
+    notice.classList.remove('error');
+  }
+}
+
+async function loadTranslationAndCodeSwitch(prefill){
+  const data = prefill || {};
+  const translationBox = qs('translationVTT');
+  const csBox = qs('codeSwitchVTT');
+  const errors = [];
+  setPrefillNotice('');
+
+  let translationText = '';
+  let translationFetchFailed = false;
+  if(typeof data.translation_vtt_url === 'string' && data.translation_vtt_url){
+    try{
+      const res = await fetch(data.translation_vtt_url, { cache: 'no-store' });
+      if(!res.ok) throw new Error(`translation fetch ${res.status}`);
+      translationText = await res.text();
+    }catch{
+      translationFetchFailed = true;
+      errors.push('translation');
+    }
+  } else if(typeof data.translation_vtt === 'string' && data.translation_vtt.trim()){
+    translationText = data.translation_vtt;
+  }
+
+  if(translationText){
+    EAQ.state.translationVTT = translationText;
+    if(translationBox) translationBox.value = translationText;
+    try{ EAQ.state.translationCues = VTT.normalize(VTT.parse(translationText)); }
+    catch{ EAQ.state.translationCues = []; }
+  } else if(translationFetchFailed){
+    const base = (EAQ.state.transcriptCues||[]).map(c=> ({ start:c.start, end:c.end, text:'' }));
+    EAQ.state.translationCues = base;
+    EAQ.state.translationVTT = VTT.stringify(base);
+    if(translationBox) translationBox.value = EAQ.state.translationVTT;
+  } else {
+    EAQ.state.translationCues = EAQ.state.translationCues || [];
+    EAQ.state.translationVTT = VTT.stringify(EAQ.state.translationCues);
+    if(translationBox) translationBox.value = EAQ.state.translationVTT;
+  }
+
+  let csText = '';
+  if(typeof data.code_switch_vtt_url === 'string' && data.code_switch_vtt_url){
+    try{
+      const res = await fetch(data.code_switch_vtt_url, { cache: 'no-store' });
+      if(!res.ok) throw new Error(`code-switch fetch ${res.status}`);
+      csText = await res.text();
+    }catch{
+      errors.push('code-switch');
+    }
+  } else if(typeof data.code_switch_vtt === 'string' && data.code_switch_vtt.trim()){
+    csText = data.code_switch_vtt;
+  }
+
+  if(csText){
+    EAQ.state.codeSwitchVTT = csText;
+    if(csBox) csBox.value = csText;
+    try{ EAQ.state.codeSwitchCues = VTT.normalize(VTT.parse(csText)); }
+    catch{ EAQ.state.codeSwitchCues = []; }
+  } else {
+    EAQ.state.codeSwitchCues = [];
+    EAQ.state.codeSwitchVTT = VTT.stringify([]);
+    if(csBox) csBox.value = EAQ.state.codeSwitchVTT;
+  }
+
+  alignTranslationToTranscript();
+  if(translationBox){ EAQ.state.translationVTT = translationBox.value; }
+  if(csBox){ EAQ.state.codeSwitchVTT = csBox.value; }
+
+  if(errors.length){
+    const unique = Array.from(new Set(errors));
+    let label = unique[0];
+    if(unique.length > 1){
+      const head = unique.slice(0, -1).join(', ');
+      label = `${head} and ${unique[unique.length-1]}`;
+    }
+    setPrefillNotice(`Failed to load ${label} prefill. Using empty placeholders.`);
+  } else {
+    setPrefillNotice('');
   }
 }
 
