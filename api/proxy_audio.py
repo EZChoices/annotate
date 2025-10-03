@@ -13,7 +13,9 @@ FROM_EXT = os.environ.get("AUDIO_PROXY_FROM_EXT", ".mp4")
 TO_EXT = os.environ.get("AUDIO_PROXY_EXT", ".opus")
 
 
-def allowed_host(url: str) -> bool:
+def allowed_host(url: str, *, from_src: bool = False) -> bool:
+    if from_src:
+        return True
     try:
         host = (urlparse(url).hostname or "").lower()
     except Exception:
@@ -116,7 +118,9 @@ async def proxy_audio(req: Request, src: str | None = None, file: str | None = N
         except Exception:
             pass
 
-    if not allowed_host(final_src):
+    from_src = bool(src)
+
+    if not allowed_host(final_src, from_src=from_src):
         return Response(status_code=403, content=b"host not allowed")
 
     return build_streaming_response(req, final_src)
