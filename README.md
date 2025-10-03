@@ -36,7 +36,7 @@ annotate/
     app.js                  # Flow, offline queue, syncing
 ```
 
-`meta-v2` serves as the metadata UI and is exposed at the root path.
+`stage2` serves as the deep annotation UI and is exposed at the root path. `meta-v2` remains available at `/meta-v2` for the legacy metadata experience.
 
 ## vercel.json
 
@@ -46,12 +46,19 @@ annotate/
   "builds": [
     { "src": "api/*.py", "use": "@vercel/python" },
     { "src": "meta-v2/index.html", "use": "@vercel/static" },
+    { "src": "stage2/**/*", "use": "@vercel/static" },
     { "src": "public/**/*", "use": "@vercel/static" }
   ],
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/$1.py" },
+    { "src": "^/stage2$", "dest": "/stage2/index.html" },
+    { "src": "^/stage2/$", "dest": "/stage2/index.html" },
+    { "src": "^/stage2/(.*)$", "dest": "/stage2/$1" },
+    { "src": "^/meta-v2$", "dest": "/meta-v2/index.html" },
+    { "src": "^/meta-v2/$", "dest": "/meta-v2/index.html" },
+    { "src": "^/meta-v2/(.*)$", "dest": "/meta-v2/$1" },
     { "src": "/public/(.*)", "dest": "/public/$1" },
-    { "src": "/(.*)", "dest": "/meta-v2/index.html" }
+    { "src": "/(.*)", "dest": "/stage2/index.html" }
   ]
 }
 ```
