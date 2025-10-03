@@ -8,7 +8,9 @@
   ],
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/$1.py" },
-    { "src": "/stage2(.*)", "dest": "/stage2/index.html" },
+    { "src": "^/stage2$", "dest": "/stage2/index.html" },
+    { "src": "^/stage2/$", "dest": "/stage2/index.html" },
+    { "src": "^/stage2/(.*)$", "dest": "/stage2/$1" },
     { "src": "/public/(.*)", "dest": "/public/$1" },
     { "src": "/(.*)", "dest": "/meta-v2/index.html" }
   ]
