@@ -36,19 +36,34 @@ def allowed_host(url: str) -> bool:
 @app.get("/api/proxy_audio")
 async def proxy_audio(req: Request, src: str | None = None, file: str | None = None):
     # Build upstream URL
+    fallback_src = None
     if not src and file:
         base = (BUNNY_KEEP_URL or "").rstrip("/")
         from_ext = FROM_EXT if FROM_EXT.startswith(".") else f".{FROM_EXT}"
         to_ext = TO_EXT if TO_EXT.startswith(".") else f".{TO_EXT}"
-        remote_path = file
-        if remote_path.endswith(from_ext):
-            remote_path = remote_path[: -len(from_ext)] + to_ext
-        src = f"{base}/{remote_path.lstrip('/')}"
+        remote_path = file.lstrip("/")
+        remote_path_converted = remote_path
+        if remote_path_converted.endswith(from_ext):
+            remote_path_converted = remote_path_converted[: -len(from_ext)] + to_ext
+            fallback_src = f"{base}/{remote_path}"
+        src = f"{base}/{remote_path_converted}"
 
-    if not src:
+    final_src = src
+
+    if fallback_src and src:
+        try:
+            head_resp = requests.head(src, timeout=10)
+            if 400 <= head_resp.status_code < 500:
+                final_src = fallback_src
+        except Exception:
+            pass
+    elif not src:
+        final_src = None
+
+    if not final_src:
         return Response(status_code=400, content=b"missing src or file")
 
-    if not allowed_host(src):
+    if not allowed_host(final_src):
         return Response(status_code=403, content=b"host not allowed")
 
     # Forward Range header if present
@@ -57,13 +72,15 @@ async def proxy_audio(req: Request, src: str | None = None, file: str | None = N
         headers["Range"] = req.headers["range"]
 
     try:
-        upstream = requests.get(src, headers=headers, stream=True, timeout=30)
+        upstream = requests.get(final_src, headers=headers, stream=True, timeout=30)
     except Exception:
         return Response(status_code=502, content=b"upstream error")
 
     status = upstream.status_code
     # Default content-type for opus
-    content_type = upstream.headers.get("content-type") or ("audio/ogg" if src.lower().endswith(".opus") else "application/octet-stream")
+    content_type = upstream.headers.get("content-type") or (
+        "audio/ogg" if final_src.lower().endswith(".opus") else "application/octet-stream"
+    )
     content_length = upstream.headers.get("content-length")
     content_range = upstream.headers.get("content-range")
 
