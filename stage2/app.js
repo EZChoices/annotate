@@ -55,6 +55,21 @@ function escapeHtml(str){
   })[s]);
 }
 
+async function fetchWithProxy(url){
+  if(!url) return null;
+  const options = { cache: 'no-store' };
+  try{
+    const res = await fetch(url, options);
+    if(res && res.ok) return res;
+  }catch{}
+  try{
+    const fallback = `/api/proxy_audio?src=${encodeURIComponent(url)}`;
+    const res = await fetch(fallback, options);
+    if(res && res.ok) return res;
+  }catch{}
+  return null;
+}
+
 function show(id){
   ['screen_welcome','screen_transcript','screen_translation','screen_codeswitch','screen_speaker','screen_emotion','screen_pii','screen_diar','screen_review']
     .forEach(x=> qs(x).classList.toggle('hide', x!==id));
@@ -514,10 +529,13 @@ async function loadPrefillForCurrent(){
   // Transcript
   if(prefill.transcript_vtt_url){
     try{
-      const t = await fetch(prefill.transcript_vtt_url).then(r=> r.text());
-      EAQ.state.transcriptVTT = t;
-      qs('transcriptVTT').value = t;
-      EAQ.state.transcriptCues = VTT.normalize(VTT.parse(t));
+      let vttText = '';
+      const res = await fetchWithProxy(prefill.transcript_vtt_url);
+      if(res) vttText = await res.text();
+      EAQ.state.transcriptVTT = vttText;
+      qs('transcriptVTT').value = vttText;
+      if(vttText.trim()){ EAQ.state.transcriptCues = VTT.normalize(VTT.parse(vttText)); }
+      else { EAQ.state.transcriptCues = []; }
     } catch{}
   } else if(typeof prefill.transcript_vtt === 'string' && prefill.transcript_vtt.trim()){
     EAQ.state.transcriptVTT = prefill.transcript_vtt;
@@ -654,9 +672,13 @@ async function loadTranslationAndCodeSwitch(prefill){
   let translationFetchFailed = false;
   if(typeof data.translation_vtt_url === 'string' && data.translation_vtt_url){
     try{
-      const res = await fetch(data.translation_vtt_url, { cache: 'no-store' });
-      if(!res.ok) throw new Error(`translation fetch ${res.status}`);
-      translationText = await res.text();
+      const res = await fetchWithProxy(data.translation_vtt_url);
+      if(res){
+        translationText = await res.text();
+      } else {
+        translationFetchFailed = true;
+        errors.push('translation');
+      }
     }catch{
       translationFetchFailed = true;
       errors.push('translation');
@@ -684,9 +706,12 @@ async function loadTranslationAndCodeSwitch(prefill){
   let csText = '';
   if(typeof data.code_switch_vtt_url === 'string' && data.code_switch_vtt_url){
     try{
-      const res = await fetch(data.code_switch_vtt_url, { cache: 'no-store' });
-      if(!res.ok) throw new Error(`code-switch fetch ${res.status}`);
-      csText = await res.text();
+      const res = await fetchWithProxy(data.code_switch_vtt_url);
+      if(res){
+        csText = await res.text();
+      } else {
+        errors.push('code-switch');
+      }
     }catch{
       errors.push('code-switch');
     }
