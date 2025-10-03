@@ -11,7 +11,10 @@
     { "src": "^/stage2$", "dest": "/stage2/index.html" },
     { "src": "^/stage2/$", "dest": "/stage2/index.html" },
     { "src": "^/stage2/(.*)$", "dest": "/stage2/$1" },
+    { "src": "^/meta-v2$", "dest": "/meta-v2/index.html" },
+    { "src": "^/meta-v2/$", "dest": "/meta-v2/index.html" },
+    { "src": "^/meta-v2/(.*)$", "dest": "/meta-v2/$1" },
     { "src": "/public/(.*)", "dest": "/public/$1" },
-    { "src": "/(.*)", "dest": "/meta-v2/index.html" }
+    { "src": "/(.*)", "dest": "/stage2/index.html" }
   ]
 }

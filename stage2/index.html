@@ -154,9 +154,9 @@
       let id = 'anonymous';
       try { id = localStorage.getItem(annotKey) || 'anonymous'; } catch{}
       if(new URLSearchParams(location.search).get('links')==='0') return;
-      c.innerHTML = `Quick Links: 
-        <a href="${base}/">Meta V2</a> · 
-        <a href="${base}/stage2/index.html">Stage 2</a> ·
+      c.innerHTML = `Quick Links:
+        <a href="${base}/meta-v2/index.html">Meta V2</a> ·
+        <a href="${base}/">Stage 2</a> ·
         <a href="${base}/api/tasks?stage=2&annotator_id=${encodeURIComponent(id)}&limit=5" target="_blank">Tasks API</a> · 
         <a href="${base}/api/clip?annotator=${encodeURIComponent(id)}" target="_blank">Clip API</a> · 
         <a href="${base}/api/debug?annotator=${encodeURIComponent(id)}" target="_blank">Debug</a>`;
