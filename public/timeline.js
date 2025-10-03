@@ -27,7 +27,7 @@ const Timeline = (function(){
     function paintOverlay(list, cls){
       (list||[]).forEach(o=>{
         const seg = document.createElement('div');
-        seg.className = `tl-seg ${cls}`;
+        seg.className = `tl-seg ${cls} tl-${cls}`;
         seg.style.left = pct(o.start);
         seg.style.width = `calc(${pct(o.end)} - ${pct(o.start)})`;
         seg.style.background = cls === 'cs' ? 'rgba(43,124,255,0.25)' : 'rgba(230,140,30,0.25)';
