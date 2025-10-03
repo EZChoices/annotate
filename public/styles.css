@@ -63,8 +63,11 @@ button{ -webkit-tap-highlight-color:transparent }
 /* Timeline */
 .tl{ position:relative; height:32px; background:var(--card); border:1px solid var(--border); border-radius:6px; overflow:hidden }
 .tl-seg{ position:absolute; top:0; bottom:0; background:rgba(43,124,255,0.18); border-left:1px solid rgba(43,124,255,0.45); border-right:1px solid rgba(43,124,255,0.45) }
-.tl-seg.tl-cs,.tl-seg.cs,.tl-cs{ background:rgba(43,124,255,0.28); border-color:rgba(43,124,255,0.6); pointer-events:none }
-.tl-seg.tl-evt,.tl-seg.evt,.tl-evt{ background:rgba(230,140,30,0.32); border-color:rgba(230,140,30,0.65); pointer-events:none }
+.tl-seg.tl-cs,.tl-seg.cs,.tl-cs,.timeline-overlay-cs{ background:rgba(43,124,255,0.28); border-color:rgba(43,124,255,0.6); pointer-events:none }
+.tl-seg.tl-evt,.tl-seg.evt,.tl-evt,.timeline-overlay-evt{ background:rgba(230,140,30,0.32); border-color:rgba(230,140,30,0.65); pointer-events:none }
+.timeline-overlay,.timeline-overlay-cs,.timeline-overlay-evt{ position:absolute; top:0; bottom:0; border-left:1px solid currentColor; border-right:1px solid currentColor; opacity:1 }
+.timeline-overlay-cs{ color:rgba(43,124,255,0.6) }
+.timeline-overlay-evt{ color:rgba(230,140,30,0.65) }
 .tl-handle{ position:absolute; right:-6px; top:0; bottom:0; width:12px; cursor:col-resize; background:rgba(43,124,255,0.3) }
 /* Enhancements for wider screens */
 @media (min-width:600px){

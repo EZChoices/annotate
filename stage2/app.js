@@ -66,10 +66,7 @@ async function loadManifest(){
   const res = await fetch(url, {cache:'no-store'});
   if(!res.ok) throw new Error('tasks fetch');
   EAQ.state.manifest = await res.json();
-  const prefill = await loadPrefillForCurrent();
-  if(prefill){
-    await loadTranslationAndCodeSwitch(prefill);
-  }
+  return EAQ.state.manifest;
 }
 
 function currentItem(){
@@ -114,6 +111,27 @@ function basicValidation(){
   if(!/^WEBVTT/m.test(EAQ.state.translationVTT)) errs.push('Translation VTT missing WEBVTT');
   if(EAQ.state.codeSwitchVTT.trim() && !/^WEBVTT/m.test(EAQ.state.codeSwitchVTT)) errs.push('Code-switch VTT missing WEBVTT');
   return errs;
+}
+
+function refreshTimeline(){
+  if(typeof Timeline === 'undefined' || typeof Timeline.update !== 'function'){ return; }
+  const audioEl = qs('audio');
+  let duration = 0;
+  if(audioEl && isFinite(audioEl.duration) && audioEl.duration > 0){
+    duration = audioEl.duration;
+  } else {
+    const item = currentItem();
+    if(item && item.media && isFinite(+item.media.duration_sec)){
+      duration = +item.media.duration_sec;
+    } else {
+      const cues = EAQ.state.transcriptCues || [];
+      duration = cues.reduce((max, cue)=> Math.max(max, +cue.end || 0), 0);
+    }
+  }
+  Timeline.update(duration, EAQ.state.transcriptCues || []);
+  if(typeof Timeline.setOverlays === 'function'){
+    Timeline.setOverlays(EAQ.state.codeSwitchCues || [], EAQ.state.eventsCues || []);
+  }
 }
 
 async function enqueueAndSync(){
@@ -189,10 +207,14 @@ function bindUI(){
     qs('downloadStatus').textContent = 'Loading tasks...';
     try{
       await loadManifest();
+      const prefill = await loadPrefillForCurrent();
+      if(prefill){ await loadTranslationAndCodeSwitch(prefill); }
       loadAudio();
       prefetchNext();
       EAQ.state.startedAt = Date.now();
       show('screen_transcript');
+      refreshTimeline();
+      qs('downloadStatus').textContent = 'Tasks loaded.';
     }catch{
       qs('downloadStatus').textContent = 'Failed to load tasks. Using offline queue.';
     }
@@ -301,14 +323,13 @@ function bindUI(){
     EAQ.state.emotionCues = [];
     EAQ.state.speakerProfiles = [];
     const speakerCards = qs('speakerCards'); if(speakerCards) speakerCards.innerHTML = '';
-    loadAudio();
     const prefill = await loadPrefillForCurrent();
-    if(prefill){
-      await loadTranslationAndCodeSwitch(prefill);
-    }
+    if(prefill){ await loadTranslationAndCodeSwitch(prefill); }
+    loadAudio();
     prefetchNext();
     EAQ.state.startedAt = Date.now();
     show('screen_transcript');
+    refreshTimeline();
   });
 }
 
@@ -591,6 +612,7 @@ async function loadPrefillForCurrent(){
     EAQ.state.emotionCues = [];
     if(emotionBox) emotionBox.value = '';
   }
+  refreshTimeline();
   return prefill;
 }
 
@@ -698,6 +720,7 @@ async function loadTranslationAndCodeSwitch(prefill){
   } else {
     setPrefillNotice('');
   }
+  refreshTimeline();
 }
 
 function alignTranslationToTranscript(){
