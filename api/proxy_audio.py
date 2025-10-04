@@ -5,6 +5,8 @@ import os
 import requests
 from requests.utils import requote_uri
 
+DEFAULT_UPSTREAM_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "*/*"}
+
 app = FastAPI()
 
 BUNNY_KEEP_URL = os.environ.get("BUNNY_KEEP_URL") or os.environ.get("BUNNY_BASE") or os.environ.get("BUNNY_PULL_BASE")
@@ -57,7 +59,7 @@ def build_bunny_url(path: str) -> tuple[str | None, str | None]:
 
 
 def build_streaming_response(req: Request, url: str) -> Response:
-    headers = {}
+    headers = dict(DEFAULT_UPSTREAM_HEADERS)
     if "range" in req.headers:
         headers["Range"] = req.headers["range"]
 
@@ -112,7 +114,7 @@ async def proxy_audio(req: Request, src: str | None = None, file: str | None = N
 
     if fallback_src and final_src:
         try:
-            head_resp = requests.head(final_src, timeout=10)
+            head_resp = requests.head(final_src, headers=dict(DEFAULT_UPSTREAM_HEADERS), timeout=10)
             if 400 <= head_resp.status_code < 500:
                 final_src = fallback_src
         except Exception:
