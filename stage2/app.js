@@ -29,14 +29,23 @@ const EAQ = {
     codeSwitchSummary: null,
     codeSwitchToastTimer: null,
     codeSwitchDrag: null,
-    eventsCues: [],
+    emotionSpans: [],
+    emotionHistory: [],
+    emotionFuture: [],
+    emotionActive: null,
+    emotionSelectedIndex: null,
+    emotionDrag: null,
+    safetyEvents: [],
+    safetyHistory: [],
+    safetyFuture: [],
+    safetySelectedIndex: null,
+    safetyDrag: null,
+    clipFlagged: false,
     diarSegments: [],
     diarSelectedIndex: null,
     diarColorMap: {},
     diarizationSourcePath: null,
     speakerProfiles: [],
-    emotionVTT: '',
-    emotionCues: [],
     startedAt: 0,
     lintReport: { errors: [], warnings: [] }
   }
@@ -84,6 +93,46 @@ const CODE_SWITCH_LANGS = {
 };
 
 const CODE_SWITCH_MIN_DURATION = EAQ.SPEC.csMinSec || 0.4;
+
+const EMOTION_OPTIONS = [
+  { id: 'neutral', label: 'Neutral', color: '#6b7280', background: 'rgba(107,114,128,0.35)' },
+  { id: 'happy', label: 'Happy', color: '#f59e0b', background: 'rgba(245,158,11,0.38)' },
+  { id: 'angry', label: 'Angry', color: '#ef4444', background: 'rgba(239,68,68,0.4)' },
+  { id: 'sad', label: 'Sad', color: '#3b82f6', background: 'rgba(59,130,246,0.35)' },
+  { id: 'excited', label: 'Excited', color: '#8b5cf6', background: 'rgba(139,92,246,0.4)' },
+  { id: 'other', label: 'Other', color: '#10b981', background: 'rgba(16,185,129,0.38)' }
+];
+
+const EMOTION_LABEL_SET = new Set(EMOTION_OPTIONS.map(opt=> opt.id));
+const EMOTION_ALIASES = {
+  anger: 'angry',
+  mad: 'angry',
+  upset: 'angry',
+  happiness: 'happy',
+  joy: 'happy',
+  joyful: 'happy',
+  excite: 'excited',
+  excited: 'excited',
+  sadness: 'sad',
+  upset_sad: 'sad',
+  neutral: 'neutral'
+};
+
+const SAFETY_EVENT_TYPES = [
+  { id: 'pii_name', label: 'PII: Name', color: '#f97316' },
+  { id: 'pii_phone', label: 'PII: Phone', color: '#ef4444' },
+  { id: 'minor_face', label: 'Minor Face', color: '#0ea5e9' },
+  { id: 'political', label: 'Political', color: '#a855f7' },
+  { id: 'religious', label: 'Religious', color: '#22c55e' },
+  { id: 'explicit', label: 'Explicit', color: '#dc2626' }
+];
+
+const SAFETY_TYPE_SET = new Set(SAFETY_EVENT_TYPES.map(opt=> opt.id));
+
+const EMOTION_MIN_DURATION = EAQ.SPEC.emotionMinSec || 1.5;
+const EMOTION_DRAG_MAX_DELTA = 0.2;
+const SAFETY_DEFAULT_DURATION = 0.5;
+const SAFETY_DRAG_MAX_DELTA = 0.5;
 
 const MANIFEST_STORAGE_KEY = 'ea_stage2_manifest';
 
@@ -650,7 +699,7 @@ async function fetchWithProxy(url){
 function relocateErrorsList(activeScreenId){
   const el = qs('errorsList');
   if(!el) return;
-  const allowed = new Set(['screen_translation','screen_codeswitch','screen_review']);
+  const allowed = new Set(['screen_translation','screen_codeswitch','screen_emotionSafety','screen_review']);
   if(!allowed.has(activeScreenId)){
     el.classList.add('hide');
     return;
@@ -697,7 +746,7 @@ function pushIssue(list, message){
 }
 
 function show(id){
-  ['screen_welcome','screen_transcript','screen_translation','screen_codeswitch','screen_emotion','screen_pii','screen_diar','screen_review']
+  ['screen_welcome','screen_transcript','screen_translation','screen_codeswitch','screen_emotionSafety','screen_diar','screen_review']
     .forEach(x=> qs(x).classList.toggle('hide', x!==id));
   relocateErrorsList(id);
 }
@@ -797,7 +846,8 @@ function loadAudio(){
     else { a.addEventListener('loadedmetadata', attachTl, { once:true }); }
     // paint overlays from CS and Events
     setInterval(()=>{
-      Timeline.setOverlays(EAQ.state.codeSwitchCues||[], EAQ.state.eventsCues||[]);
+      const safetyOverlay = (EAQ.state.safetyEvents||[]).map(evt=>({ start: Math.max(0, +evt.startSec||0), end: Math.max(0, +evt.endSec||0) }));
+      Timeline.setOverlays(EAQ.state.codeSwitchCues||[], safetyOverlay);
     }, 600);
   }
 }
@@ -940,6 +990,36 @@ function validateAnnotation(){
     }
   }
 
+  const emotionSpans = cloneEmotionSpans(EAQ.state.emotionSpans || []);
+  emotionSpans.forEach((span, idx)=>{
+    const duration = Math.max(0, span.endSec - span.startSec);
+    if(duration < EMOTION_MIN_DURATION - 0.01){
+      pushIssue(report.errors, `Emotion span #${idx+1} is ${duration.toFixed(2)}s (< ${EMOTION_MIN_DURATION.toFixed(2)}s).`);
+    } else if(duration < EMOTION_MIN_DURATION){
+      pushIssue(report.warnings, `Emotion span #${idx+1} is ${duration.toFixed(2)}s (min ${EMOTION_MIN_DURATION.toFixed(2)}s).`);
+    }
+    if(idx>0){
+      const prev = emotionSpans[idx-1];
+      if(span.startSec < prev.endSec - 0.01){
+        pushIssue(report.warnings, `Emotion span #${idx+1} overlaps span #${idx}. Adjust to remove overlap.`);
+      }
+    }
+  });
+
+  const safetyEvents = cloneSafetyEvents(EAQ.state.safetyEvents || []);
+  safetyEvents.forEach((evt, idx)=>{
+    const duration = Math.max(0, evt.endSec - evt.startSec);
+    if(duration <= 0){
+      pushIssue(report.errors, `Safety event #${idx+1} has invalid timing.`);
+    }
+    if(idx>0){
+      const prev = safetyEvents[idx-1];
+      if(evt.startSec < prev.endSec - 0.01){
+        pushIssue(report.errors, `Safety event #${idx+1} overlaps event #${idx}.`);
+      }
+    }
+  });
+
   return report;
 }
 
@@ -974,7 +1054,8 @@ function refreshTimeline(){
   const duration = estimateMediaDuration();
   Timeline.update(duration, EAQ.state.transcriptCues || []);
   if(typeof Timeline.setOverlays === 'function'){
-    Timeline.setOverlays(EAQ.state.codeSwitchCues || [], EAQ.state.eventsCues || []);
+    const safetyOverlay = (EAQ.state.safetyEvents||[]).map(evt=>({ start: Math.max(0, +evt.startSec||0), end: Math.max(0, +evt.endSec||0) }));
+    Timeline.setOverlays(EAQ.state.codeSwitchCues || [], safetyOverlay);
   }
   renderDiarTimeline();
 }
@@ -993,29 +1074,31 @@ async function enqueueAndSync(lintReport){
   EAQ.state.codeSwitchSummary = csExports.summary;
   const csJsonText = JSON.stringify(csExports.summary);
   setCodeSwitchSpans(csSnapshot, { pushHistory: false });
+  const files = {
+    diarization_rttm: rttmStringify(EAQ.state.diarSegments||[], it.asset_id || 'rec'),
+    diarization_rttm_source: EAQ.state.diarizationSourcePath || null,
+    transcript_vtt: EAQ.state.transcriptVTT,
+    transcript_ctm: null,
+    translation_vtt: EAQ.state.translationVTT,
+    code_switch_vtt: EAQ.state.codeSwitchVTT || '',
+    code_switch_spans_json: csJsonText,
+    speaker_profiles_json: (function(){ try{ return JSON.stringify(EAQ.state.speakerProfiles||[]); }catch{ return '[]'; } })()
+  };
+  const emotionVtt = buildEmotionVTT(EAQ.state.emotionSpans || []);
+  const eventsVtt = buildSafetyEventsVTT(EAQ.state.safetyEvents || []);
+  if(emotionVtt){ files.emotion_vtt = emotionVtt; }
+  if(eventsVtt){ files.events_vtt = eventsVtt; }
+
   const payload = {
     asset_id: it.asset_id,
-    files: {
-      diarization_rttm: rttmStringify(EAQ.state.diarSegments||[], it.asset_id || 'rec'),
-      diarization_rttm_source: EAQ.state.diarizationSourcePath || null,
-      transcript_vtt: EAQ.state.transcriptVTT,
-      transcript_ctm: null,
-      translation_vtt: EAQ.state.translationVTT,
-      code_switch_vtt: EAQ.state.codeSwitchVTT || '',
-      code_switch_spans_json: csJsonText,
-      events_vtt: (function(){
-        const ev = qs('eventsVTT');
-        if(ev && ev.value.trim()) return ev.value;
-        return (EAQ.state.eventsCues||[]).length ? VTT.stringify(EAQ.state.eventsCues) : '';
-      })(),
-      emotion_vtt: EAQ.state.emotionVTT || '',
-      speaker_profiles_json: (function(){ try{ return JSON.stringify(EAQ.state.speakerProfiles||[]); }catch{ return '[]'; } })()
-    },
+    files,
     summary: {
       contains_code_switch: csSnapshot.length > 0,
       code_switch_languages: csExports.summary.languages || [],
       cs_total_duration_sec: csExports.summary.total_duration_sec,
-      non_arabic_token_ratio_est: csExports.summary.non_arabic_duration_ratio
+      non_arabic_token_ratio_est: csExports.summary.non_arabic_duration_ratio,
+      events_present: (EAQ.state.safetyEvents||[]).length > 0,
+      clipFlagged: !!EAQ.state.clipFlagged
     },
     qa: {
       annotator_id: EAQ.state.annotator,
@@ -1144,46 +1227,19 @@ function bindUI(){
     });
   }
 
-  const emotionNext = qs('emotionNext');
-  if(emotionNext){
-    emotionNext.addEventListener('click', ()=>{
-      const box = qs('emotionVTT');
-      const text = box ? box.value : '';
-      EAQ.state.emotionVTT = text || '';
-      if(text && text.trim()){
-        try{ EAQ.state.emotionCues = VTT.normalize(VTT.parse(text)); }
-        catch{ EAQ.state.emotionCues = []; }
-      } else if((EAQ.state.emotionCues||[]).length){
-        EAQ.state.emotionVTT = VTT.stringify(VTT.normalize(EAQ.state.emotionCues));
-        if(box) box.value = EAQ.state.emotionVTT;
-      } else {
-        EAQ.state.emotionCues = [];
-      }
-      show('screen_pii');
+  setupEmotionSafetyControls();
+
+  const emotionSafetyNext = qs('emotionSafetyNext');
+  if(emotionSafetyNext){
+    emotionSafetyNext.addEventListener('click', ()=>{
+      cancelEmotionCapture();
+      cancelEmotionDrag();
+      cancelSafetyDrag();
+      renderEmotionSafetyTimeline();
+      show('screen_diar');
+      runValidationAndDisplay('screen_diar');
     });
   }
-
-  // PII/events buttons
-  const evtBtns = document.querySelectorAll('[data-evt]');
-  const openEvt = new Map();
-  function now(){ const a=qs('audio'); return a && a.currentTime || 0; }
-  evtBtns.forEach(b=>{
-    b.addEventListener('click', ()=>{
-      const k = b.getAttribute('data-evt');
-      if(!openEvt.has(k)){
-        openEvt.set(k, now());
-        b.classList.add('selected');
-      } else {
-        const s = openEvt.get(k); openEvt.delete(k);
-        b.classList.remove('selected');
-        EAQ.state.eventsCues.push({ start:s, end:now(), text:k });
-        EAQ.state.eventsCues = VTT.normalize(EAQ.state.eventsCues);
-        const box = qs('eventsVTT'); if(box) box.value = VTT.stringify(EAQ.state.eventsCues);
-      }
-    });
-  });
-
-  const piiNext = qs('piiNext'); if(piiNext) piiNext.addEventListener('click', ()=>{ show('screen_diar'); });
   const diarNext = qs('diarNext'); if(diarNext) diarNext.addEventListener('click', ()=>{ runValidationAndDisplay('screen_review'); show('screen_review'); });
 
   qs('submitBtn').addEventListener('click', async ()=>{
@@ -1212,10 +1268,16 @@ function bindUI(){
     qs('transcriptVTT').value = '';
     qs('translationVTT').value = '';
     qs('codeSwitchVTT').value = '';
-    const ev = qs('eventsVTT'); if(ev) ev.value = '';
-    const emoBox = qs('emotionVTT'); if(emoBox) emoBox.value = '';
-    EAQ.state.emotionVTT = '';
-    EAQ.state.emotionCues = [];
+    EAQ.state.emotionSpans = [];
+    EAQ.state.emotionHistory = [];
+    EAQ.state.emotionFuture = [];
+    EAQ.state.emotionSelectedIndex = null;
+    EAQ.state.safetyEvents = [];
+    EAQ.state.safetyHistory = [];
+    EAQ.state.safetyFuture = [];
+    EAQ.state.safetySelectedIndex = null;
+    EAQ.state.clipFlagged = false;
+    renderEmotionSafetyTimeline();
     EAQ.state.speakerProfiles = [];
     const speakerCards = qs('speakerCards'); if(speakerCards) speakerCards.innerHTML = '';
     const prefill = await loadPrefillForCurrent();
@@ -1343,55 +1405,6 @@ window.addEventListener('load', ()=>{
   const csUndo = qs('csUndo'); if(csUndo) csUndo.addEventListener('click', ()=> undoCodeSwitch());
   const csRedo = qs('csRedo'); if(csRedo) csRedo.addEventListener('click', ()=> redoCodeSwitch());
 
-  // Emotion quick-mark buttons
-  let emoStart = null, emoLabel = null;
-  function startEmotion(label){ if(!a) return; emoLabel = label; emoStart = a.currentTime; }
-  function endEmotion(){
-    if(!a || emoStart==null || !emoLabel) return;
-    const end = a.currentTime;
-    const min = EAQ.SPEC.emotionMinSec || 1.5;
-    if(end - emoStart >= min){
-      if(!Array.isArray(EAQ.state.emotionCues)) EAQ.state.emotionCues = [];
-      EAQ.state.emotionCues.push({ start: emoStart, end, text: emoLabel });
-      EAQ.state.emotionCues = VTT.normalize(EAQ.state.emotionCues);
-      const out = VTT.stringify(EAQ.state.emotionCues);
-      EAQ.state.emotionVTT = out;
-      const box = qs('emotionVTT'); if(box) box.value = out;
-    }
-    emoStart = null; emoLabel = null;
-  }
-  const emotionButtons = [
-    ['btnNeutral','neutral'],
-    ['btnHappy','happy'],
-    ['btnAngry','angry'],
-    ['btnSad','sad'],
-    ['btnExcited','excited'],
-    ['btnOtherEmo','other']
-  ];
-  emotionButtons.forEach(([id,label])=>{
-    const btn = qs(id);
-    if(!btn) return;
-    const start = ()=> startEmotion(label);
-    const end = ()=> endEmotion();
-    btn.addEventListener('mousedown', start);
-    btn.addEventListener('touchstart', start);
-    btn.addEventListener('mouseup', end);
-    btn.addEventListener('mouseleave', ()=>{ if(emoLabel===label) endEmotion(); });
-    btn.addEventListener('touchend', end);
-    btn.addEventListener('touchcancel', end);
-  });
-  const emoUndo = qs('emoUndo');
-  if(emoUndo){
-    emoUndo.addEventListener('click', ()=>{
-      if(!Array.isArray(EAQ.state.emotionCues)) EAQ.state.emotionCues = [];
-      EAQ.state.emotionCues.pop();
-      EAQ.state.emotionCues = VTT.normalize(EAQ.state.emotionCues);
-      const out = EAQ.state.emotionCues.length ? VTT.stringify(EAQ.state.emotionCues) : '';
-      EAQ.state.emotionVTT = out;
-      const box = qs('emotionVTT'); if(box) box.value = out;
-    });
-  }
-
   const wave = qs('wave');
   if(wave){
     function seekFromEvent(ev){
@@ -1424,9 +1437,18 @@ window.addEventListener('load', ()=>{
 // Prefill loader and alignment helpers
 async function loadPrefillForCurrent(){
   const it = currentItem(); if(!it) return;
-  const emotionBox = qs('emotionVTT'); if(emotionBox) emotionBox.value = '';
-  EAQ.state.emotionVTT = '';
-  EAQ.state.emotionCues = [];
+  EAQ.state.emotionSpans = [];
+  EAQ.state.emotionHistory = [];
+  EAQ.state.emotionFuture = [];
+  EAQ.state.emotionSelectedIndex = null;
+  EAQ.state.emotionActive = null;
+  EAQ.state.safetyEvents = [];
+  EAQ.state.safetyHistory = [];
+  EAQ.state.safetyFuture = [];
+  EAQ.state.safetySelectedIndex = null;
+  EAQ.state.safetyDrag = null;
+  EAQ.state.clipFlagged = false;
+  renderEmotionSafetyTimeline();
   EAQ.state.speakerProfiles = [];
   EAQ.state.lintReport = { errors: [], warnings: [] };
   updateErrorsList(null);
@@ -1561,18 +1583,30 @@ async function loadPrefillForCurrent(){
   } else if(typeof prefill.emotion_vtt === 'string'){
     emotionText = prefill.emotion_vtt;
   }
-  if(typeof emotionText === 'string'){
-    EAQ.state.emotionVTT = emotionText;
-    if(emotionBox) emotionBox.value = emotionText;
-    if(emotionText.trim()){
-      try{ EAQ.state.emotionCues = VTT.normalize(VTT.parse(emotionText)); }
-      catch{ EAQ.state.emotionCues = []; }
-    }
+  if(typeof emotionText === 'string' && emotionText.trim()){
+    commitEmotionSpans(parseEmotionVTT(emotionText), { replaceHistory: true });
   } else {
-    EAQ.state.emotionVTT = '';
-    EAQ.state.emotionCues = [];
-    if(emotionBox) emotionBox.value = '';
+    commitEmotionSpans([], { replaceHistory: true });
   }
+
+  // Safety / events prefill
+  let eventsText = null;
+  if(prefill.events_vtt_url){
+    try{ eventsText = await fetch(prefill.events_vtt_url).then(r=> r.text()); }
+    catch{}
+  } else if(typeof prefill.events_vtt === 'string'){
+    eventsText = prefill.events_vtt;
+  }
+  if(typeof eventsText === 'string' && eventsText.trim()){
+    commitSafetyEvents(parseSafetyEventsVTT(eventsText), { replaceHistory: true });
+  } else {
+    commitSafetyEvents([], { replaceHistory: true });
+  }
+
+  const clipToggle = qs('clipFlagToggle');
+  const clipPrefill = prefill.clipFlagged === true || prefill.clip_flagged === true;
+  EAQ.state.clipFlagged = clipPrefill;
+  if(clipToggle){ clipToggle.checked = EAQ.state.clipFlagged; }
   refreshTimeline();
   return prefill;
 }
@@ -1999,7 +2033,8 @@ function setCodeSwitchSpans(spans, options){
   }
   renderCodeSwitchTimeline();
   if(typeof Timeline !== 'undefined' && typeof Timeline.setOverlays === 'function'){
-    Timeline.setOverlays(EAQ.state.codeSwitchCues || [], EAQ.state.eventsCues || []);
+    const safetyOverlay = (EAQ.state.safetyEvents||[]).map(evt=>({ start: Math.max(0, +evt.startSec||0), end: Math.max(0, +evt.endSec||0) }));
+    Timeline.setOverlays(EAQ.state.codeSwitchCues || [], safetyOverlay);
   }
 }
 
@@ -2666,37 +2701,721 @@ function syncSpeakerProfilesFromUI(options){
   return true;
 }
 
-function emotionCuesToVTT(cues){
-  const items = (cues||[]).map(c=> ({
-    start: Math.max(0, +c.start || 0),
-    end: Math.max(Math.max(0, +c.start || 0), +c.end || 0),
-    text: (c.label ?? c.text ?? '').trim()
-  }));
-  return VTT.stringify(items);
+function normalizeEmotionLabel(label){
+  const raw = String(label || '').trim().toLowerCase();
+  if(!raw){ return 'neutral'; }
+  if(EMOTION_LABEL_SET.has(raw)) return raw;
+  if(raw in EMOTION_ALIASES && EMOTION_LABEL_SET.has(EMOTION_ALIASES[raw])){
+    return EMOTION_ALIASES[raw];
+  }
+  if(raw.includes('happy')) return 'happy';
+  if(raw.includes('angry') || raw.includes('mad')) return 'angry';
+  if(raw.includes('sad')) return 'sad';
+  if(raw.includes('excite')) return 'excited';
+  if(raw.includes('neutral')) return 'neutral';
+  return 'other';
 }
 
-function rebuildEmotionState(){
-  const cues = (EAQ.state.emotionCues||[]).map(c=>{
-    const start = Math.max(0, +c.start || 0);
-    const end = Math.max(start, +c.end || 0);
-    const label = (c.label ?? c.text ?? '').trim();
-    return { start, end, label };
+function getEmotionOption(label){
+  const normalized = normalizeEmotionLabel(label);
+  return EMOTION_OPTIONS.find(opt=> opt.id === normalized) || EMOTION_OPTIONS[0];
+}
+
+function cloneEmotionSpans(spans){
+  return (Array.isArray(spans) ? spans : []).map(span=>{
+    const startCandidate = Number.isFinite(span.startSec) ? span.startSec : (Number.isFinite(span.start) ? span.start : 0);
+    const normStart = Math.max(0, startCandidate || 0);
+    const endCandidate = Number.isFinite(span.endSec) ? span.endSec : (Number.isFinite(span.end) ? span.end : normStart + EMOTION_MIN_DURATION);
+    const normEnd = Math.max(normStart, endCandidate);
+    return {
+      startSec: normStart,
+      endSec: normEnd,
+      label: normalizeEmotionLabel(span.label || span.text),
+      confidence: Number.isFinite(span.confidence) ? Math.max(0, Math.min(1, span.confidence)) : 0.9
+    };
+  }).filter(span=> span.endSec > span.startSec).sort((a,b)=> a.startSec - b.startSec || a.endSec - b.endSec);
+}
+
+function cloneSafetyEvents(events){
+  return (Array.isArray(events) ? events : []).map(evt=>{
+    const startCandidate = Number.isFinite(evt.startSec) ? evt.startSec : (Number.isFinite(evt.start) ? evt.start : 0);
+    const normStart = Math.max(0, startCandidate || 0);
+    const endCandidate = Number.isFinite(evt.endSec) ? evt.endSec : (Number.isFinite(evt.end) ? evt.end : normStart + SAFETY_DEFAULT_DURATION);
+    const duration = Math.max(0.05, endCandidate - normStart);
+    const type = normalizeSafetyType(evt.type || evt.label || evt.text);
+    return {
+      startSec: normStart,
+      endSec: normStart + duration,
+      type
+    };
+  }).filter(evt=> evt.endSec > evt.startSec).sort((a,b)=> a.startSec - b.startSec || a.endSec - b.endSec);
+}
+
+function normalizeSafetyType(type){
+  const raw = String(type || '').trim().toLowerCase();
+  if(SAFETY_TYPE_SET.has(raw)) return raw;
+  return 'pii_name';
+}
+
+function getSafetyOption(type){
+  const normalized = normalizeSafetyType(type);
+  return SAFETY_EVENT_TYPES.find(opt=> opt.id === normalized) || SAFETY_EVENT_TYPES[0];
+}
+
+function insertEmotionSpan(existingSpans, candidate){
+  const spans = cloneEmotionSpans(existingSpans);
+  const duration = Math.max(estimateMediaDuration() || 0, candidate.endSec || candidate.startSec || 0);
+  const label = normalizeEmotionLabel(candidate.label || candidate.text);
+  const confidence = Number.isFinite(candidate.confidence) ? Math.max(0, Math.min(1, candidate.confidence)) : 0.9;
+  const startCandidate = Number.isFinite(candidate.startSec) ? candidate.startSec : (Number.isFinite(candidate.start) ? candidate.start : 0);
+  const endCandidate = Number.isFinite(candidate.endSec) ? candidate.endSec : (Number.isFinite(candidate.end) ? candidate.end : (startCandidate + EMOTION_MIN_DURATION));
+  let start = Math.max(0, startCandidate || 0);
+  let end = Math.max(start + EMOTION_MIN_DURATION, endCandidate || start);
+  const totalDuration = duration > 0 ? duration : Math.max(end, start + EMOTION_MIN_DURATION);
+  if(end - start < EMOTION_MIN_DURATION){ end = start + EMOTION_MIN_DURATION; }
+  if(end > totalDuration){
+    end = totalDuration;
+    if(end - start < EMOTION_MIN_DURATION){
+      start = Math.max(0, end - EMOTION_MIN_DURATION);
+    }
+  }
+  const insertIndex = spans.findIndex(span=> span.startSec > start);
+  const idx = insertIndex === -1 ? spans.length : insertIndex;
+  const prev = spans[idx-1] || null;
+  const next = spans[idx] || null;
+  const windowStart = prev ? prev.endSec : 0;
+  const windowEnd = next ? next.startSec : totalDuration;
+  if(windowEnd - windowStart < EMOTION_MIN_DURATION - 0.001){
+    return null;
+  }
+  const maxStart = windowEnd - EMOTION_MIN_DURATION;
+  start = Math.min(Math.max(start, windowStart), maxStart);
+  end = Math.max(start + EMOTION_MIN_DURATION, Math.min(end, windowEnd));
+  if(end - start < EMOTION_MIN_DURATION - 0.001){
+    return null;
+  }
+  spans.splice(idx, 0, { startSec: start, endSec: end, label, confidence });
+  return { spans, index: idx };
+}
+
+function insertSafetyEvent(existingEvents, candidate){
+  const events = cloneSafetyEvents(existingEvents);
+  const startCandidate = Number.isFinite(candidate.startSec) ? candidate.startSec : (Number.isFinite(candidate.start) ? candidate.start : 0);
+  const durationCandidate = Number.isFinite(candidate.duration) ? candidate.duration : ((Number.isFinite(candidate.endSec) ? candidate.endSec : (Number.isFinite(candidate.end) ? candidate.end : startCandidate + SAFETY_DEFAULT_DURATION)) - startCandidate);
+  const duration = Math.max(0.05, durationCandidate || SAFETY_DEFAULT_DURATION);
+  let start = Math.max(0, startCandidate || 0);
+  const totalDuration = Math.max(estimateMediaDuration() || 0, start + duration);
+  const insertIndex = events.findIndex(evt=> evt.startSec > start);
+  const idx = insertIndex === -1 ? events.length : insertIndex;
+  const prev = events[idx-1] || null;
+  const next = events[idx] || null;
+  const windowStart = prev ? prev.endSec : 0;
+  const windowEnd = next ? next.startSec : totalDuration;
+  if(windowEnd - windowStart < duration - 0.001){
+    return null;
+  }
+  start = Math.min(Math.max(start, windowStart), windowEnd - duration);
+  const end = start + duration;
+  const type = normalizeSafetyType(candidate.type || candidate.label || candidate.text);
+  events.splice(idx, 0, { startSec: start, endSec: end, type });
+  return { events, index: idx };
+}
+
+function commitEmotionSpans(spans, options){
+  const opts = Object.assign({ pushHistory: true }, options||{});
+  const normalized = cloneEmotionSpans(spans);
+  if(opts.replaceHistory){
+    EAQ.state.emotionHistory = [];
+    EAQ.state.emotionFuture = [];
+  } else if(opts.pushHistory){
+    EAQ.state.emotionHistory.push(cloneEmotionSpans(EAQ.state.emotionSpans));
+    if(EAQ.state.emotionHistory.length > 100){ EAQ.state.emotionHistory.shift(); }
+    EAQ.state.emotionFuture = [];
+  }
+  EAQ.state.emotionSpans = normalized;
+  if(typeof opts.selectIndex === 'number'){
+    if(normalized.length === 0){ EAQ.state.emotionSelectedIndex = null; }
+    else { EAQ.state.emotionSelectedIndex = Math.max(0, Math.min(normalized.length-1, opts.selectIndex)); }
+  } else if(normalized.length === 0){
+    EAQ.state.emotionSelectedIndex = null;
+  } else if(EAQ.state.emotionSelectedIndex!=null && EAQ.state.emotionSelectedIndex >= normalized.length){
+    EAQ.state.emotionSelectedIndex = normalized.length-1;
+  }
+  renderEmotionSafetyTimeline();
+}
+
+function commitSafetyEvents(events, options){
+  const opts = Object.assign({ pushHistory: true }, options||{});
+  const normalized = cloneSafetyEvents(events);
+  if(opts.replaceHistory){
+    EAQ.state.safetyHistory = [];
+    EAQ.state.safetyFuture = [];
+  } else if(opts.pushHistory){
+    EAQ.state.safetyHistory.push(cloneSafetyEvents(EAQ.state.safetyEvents));
+    if(EAQ.state.safetyHistory.length > 100){ EAQ.state.safetyHistory.shift(); }
+    EAQ.state.safetyFuture = [];
+  }
+  EAQ.state.safetyEvents = normalized;
+  if(typeof opts.selectIndex === 'number'){
+    if(normalized.length === 0){ EAQ.state.safetySelectedIndex = null; }
+    else { EAQ.state.safetySelectedIndex = Math.max(0, Math.min(normalized.length-1, opts.selectIndex)); }
+  } else if(normalized.length === 0){
+    EAQ.state.safetySelectedIndex = null;
+  } else if(EAQ.state.safetySelectedIndex!=null && EAQ.state.safetySelectedIndex >= normalized.length){
+    EAQ.state.safetySelectedIndex = normalized.length-1;
+  }
+  renderEmotionSafetyTimeline();
+}
+
+function buildEmotionVTT(spans){
+  const list = cloneEmotionSpans(spans);
+  if(!list.length) return '';
+  const lines = ['WEBVTT',''];
+  list.forEach(span=>{
+    lines.push(`${secToLabel(span.startSec)} --> ${secToLabel(span.endSec)}`);
+    lines.push(JSON.stringify({ emotion: span.label }));
+    lines.push('');
   });
-  cues.sort((a,b)=> a.start - b.start || a.end - b.end);
-  EAQ.state.emotionCues = cues;
-  EAQ.state.emotionVTT = emotionCuesToVTT(cues);
-  const box = qs('emotionVTT'); if(box) box.value = EAQ.state.emotionVTT;
+  return lines.join('\n');
+}
+
+function buildSafetyEventsVTT(events){
+  const list = cloneSafetyEvents(events);
+  if(!list.length) return '';
+  const lines = ['WEBVTT',''];
+  list.forEach(evt=>{
+    lines.push(`${secToLabel(evt.startSec)} --> ${secToLabel(evt.endSec)}`);
+    lines.push(JSON.stringify({ event: evt.type }));
+    lines.push('');
+  });
+  return lines.join('\n');
 }
 
 function parseEmotionVTT(text){
+  const spans = [];
   try{
     const cues = VTT.parse(text||'');
-    return cues.map(c=>{
-      const start = Math.max(0, c.start||0);
-      const end = Math.max(start, Math.max(0, c.end||0));
-      return { start, end, label: (c.text||'').trim() };
+    cues.forEach(cue=>{
+      const start = Math.max(0, cue.start || 0);
+      const end = Math.max(start, cue.end || start);
+      let label = (cue.text || '').trim();
+      try{
+        const parsed = JSON.parse(label);
+        if(parsed && typeof parsed === 'object' && parsed.emotion){
+          label = parsed.emotion;
+        }
+      }catch{}
+      spans.push({ startSec: start, endSec: end, label: normalizeEmotionLabel(label), confidence: 0.9 });
     });
-  }catch{
-    return [];
+  }catch{}
+  let working = [];
+  spans.sort((a,b)=> a.startSec - b.startSec || a.endSec - b.endSec).forEach(span=>{
+    const inserted = insertEmotionSpan(working, span);
+    if(inserted){ working = inserted.spans; }
+  });
+  return working;
+}
+
+function parseSafetyEventsVTT(text){
+  const events = [];
+  try{
+    const cues = VTT.parse(text||'');
+    cues.forEach(cue=>{
+      const start = Math.max(0, cue.start || 0);
+      const end = Math.max(start, cue.end || (start + SAFETY_DEFAULT_DURATION));
+      let type = (cue.text || '').trim();
+      try{
+        const parsed = JSON.parse(type);
+        if(parsed && typeof parsed === 'object' && parsed.event){
+          type = parsed.event;
+        }
+      }catch{}
+      events.push({ startSec: start, endSec: end, type: normalizeSafetyType(type) });
+    });
+  }catch{}
+  let working = [];
+  events.sort((a,b)=> a.startSec - b.startSec || a.endSec - b.endSec).forEach(evt=>{
+    const inserted = insertSafetyEvent(working, evt);
+    if(inserted){ working = inserted.events; }
+  });
+  return working;
+}
+
+function renderEmotionSafetyTimeline(){
+  const emotionLane = qs('emotionLane');
+  const safetyLane = qs('safetyLane');
+  const emotionEmpty = qs('emotionEmptyNotice');
+  const safetyEmpty = qs('safetyEmptyNotice');
+  const clipToggle = qs('clipFlagToggle');
+  if(clipToggle){ clipToggle.checked = !!EAQ.state.clipFlagged; }
+  const durationEstimate = estimateMediaDuration();
+  const safeDuration = durationEstimate > 0 ? durationEstimate : Math.max(1, (EAQ.state.transcriptCues||[]).reduce((max, cue)=> Math.max(max, cue.end||0), 0));
+
+  if(emotionLane){
+    emotionLane.innerHTML = '';
+    const baseSpans = cloneEmotionSpans(EAQ.state.emotionSpans || []).map((span, index)=> Object.assign({}, span, { sourceIndex: index }));
+    if(EAQ.state.emotionActive){
+      const active = EAQ.state.emotionActive;
+      baseSpans.push({
+        startSec: Math.max(0, active.startSec||0),
+        endSec: Math.max(Math.max(0, active.startSec||0), active.endSec||active.startSec||0),
+        label: normalizeEmotionLabel(active.label||'neutral'),
+        confidence: active.confidence || 0.9,
+        preview: true
+      });
+    }
+    baseSpans.forEach(span=>{
+      const option = getEmotionOption(span.label);
+      const spanEl = document.createElement('div');
+      spanEl.className = 'emotion-span';
+      spanEl.style.background = option.background;
+      spanEl.style.border = `1px solid ${option.color}`;
+      const left = safeDuration > 0 ? (Math.max(0, Math.min(safeDuration, span.startSec)) / safeDuration) * 100 : 0;
+      const width = safeDuration > 0 ? Math.max(0.5, ((Math.max(span.startSec, Math.min(safeDuration, span.endSec)) - Math.max(0, Math.min(safeDuration, span.startSec))) / safeDuration) * 100) : 100;
+      spanEl.style.left = `${left}%`;
+      spanEl.style.width = `${width}%`;
+      const labelEl = document.createElement('span');
+      labelEl.className = 'emotion-span__label';
+      labelEl.textContent = option.label.toLowerCase();
+      spanEl.appendChild(labelEl);
+      if(span.preview){
+        spanEl.classList.add('preview');
+      } else {
+        spanEl.dataset.index = String(span.sourceIndex);
+        if(EAQ.state.emotionSelectedIndex === span.sourceIndex){ spanEl.classList.add('selected'); }
+        spanEl.addEventListener('click', (ev)=>{
+          ev.stopPropagation();
+          EAQ.state.emotionSelectedIndex = span.sourceIndex;
+          renderEmotionSafetyTimeline();
+        });
+        const handleStart = document.createElement('div');
+        handleStart.className = 'emotion-span__handle start';
+        handleStart.addEventListener('pointerdown', (ev)=> beginEmotionHandleDrag(span.sourceIndex, 'start', ev));
+        const handleEnd = document.createElement('div');
+        handleEnd.className = 'emotion-span__handle end';
+        handleEnd.addEventListener('pointerdown', (ev)=> beginEmotionHandleDrag(span.sourceIndex, 'end', ev));
+        spanEl.appendChild(handleStart);
+        spanEl.appendChild(handleEnd);
+      }
+      emotionLane.appendChild(spanEl);
+    });
+    if(emotionEmpty){
+      const hasSpans = (EAQ.state.emotionSpans||[]).length > 0;
+      emotionEmpty.classList.toggle('hide', hasSpans);
+    }
   }
+
+  if(safetyLane){
+    safetyLane.innerHTML = '';
+    const baseEvents = cloneSafetyEvents(EAQ.state.safetyEvents || []).map((evt, index)=> Object.assign({}, evt, { sourceIndex: index }));
+    baseEvents.forEach(evt=>{
+      const option = getSafetyOption(evt.type);
+      const evEl = document.createElement('div');
+      evEl.className = 'safety-event';
+      evEl.style.background = option.color;
+      const left = safeDuration > 0 ? (Math.max(0, Math.min(safeDuration, evt.startSec)) / safeDuration) * 100 : 0;
+      const width = safeDuration > 0 ? Math.max(0.5, ((Math.max(evt.startSec, Math.min(safeDuration, evt.endSec)) - Math.max(0, Math.min(safeDuration, evt.startSec))) / safeDuration) * 100) : 5;
+      evEl.style.left = `${left}%`;
+      evEl.style.width = `${width}%`;
+      evEl.dataset.index = String(evt.sourceIndex);
+      evEl.setAttribute('aria-label', option.label);
+      if(EAQ.state.safetySelectedIndex === evt.sourceIndex){ evEl.classList.add('selected'); }
+      evEl.addEventListener('click', (ev)=>{
+        ev.stopPropagation();
+        EAQ.state.safetySelectedIndex = evt.sourceIndex;
+        renderEmotionSafetyTimeline();
+      });
+      evEl.addEventListener('pointerdown', (ev)=> beginSafetyDrag(evt.sourceIndex, ev));
+      const labelEl = document.createElement('span');
+      labelEl.className = 'safety-event__label';
+      labelEl.textContent = option.label.replace('PII: ','');
+      evEl.appendChild(labelEl);
+      safetyLane.appendChild(evEl);
+    });
+    if(safetyEmpty){
+      const hasEvents = (EAQ.state.safetyEvents||[]).length > 0;
+      safetyEmpty.classList.toggle('hide', hasEvents);
+    }
+  }
+}
+
+function setupEmotionSafetyControls(){
+  const emotionContainer = qs('emotionButtons');
+  if(emotionContainer && !emotionContainer.dataset.bound){
+    emotionContainer.dataset.bound = '1';
+    EMOTION_OPTIONS.forEach(opt=>{
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'secondary';
+      btn.textContent = opt.label;
+      btn.dataset.emotion = opt.id;
+      emotionContainer.appendChild(btn);
+      btn.addEventListener('pointerdown', (ev)=>{ ev.preventDefault(); startEmotionCapture(opt.id, ev); });
+      btn.addEventListener('keydown', (ev)=>{
+        if(ev.key === 'Enter' || ev.key === ' '){
+          ev.preventDefault();
+          startEmotionCapture(opt.id, ev);
+          setTimeout(()=> finishEmotionCapture(), 220);
+        }
+      });
+    });
+  }
+
+  const safetyContainer = qs('safetyButtons');
+  if(safetyContainer && !safetyContainer.dataset.bound){
+    safetyContainer.dataset.bound = '1';
+    SAFETY_EVENT_TYPES.forEach(opt=>{
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'secondary';
+      btn.textContent = opt.label;
+      btn.dataset.eventType = opt.id;
+      safetyContainer.appendChild(btn);
+      btn.addEventListener('click', ()=> addSafetyEvent(opt.id));
+    });
+  }
+
+  const clipToggle = qs('clipFlagToggle');
+  if(clipToggle && !clipToggle.dataset.bound){
+    clipToggle.dataset.bound = '1';
+    clipToggle.checked = !!EAQ.state.clipFlagged;
+    clipToggle.addEventListener('change', ()=>{ EAQ.state.clipFlagged = !!clipToggle.checked; });
+  }
+
+  const emotionUndo = qs('emotionUndo');
+  if(emotionUndo && !emotionUndo.dataset.bound){
+    emotionUndo.dataset.bound = '1';
+    emotionUndo.addEventListener('click', ()=> undoEmotion());
+  }
+  const emotionRedo = qs('emotionRedo');
+  if(emotionRedo && !emotionRedo.dataset.bound){
+    emotionRedo.dataset.bound = '1';
+    emotionRedo.addEventListener('click', ()=> redoEmotion());
+  }
+  const emotionDelete = qs('emotionDelete');
+  if(emotionDelete && !emotionDelete.dataset.bound){
+    emotionDelete.dataset.bound = '1';
+    emotionDelete.addEventListener('click', ()=> deleteSelectedEmotion());
+  }
+  const safetyUndo = qs('safetyUndo');
+  if(safetyUndo && !safetyUndo.dataset.bound){
+    safetyUndo.dataset.bound = '1';
+    safetyUndo.addEventListener('click', ()=> undoSafety());
+  }
+  const safetyRedo = qs('safetyRedo');
+  if(safetyRedo && !safetyRedo.dataset.bound){
+    safetyRedo.dataset.bound = '1';
+    safetyRedo.addEventListener('click', ()=> redoSafety());
+  }
+  const safetyDelete = qs('safetyDelete');
+  if(safetyDelete && !safetyDelete.dataset.bound){
+    safetyDelete.dataset.bound = '1';
+    safetyDelete.addEventListener('click', ()=> deleteSelectedSafety());
+  }
+
+  const emotionLane = qs('emotionLane');
+  if(emotionLane && !emotionLane.dataset.bound){
+    emotionLane.dataset.bound = '1';
+    emotionLane.addEventListener('click', (ev)=>{
+      if(ev.target === emotionLane){
+        EAQ.state.emotionSelectedIndex = null;
+        renderEmotionSafetyTimeline();
+      }
+    });
+  }
+  const safetyLane = qs('safetyLane');
+  if(safetyLane && !safetyLane.dataset.bound){
+    safetyLane.dataset.bound = '1';
+    safetyLane.addEventListener('click', (ev)=>{
+      if(ev.target === safetyLane){
+        EAQ.state.safetySelectedIndex = null;
+        renderEmotionSafetyTimeline();
+      }
+    });
+  }
+
+  renderEmotionSafetyTimeline();
+}
+
+function startEmotionCapture(label, ev){
+  if(EAQ.state.emotionActive){ cancelEmotionCapture(); }
+  const audio = EAQ.audio;
+  if(!audio) return;
+  const startSec = Math.max(0, audio.currentTime || 0);
+  const active = {
+    label: normalizeEmotionLabel(label),
+    startSec,
+    endSec: startSec,
+    confidence: 0.9
+  };
+  EAQ.state.emotionActive = active;
+  const update = ()=>{
+    if(EAQ.state.emotionActive !== active) return;
+    active.endSec = Math.max(active.startSec, audio.currentTime || active.startSec);
+    renderEmotionSafetyTimeline();
+    active.raf = requestAnimationFrame(update);
+  };
+  active.raf = requestAnimationFrame(update);
+  active.handlePointerUp = ()=> finishEmotionCapture();
+  active.handlePointerCancel = ()=> cancelEmotionCapture();
+  window.addEventListener('pointerup', active.handlePointerUp);
+  window.addEventListener('pointercancel', active.handlePointerCancel);
+}
+
+function finishEmotionCapture(){
+  const active = EAQ.state.emotionActive;
+  if(!active) return;
+  if(active.raf){ cancelAnimationFrame(active.raf); }
+  window.removeEventListener('pointerup', active.handlePointerUp);
+  window.removeEventListener('pointercancel', active.handlePointerCancel);
+  const audio = EAQ.audio;
+  const duration = Math.max(estimateMediaDuration() || 0, audio && audio.duration ? audio.duration : 0);
+  let start = Math.max(0, active.startSec || 0);
+  let end = Math.max(start + EMOTION_MIN_DURATION, audio ? (audio.currentTime || active.endSec || start) : (active.endSec || start));
+  if(duration > 0){ end = Math.min(end, duration); }
+  if(end - start < EMOTION_MIN_DURATION){
+    if(duration > 0 && duration >= EMOTION_MIN_DURATION){
+      start = Math.max(0, Math.min(start, duration - EMOTION_MIN_DURATION));
+      end = Math.max(start + EMOTION_MIN_DURATION, end);
+    } else {
+      end = start + EMOTION_MIN_DURATION;
+    }
+  }
+  const inserted = insertEmotionSpan(EAQ.state.emotionSpans || [], { startSec: start, endSec: end, label: active.label, confidence: active.confidence });
+  EAQ.state.emotionActive = null;
+  if(inserted){
+    commitEmotionSpans(inserted.spans, { pushHistory: true, selectIndex: inserted.index });
+  } else {
+    renderEmotionSafetyTimeline();
+    showCodeSwitchToast('Not enough space for emotion span.');
+  }
+}
+
+function cancelEmotionCapture(){
+  const active = EAQ.state.emotionActive;
+  if(!active) return;
+  if(active.raf){ cancelAnimationFrame(active.raf); }
+  window.removeEventListener('pointerup', active.handlePointerUp);
+  window.removeEventListener('pointercancel', active.handlePointerCancel);
+  EAQ.state.emotionActive = null;
+  renderEmotionSafetyTimeline();
+}
+
+function beginEmotionHandleDrag(index, edge, ev){
+  ev.preventDefault();
+  const spans = cloneEmotionSpans(EAQ.state.emotionSpans || []);
+  if(index < 0 || index >= spans.length) return;
+  const lane = qs('emotionLane');
+  if(!lane) return;
+  const rect = lane.getBoundingClientRect();
+  EAQ.state.emotionDrag = {
+    index,
+    edge,
+    pointerId: ev.pointerId,
+    rect,
+    originalSpans: spans,
+    workingSpans: cloneEmotionSpans(spans),
+    originalStart: spans[index].startSec,
+    originalEnd: spans[index].endSec
+  };
+  document.addEventListener('pointermove', onEmotionDragMove);
+  document.addEventListener('pointerup', endEmotionDrag);
+  document.addEventListener('pointercancel', cancelEmotionDrag);
+}
+
+function onEmotionDragMove(ev){
+  const drag = EAQ.state.emotionDrag;
+  if(!drag) return;
+  if(drag.pointerId!=null && ev.pointerId!=null && ev.pointerId !== drag.pointerId) return;
+  const lane = qs('emotionLane');
+  if(!lane) return;
+  const rect = drag.rect || lane.getBoundingClientRect();
+  const spans = drag.workingSpans;
+  const span = spans[drag.index];
+  if(!span) return;
+  const duration = Math.max(estimateMediaDuration() || 0, spans[spans.length-1].endSec || 0);
+  const safeDuration = duration > 0 ? duration : Math.max(span.endSec, EMOTION_MIN_DURATION);
+  const x = ev.clientX || (ev.touches && ev.touches[0] ? ev.touches[0].clientX : rect.left);
+  const ratio = rect.width > 0 ? Math.max(0, Math.min(1, (x - rect.left) / rect.width)) : 0;
+  const pointerTime = ratio * safeDuration;
+  const prev = drag.index > 0 ? spans[drag.index-1] : null;
+  const next = drag.index < spans.length-1 ? spans[drag.index+1] : null;
+  if(drag.edge === 'start'){
+    const minStart = prev ? prev.endSec : 0;
+    const maxStart = next ? Math.min(next.startSec - EMOTION_MIN_DURATION, drag.originalStart + EMOTION_DRAG_MAX_DELTA) : drag.originalStart + EMOTION_DRAG_MAX_DELTA;
+    const allowedMin = Math.max(minStart, drag.originalStart - EMOTION_DRAG_MAX_DELTA);
+    const newStart = Math.min(Math.max(pointerTime, allowedMin), Math.min(maxStart, span.endSec - EMOTION_MIN_DURATION));
+    span.startSec = Math.max(minStart, newStart);
+    if(span.endSec - span.startSec < EMOTION_MIN_DURATION){
+      span.endSec = span.startSec + EMOTION_MIN_DURATION;
+    }
+  } else {
+    const nextStart = next ? next.startSec : safeDuration;
+    const maxEnd = Math.min(nextStart, drag.originalEnd + EMOTION_DRAG_MAX_DELTA);
+    const minEnd = Math.max(span.startSec + EMOTION_MIN_DURATION, drag.originalEnd - EMOTION_DRAG_MAX_DELTA);
+    const newEnd = Math.min(Math.max(pointerTime, minEnd), maxEnd);
+    span.endSec = Math.max(span.startSec + EMOTION_MIN_DURATION, newEnd);
+  }
+  EAQ.state.emotionSpans = cloneEmotionSpans(spans);
+  EAQ.state.emotionSelectedIndex = drag.index;
+  renderEmotionSafetyTimeline();
+}
+
+function endEmotionDrag(){
+  const drag = EAQ.state.emotionDrag;
+  if(!drag) return;
+  document.removeEventListener('pointermove', onEmotionDragMove);
+  document.removeEventListener('pointerup', endEmotionDrag);
+  document.removeEventListener('pointercancel', cancelEmotionDrag);
+  EAQ.state.emotionDrag = null;
+  EAQ.state.emotionSpans = drag.originalSpans;
+  commitEmotionSpans(drag.workingSpans, { pushHistory: true, selectIndex: drag.index });
+}
+
+function cancelEmotionDrag(){
+  const drag = EAQ.state.emotionDrag;
+  if(!drag) return;
+  document.removeEventListener('pointermove', onEmotionDragMove);
+  document.removeEventListener('pointerup', endEmotionDrag);
+  document.removeEventListener('pointercancel', cancelEmotionDrag);
+  EAQ.state.emotionDrag = null;
+  EAQ.state.emotionSpans = drag.originalSpans;
+  renderEmotionSafetyTimeline();
+}
+
+function beginSafetyDrag(index, ev){
+  ev.preventDefault();
+  const events = cloneSafetyEvents(EAQ.state.safetyEvents || []);
+  if(index < 0 || index >= events.length) return;
+  const lane = qs('safetyLane');
+  if(!lane) return;
+  const rect = lane.getBoundingClientRect();
+  const event = events[index];
+  const duration = Math.max(0.05, event.endSec - event.startSec);
+  const pointerTime = rect.width > 0 ? ((ev.clientX - rect.left) / rect.width) * Math.max(estimateMediaDuration() || 0, event.endSec) : event.startSec;
+  EAQ.state.safetyDrag = {
+    index,
+    pointerId: ev.pointerId,
+    rect,
+    duration,
+    offset: pointerTime - event.startSec,
+    originalEvents: events,
+    workingEvents: cloneSafetyEvents(events)
+  };
+  EAQ.state.safetySelectedIndex = index;
+  document.addEventListener('pointermove', onSafetyDragMove);
+  document.addEventListener('pointerup', endSafetyDrag);
+  document.addEventListener('pointercancel', cancelSafetyDrag);
+}
+
+function onSafetyDragMove(ev){
+  const drag = EAQ.state.safetyDrag;
+  if(!drag) return;
+  if(drag.pointerId!=null && ev.pointerId!=null && ev.pointerId !== drag.pointerId) return;
+  const lane = qs('safetyLane');
+  if(!lane) return;
+  const rect = drag.rect || lane.getBoundingClientRect();
+  const events = drag.workingEvents;
+  const evt = events[drag.index];
+  if(!evt) return;
+  const duration = Math.max(estimateMediaDuration() || 0, events[events.length-1].endSec || 0);
+  const safeDuration = duration > 0 ? duration : Math.max(evt.endSec, SAFETY_DEFAULT_DURATION);
+  const x = ev.clientX || (ev.touches && ev.touches[0] ? ev.touches[0].clientX : rect.left);
+  const ratio = rect.width > 0 ? Math.max(0, Math.min(1, (x - rect.left) / rect.width)) : 0;
+  let newStart = ratio * safeDuration - (drag.offset || 0);
+  const prev = drag.index > 0 ? events[drag.index-1] : null;
+  const next = drag.index < events.length-1 ? events[drag.index+1] : null;
+  const minStart = prev ? prev.endSec : 0;
+  const maxStart = next ? next.startSec - drag.duration : safeDuration - drag.duration;
+  newStart = Math.min(Math.max(newStart, minStart), maxStart);
+  evt.startSec = newStart;
+  evt.endSec = newStart + drag.duration;
+  EAQ.state.safetyEvents = cloneSafetyEvents(events);
+  renderEmotionSafetyTimeline();
+}
+
+function endSafetyDrag(){
+  const drag = EAQ.state.safetyDrag;
+  if(!drag) return;
+  document.removeEventListener('pointermove', onSafetyDragMove);
+  document.removeEventListener('pointerup', endSafetyDrag);
+  document.removeEventListener('pointercancel', cancelSafetyDrag);
+  EAQ.state.safetyDrag = null;
+  EAQ.state.safetyEvents = drag.originalEvents;
+  commitSafetyEvents(drag.workingEvents, { pushHistory: true, selectIndex: drag.index });
+}
+
+function cancelSafetyDrag(){
+  const drag = EAQ.state.safetyDrag;
+  if(!drag) return;
+  document.removeEventListener('pointermove', onSafetyDragMove);
+  document.removeEventListener('pointerup', endSafetyDrag);
+  document.removeEventListener('pointercancel', cancelSafetyDrag);
+  EAQ.state.safetyDrag = null;
+  EAQ.state.safetyEvents = drag.originalEvents;
+  renderEmotionSafetyTimeline();
+}
+
+function addSafetyEvent(type){
+  const audio = EAQ.audio;
+  if(!audio) return;
+  const start = Math.max(0, audio.currentTime || 0);
+  const inserted = insertSafetyEvent(EAQ.state.safetyEvents || [], { startSec: start, endSec: start + SAFETY_DEFAULT_DURATION, type: normalizeSafetyType(type) });
+  if(inserted){
+    commitSafetyEvents(inserted.events, { pushHistory: true, selectIndex: inserted.index });
+  } else {
+    showCodeSwitchToast('No room for another event at this time.');
+  }
+}
+
+function undoEmotion(){
+  if(!EAQ.state.emotionHistory || !EAQ.state.emotionHistory.length) return;
+  const snapshot = EAQ.state.emotionHistory.pop();
+  EAQ.state.emotionFuture.push(cloneEmotionSpans(EAQ.state.emotionSpans));
+  EAQ.state.emotionSpans = cloneEmotionSpans(snapshot);
+  EAQ.state.emotionSelectedIndex = null;
+  renderEmotionSafetyTimeline();
+}
+
+function redoEmotion(){
+  if(!EAQ.state.emotionFuture || !EAQ.state.emotionFuture.length) return;
+  const snapshot = EAQ.state.emotionFuture.pop();
+  EAQ.state.emotionHistory.push(cloneEmotionSpans(EAQ.state.emotionSpans));
+  EAQ.state.emotionSpans = cloneEmotionSpans(snapshot);
+  renderEmotionSafetyTimeline();
+}
+
+function deleteSelectedEmotion(){
+  const idx = EAQ.state.emotionSelectedIndex;
+  if(idx==null) return;
+  const spans = cloneEmotionSpans(EAQ.state.emotionSpans || []);
+  if(idx < 0 || idx >= spans.length) return;
+  spans.splice(idx, 1);
+  commitEmotionSpans(spans, { pushHistory: true, selectIndex: Math.min(idx, spans.length-1) });
+}
+
+function undoSafety(){
+  if(!EAQ.state.safetyHistory || !EAQ.state.safetyHistory.length) return;
+  const snapshot = EAQ.state.safetyHistory.pop();
+  EAQ.state.safetyFuture.push(cloneSafetyEvents(EAQ.state.safetyEvents));
+  EAQ.state.safetyEvents = cloneSafetyEvents(snapshot);
+  EAQ.state.safetySelectedIndex = null;
+  renderEmotionSafetyTimeline();
+}
+
+function redoSafety(){
+  if(!EAQ.state.safetyFuture || !EAQ.state.safetyFuture.length) return;
+  const snapshot = EAQ.state.safetyFuture.pop();
+  EAQ.state.safetyHistory.push(cloneSafetyEvents(EAQ.state.safetyEvents));
+  EAQ.state.safetyEvents = cloneSafetyEvents(snapshot);
+  renderEmotionSafetyTimeline();
+}
+
+function deleteSelectedSafety(){
+  const idx = EAQ.state.safetySelectedIndex;
+  if(idx==null) return;
+  const events = cloneSafetyEvents(EAQ.state.safetyEvents || []);
+  if(idx < 0 || idx >= events.length) return;
+  events.splice(idx, 1);
+  commitSafetyEvents(events, { pushHistory: true, selectIndex: Math.min(idx, events.length-1) });
 }
