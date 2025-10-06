@@ -42,9 +42,40 @@ const EAQ = {
   }
 };
 
-const SPEAKER_GENDERS = ['male','female','nonbinary','unknown'];
-const SPEAKER_AGE_BANDS = ['child','teen','young_adult','adult','elderly','unknown'];
-const SPEAKER_DIALECTS = ['Levantine','Iraqi','Gulf','Yemeni','Egyptian','Maghrebi','MSA','Mixed','Other','Unknown'];
+const SPEAKER_GENDER_OPTIONS = [
+  { value: 'male', label: 'Male' },
+  { value: 'female', label: 'Female' },
+  { value: 'nonbinary', label: 'Nonbinary' },
+  { value: 'unknown', label: 'Unknown' }
+];
+const SPEAKER_GENDERS = SPEAKER_GENDER_OPTIONS.map(opt=> opt.value);
+const SPEAKER_GENDER_SET = new Set(SPEAKER_GENDERS);
+
+const SPEAKER_AGE_OPTIONS = [
+  { value: 'child', label: 'Child' },
+  { value: 'teen', label: 'Teen' },
+  { value: 'young_adult', label: 'Young Adult' },
+  { value: 'adult', label: 'Adult' },
+  { value: 'elderly', label: 'Elderly' },
+  { value: 'unknown', label: 'Unknown' }
+];
+const SPEAKER_AGE_BANDS = SPEAKER_AGE_OPTIONS.map(opt=> opt.value);
+const SPEAKER_AGE_SET = new Set(SPEAKER_AGE_BANDS);
+
+const SPEAKER_DIALECT_OPTIONS = [
+  { value: 'levantine', label: 'Levantine' },
+  { value: 'iraqi', label: 'Iraqi' },
+  { value: 'gulf', label: 'Gulf' },
+  { value: 'yemeni', label: 'Yemeni' },
+  { value: 'egyptian', label: 'Egyptian' },
+  { value: 'maghrebi', label: 'Maghrebi' },
+  { value: 'msa', label: 'MSA' },
+  { value: 'mixed', label: 'Mixed' },
+  { value: 'other', label: 'Other' },
+  { value: 'unknown', label: 'Unknown' }
+];
+const SPEAKER_DIALECTS = SPEAKER_DIALECT_OPTIONS.map(opt=> opt.value);
+const SPEAKER_DIALECT_SET = new Set(SPEAKER_DIALECTS);
 
 const CODE_SWITCH_LANGS = {
   eng: { label: 'EN', color: '#2b7cff', background: 'rgba(43,124,255,0.28)' },
@@ -105,6 +136,68 @@ function escapeHtml(str){
     '"':'&quot;',
     "'":"&#39;"
   })[s]);
+}
+
+function normalizeSpeakerGender(val){
+  const raw = val==null ? '' : String(val).trim().toLowerCase();
+  if(!raw) return 'unknown';
+  const normalized = raw.replace(/[\s-]+/g,'_');
+  const aliases = {
+    m: 'male',
+    male: 'male',
+    man: 'male',
+    f: 'female',
+    female: 'female',
+    woman: 'female',
+    non_binary: 'nonbinary',
+    nonbinary: 'nonbinary',
+    nb: 'nonbinary'
+  };
+  const candidate = aliases[normalized] || normalized;
+  return SPEAKER_GENDER_SET.has(candidate) ? candidate : 'unknown';
+}
+
+function normalizeSpeakerAge(val){
+  const raw = val==null ? '' : String(val).trim().toLowerCase();
+  if(!raw) return 'unknown';
+  const normalized = raw.replace(/[\s-]+/g,'_');
+  return SPEAKER_AGE_SET.has(normalized) ? normalized : 'unknown';
+}
+
+function normalizeSpeakerDialect(val){
+  const raw = val==null ? '' : String(val).trim().toLowerCase();
+  if(!raw) return 'unknown';
+  const normalized = raw.replace(/[\s-]+/g,'_');
+  const aliases = {
+    levant: 'levantine',
+    levantine: 'levantine',
+    syria: 'levantine',
+    gulf: 'gulf',
+    gulf_arabic: 'gulf',
+    arabian_peninsula: 'gulf',
+    iraq: 'iraqi',
+    iraqi: 'iraqi',
+    mesopotamia: 'iraqi',
+    yemen: 'yemeni',
+    yemeni: 'yemeni',
+    egypt: 'egyptian',
+    egyptian: 'egyptian',
+    egyption: 'egyptian',
+    maghreb: 'maghrebi',
+    maghrebi: 'maghrebi',
+    msa: 'msa',
+    fusha: 'msa',
+    classical: 'msa',
+    modern_standard_arabic: 'msa',
+    mixed: 'mixed',
+    hybrid: 'mixed',
+    sudan: 'other',
+    horn_of_africa: 'other',
+    other: 'other',
+    unknown: 'unknown'
+  };
+  const candidate = aliases[normalized] || normalized;
+  return SPEAKER_DIALECT_SET.has(candidate) ? candidate : 'unknown';
 }
 
 // Utility helpers -----------------------------------------------------------
@@ -557,7 +650,7 @@ async function fetchWithProxy(url){
 function relocateErrorsList(activeScreenId){
   const el = qs('errorsList');
   if(!el) return;
-  const allowed = new Set(['screen_translation','screen_speaker','screen_review']);
+  const allowed = new Set(['screen_translation','screen_codeswitch','screen_review']);
   if(!allowed.has(activeScreenId)){
     el.classList.add('hide');
     return;
@@ -604,7 +697,7 @@ function pushIssue(list, message){
 }
 
 function show(id){
-  ['screen_welcome','screen_transcript','screen_translation','screen_codeswitch','screen_speaker','screen_emotion','screen_pii','screen_diar','screen_review']
+  ['screen_welcome','screen_transcript','screen_translation','screen_codeswitch','screen_emotion','screen_pii','screen_diar','screen_review']
     .forEach(x=> qs(x).classList.toggle('hide', x!==id));
   relocateErrorsList(id);
 }
@@ -818,6 +911,35 @@ function validateAnnotation(){
   });
   report.codeSwitchIssues = csIssues;
 
+  const diarSpeakers = listUniqueSpeakers();
+  if(diarSpeakers.length){
+    const profiles = Array.isArray(EAQ.state.speakerProfiles) ? EAQ.state.speakerProfiles : [];
+    const missingSpeakers = [];
+    const invalidSpeakers = [];
+    diarSpeakers.forEach((speakerId, idx)=>{
+      const profile = profiles.find(p=> p && p.speaker_id === speakerId);
+      const display = profile && profile.display_label ? profile.display_label : `S${idx+1}`;
+      if(!profile){
+        missingSpeakers.push(display);
+        return;
+      }
+      const gender = normalizeSpeakerGender(profile.apparent_gender);
+      const age = normalizeSpeakerAge(profile.apparent_age_band);
+      const dialect = normalizeSpeakerDialect(profile.dialect_subregion);
+      if(!SPEAKER_GENDER_SET.has(gender) || !SPEAKER_AGE_SET.has(age) || !SPEAKER_DIALECT_SET.has(dialect)){
+        invalidSpeakers.push(display);
+      }
+    });
+    if(missingSpeakers.length){
+      const label = missingSpeakers.join(', ');
+      pushIssue(report.errors, `Speaker attributes missing for ${label}.`);
+    }
+    if(invalidSpeakers.length){
+      const label = invalidSpeakers.join(', ');
+      pushIssue(report.errors, `Review gender, age band, and dialect selections for ${label}. Unknown is allowed.`);
+    }
+  }
+
   return report;
 }
 
@@ -986,16 +1108,27 @@ function bindUI(){
     runValidationAndDisplay('screen_translation');
     show('screen_codeswitch');
     renderCodeSwitchTimeline();
+    renderSpeakerCards();
+    runValidationAndDisplay('screen_codeswitch');
   });
 
+  const speakerError = qs('speakerDrawerError');
   qs('csNext').addEventListener('click', ()=>{
     const snapshot = snapshotCodeSwitchSpans();
     const exports = buildCodeSwitchExports(snapshot);
     EAQ.state.codeSwitchVTT = exports.vtt;
     EAQ.state.codeSwitchSummary = exports.summary;
     const box = qs('codeSwitchVTT'); if(box) box.value = exports.vtt;
-    show('screen_speaker');
-    runValidationAndDisplay('screen_speaker');
+    const speakerValid = syncSpeakerProfilesFromUI({ silent: true });
+    if(!speakerValid){
+      syncSpeakerProfilesFromUI({ silent: false });
+      runValidationAndDisplay('screen_codeswitch');
+      return;
+    }
+    if(speakerError){ speakerError.classList.add('hide'); speakerError.textContent = ''; }
+    runValidationAndDisplay('screen_codeswitch');
+    show('screen_emotion');
+    runValidationAndDisplay('screen_emotion');
   });
 
   const timelineEl = qs('timeline');
@@ -1008,34 +1141,6 @@ function bindUI(){
         const isVisible = translationScreen && !translationScreen.classList.contains('hide');
         if(isVisible){ focusTranslationField(detail.index, { scroll: true }); }
       }
-    });
-  }
-
-  const speakerNext = qs('speakerNext');
-  if(speakerNext){
-    speakerNext.addEventListener('click', ()=>{
-      const container = qs('speakerCards');
-      const cards = container ? Array.from(container.querySelectorAll('[data-speaker-card]')) : [];
-      const profiles = cards.map((card, idx)=>{
-        const speakerId = card.getAttribute('data-speaker-id') || `spk${idx+1}`;
-        const displayLabel = card.getAttribute('data-display-label') || `S${idx+1}`;
-        const genderSel = card.querySelector('select[name="apparent_gender"]');
-        const ageSel = card.querySelector('select[name="apparent_age_band"]');
-        const dialectSel = card.querySelector('select[name="dialect_subregion"]');
-        const apparent_gender = genderSel ? (genderSel.value || 'unknown') : 'unknown';
-        const apparent_age_band = ageSel ? (ageSel.value || 'unknown') : 'unknown';
-        const dialect_subregion = dialectSel ? (dialectSel.value || 'unknown') : 'unknown';
-        const existing = Array.isArray(EAQ.state.speakerProfiles) ? EAQ.state.speakerProfiles.find(p=> p && p.speaker_id === speakerId) : null;
-        return Object.assign({}, existing||{}, {
-          speaker_id: speakerId,
-          display_label: displayLabel,
-          apparent_gender,
-          apparent_age_band,
-          dialect_subregion
-        });
-      });
-      EAQ.state.speakerProfiles = profiles;
-      show('screen_emotion');
     });
   }
 
@@ -1327,6 +1432,8 @@ async function loadPrefillForCurrent(){
   updateErrorsList(null);
   const speakerContainer = qs('speakerCards');
   if(speakerContainer) speakerContainer.innerHTML = '<em>Loading speaker attributes...</em>';
+  const speakerErrorBox = qs('speakerDrawerError');
+  if(speakerErrorBox){ speakerErrorBox.classList.add('hide'); speakerErrorBox.textContent = ''; }
   const prefill = it.prefill || {};
   const translationBox = qs('translationVTT'); if(translationBox) translationBox.value = '';
   const csBox = qs('codeSwitchVTT'); if(csBox) csBox.value = '';
@@ -1377,9 +1484,9 @@ async function loadPrefillForCurrent(){
   }
 
   // Speaker profiles prefill (robust)
-  const allowedGenders = new Set(['male','female','nonbinary','unknown']);
-  const allowedAges = new Set(['child','teen','young_adult','adult','elderly','unknown']);
-  const allowedDialects = new Set(['unknown','levant','gulf','egypt','maghreb','mesopotamia','sudan','arabian_peninsula','horn_of_africa','other']);
+  const allowedGenders = new Set(SPEAKER_GENDERS);
+  const allowedAges = new Set(SPEAKER_AGE_BANDS);
+  const allowedDialects = new Set(SPEAKER_DIALECTS);
 
   const normalizeProfile = (entry, idx, fallback)=>{
     const data = entry && typeof entry === 'object' ? entry : {};
@@ -1390,15 +1497,18 @@ async function loadPrefillForCurrent(){
       return str.toLowerCase().replace(/[\s-]+/g,'_');
     };
     const speakerIdRaw = data.speaker_id || data.diarization_speaker || data.speaker || fallback || `spk${idx+1}`;
-    const genderNorm = normEnum(data.apparent_gender, 'unknown');
-    const ageNorm = normEnum(data.apparent_age_band, 'unknown');
-    const dialectNorm = normEnum(data.dialect_subregion, 'unknown');
+    const genderCandidate = normalizeSpeakerGender(data.apparent_gender);
+    const genderNorm = allowedGenders.has(genderCandidate) ? genderCandidate : 'unknown';
+    const ageCandidate = normalizeSpeakerAge(data.apparent_age_band);
+    const ageNorm = allowedAges.has(ageCandidate) ? ageCandidate : 'unknown';
+    const dialectCandidate = normalizeSpeakerDialect(data.dialect_subregion);
+    const dialectNorm = allowedDialects.has(dialectCandidate) ? dialectCandidate : 'unknown';
     return Object.assign({}, data, {
       speaker_id: String(speakerIdRaw || `spk${idx+1}`),
       display_label: String(data.display_label || data.label || `S${idx+1}`),
-      apparent_gender: allowedGenders.has(genderNorm) ? genderNorm : 'unknown',
-      apparent_age_band: allowedAges.has(ageNorm) ? ageNorm : 'unknown',
-      dialect_subregion: allowedDialects.has(dialectNorm) ? dialectNorm : 'unknown'
+      apparent_gender: genderNorm,
+      apparent_age_band: ageNorm,
+      dialect_subregion: dialectNorm
     });
   };
 
@@ -2388,10 +2498,7 @@ function renderDiarList(){
   renderSpeakerCards();
 }
 
-function renderSpeakerCards(){
-  const container = qs('speakerCards');
-  if(!container) return;
-
+function listUniqueSpeakers(){
   const segments = Array.isArray(EAQ.state.diarSegments) ? EAQ.state.diarSegments : [];
   const labelMap = new Map();
   segments.forEach(seg=>{
@@ -2404,62 +2511,31 @@ function renderSpeakerCards(){
   const seen = [];
   const seenSet = new Set();
   for(const seg of segments){
-    const speakerId = seg && seg.speaker ? String(seg.speaker) : 'spk';
+    if(!seg) continue;
+    const speakerId = seg.speaker!=null ? String(seg.speaker) : 'spk';
     if(!seenSet.has(speakerId)){
       seenSet.add(speakerId);
       seen.push(speakerId);
     }
   }
-  if(!seen.length){
+  return seen;
+}
+
+function renderSpeakerCards(){
+  const container = qs('speakerCards');
+  if(!container) return;
+
+  const speakers = listUniqueSpeakers();
+  const errorBox = qs('speakerDrawerError');
+  if(!speakers.length){
     container.innerHTML = '<em>No diarization loaded. Speaker attributes unavailable.</em>';
     EAQ.state.speakerProfiles = [];
+    if(errorBox){ errorBox.classList.add('hide'); errorBox.textContent = ''; }
     return;
   }
 
-  const genderOptions = [
-    { value: '', label: 'Select apparent gender', disabled: true },
-    { value: 'male', label: 'Male' },
-    { value: 'female', label: 'Female' },
-    { value: 'nonbinary', label: 'Non-binary' },
-    { value: 'unknown', label: 'Unknown' }
-  ];
-  const ageOptions = [
-    { value: '', label: 'Select age band', disabled: true },
-    { value: 'child', label: 'Child' },
-    { value: 'teen', label: 'Teen' },
-    { value: 'young_adult', label: 'Young Adult' },
-    { value: 'adult', label: 'Adult' },
-    { value: 'elderly', label: 'Elderly' },
-    { value: 'unknown', label: 'Unknown' }
-  ];
-  const dialectOptions = [
-    { value: '', label: 'Select dialect sub-region', disabled: true },
-    { value: 'unknown', label: 'Unknown' },
-    { value: 'levant', label: 'Levant' },
-    { value: 'gulf', label: 'Gulf' },
-    { value: 'egypt', label: 'Egypt' },
-    { value: 'maghreb', label: 'Maghreb' },
-    { value: 'mesopotamia', label: 'Mesopotamia' },
-    { value: 'sudan', label: 'Sudan' },
-    { value: 'arabian_peninsula', label: 'Arabian Peninsula' },
-    { value: 'horn_of_africa', label: 'Horn of Africa' },
-    { value: 'other', label: 'Other' }
-  ];
-  const allowedGenderVals = new Set(genderOptions.map(o=>o.value).filter(v=>v));
-  const allowedAgeVals = new Set(ageOptions.map(o=>o.value).filter(v=>v));
-  const allowedDialectVals = new Set(dialectOptions.map(o=>o.value).filter(v=>v));
-
-  const normalizeValue = (val, fallback, allowed)=>{
-    if(val==null) return fallback;
-    const str = String(val).trim();
-    if(!str) return fallback;
-    const normalized = str.toLowerCase().replace(/[\s-]+/g,'_');
-    if(allowed && !allowed.has(normalized)) return fallback;
-    return normalized;
-  };
-
   const existing = Array.isArray(EAQ.state.speakerProfiles) ? EAQ.state.speakerProfiles : [];
-  const normalized = seen.map((speakerId, idx)=>{
+  const normalized = speakers.map((speakerId, idx)=>{
     const found = existing.find((p)=> p && p.speaker_id === speakerId) || {};
     const defaultLabel = labelMap.get(speakerId) || `S${idx+1}`;
     const display = String(found.display_label || defaultLabel);
@@ -2467,26 +2543,28 @@ function renderSpeakerCards(){
     const ageSel = normalizeValue(found.apparent_age_band, 'unknown', allowedAgeVals);
     const dialectSel = normalizeValue(found.dialect_subregion, 'unknown', allowedDialectVals);
     return Object.assign({}, found, {
+    const display = String(found.display_label || `S${idx+1}`);
+    const gender = normalizeSpeakerGender(found.apparent_gender);
+    const age = normalizeSpeakerAge(found.apparent_age_band);
+    const dialect = normalizeSpeakerDialect(found.dialect_subregion);
+    return {
       speaker_id: String(speakerId),
       display_label: display,
-      apparent_gender: genderSel,
-      apparent_age_band: ageSel,
-      dialect_subregion: dialectSel
-    });
+      apparent_gender: SPEAKER_GENDER_SET.has(gender) ? gender : 'unknown',
+      apparent_age_band: SPEAKER_AGE_SET.has(age) ? age : 'unknown',
+      dialect_subregion: SPEAKER_DIALECT_SET.has(dialect) ? dialect : 'unknown'
+    };
   });
   EAQ.state.speakerProfiles = normalized;
 
-  function renderOptions(list, selected){
-    return list.map((opt)=>{
-      const attrs = [
-        `value="${escapeHtml(opt.value)}"`
-      ];
-      if(opt.disabled){ attrs.push('disabled'); }
-      const isSelected = opt.value ? opt.value === selected : !selected;
-      if(isSelected){ attrs.push('selected'); }
+  const renderOptions = (options, selected)=>{
+    const active = selected && typeof selected === 'string' ? selected : 'unknown';
+    return options.map((opt)=>{
+      const attrs = [`value="${escapeHtml(opt.value)}"`];
+      if(opt.value === active){ attrs.push('selected'); }
       return `<option ${attrs.join(' ')}>${escapeHtml(opt.label)}</option>`;
     }).join('');
-  }
+  };
 
   const cards = normalized.map((profile, idx)=>{
     const display = String(profile.display_label || `S${idx+1}`);
@@ -2505,8 +2583,87 @@ function renderSpeakerCards(){
       `<label style="display:block;margin-bottom:.5rem;">Apparent age band <select name="apparent_age_band">${ageOptionsHtml}</select></label>`+
       `<label style="display:block;margin-bottom:.5rem;">Dialect sub-region <select name="dialect_subregion">${dialectOptionsHtml}</select></label>`+
     `</div>`;
+    const display = profile.display_label || `S${idx+1}`;
+    const speakerId = profile.speaker_id || `spk${idx+1}`;
+    const genderOptions = renderOptions(SPEAKER_GENDER_OPTIONS, profile.apparent_gender || 'unknown');
+    const ageOptions = renderOptions(SPEAKER_AGE_OPTIONS, profile.apparent_age_band || 'unknown');
+    const dialectOptions = renderOptions(SPEAKER_DIALECT_OPTIONS, profile.dialect_subregion || 'unknown');
+    return `<section class="speaker-card" data-speaker-card data-speaker-id="${escapeHtml(speakerId)}" data-display-label="${escapeHtml(display)}">`+
+      `<p class="speaker-card__title"><strong>${escapeHtml(display)}</strong><span class="speaker-card__subtitle">Diar speaker: ${escapeHtml(speakerId)}</span></p>`+
+      `<label>Apparent gender<select name="apparent_gender" class="speaker-card__select">${genderOptions}</select></label>`+
+      `<label>Apparent age band<select name="apparent_age_band" class="speaker-card__select">${ageOptions}</select></label>`+
+      `<label>Dialect sub-region<select name="dialect_subregion" class="speaker-card__select">${dialectOptions}</select></label>`+
+    `</section>`;
   }).join('');
   container.innerHTML = cards;
+
+  container.querySelectorAll('select').forEach((selectEl)=>{
+    selectEl.addEventListener('change', ()=>{
+      syncSpeakerProfilesFromUI({ silent: true });
+      runValidationAndDisplay('screen_codeswitch');
+    });
+  });
+
+  syncSpeakerProfilesFromUI({ silent: true });
+}
+
+function syncSpeakerProfilesFromUI(options){
+  const opts = options || {};
+  const container = qs('speakerCards');
+  if(!container){
+    EAQ.state.speakerProfiles = [];
+    return true;
+  }
+  const cards = Array.from(container.querySelectorAll('[data-speaker-card]'));
+  if(!cards.length){
+    EAQ.state.speakerProfiles = [];
+    const errorBox = qs('speakerDrawerError');
+    if(errorBox){ errorBox.classList.add('hide'); errorBox.textContent = ''; }
+    return true;
+  }
+
+  const profiles = [];
+  const missing = [];
+  cards.forEach((card, idx)=>{
+    const speakerId = card.getAttribute('data-speaker-id') || `spk${idx+1}`;
+    const displayLabel = card.getAttribute('data-display-label') || `S${idx+1}`;
+    const genderSel = card.querySelector('select[name="apparent_gender"]');
+    const ageSel = card.querySelector('select[name="apparent_age_band"]');
+    const dialectSel = card.querySelector('select[name="dialect_subregion"]');
+    const genderRaw = genderSel ? genderSel.value : '';
+    const ageRaw = ageSel ? ageSel.value : '';
+    const dialectRaw = dialectSel ? dialectSel.value : '';
+    const gender = normalizeSpeakerGender(genderRaw);
+    const age = normalizeSpeakerAge(ageRaw);
+    const dialect = normalizeSpeakerDialect(dialectRaw);
+    const genderValid = !!genderSel && genderSel.value !== '' && SPEAKER_GENDER_SET.has(gender);
+    const ageValid = !!ageSel && ageSel.value !== '' && SPEAKER_AGE_SET.has(age);
+    const dialectValid = !!dialectSel && dialectSel.value !== '' && SPEAKER_DIALECT_SET.has(dialect);
+    if(!genderValid || !ageValid || !dialectValid){
+      missing.push(displayLabel || speakerId);
+    }
+    profiles.push({
+      speaker_id: String(speakerId),
+      display_label: String(displayLabel),
+      apparent_gender: SPEAKER_GENDER_SET.has(gender) ? gender : 'unknown',
+      apparent_age_band: SPEAKER_AGE_SET.has(age) ? age : 'unknown',
+      dialect_subregion: SPEAKER_DIALECT_SET.has(dialect) ? dialect : 'unknown'
+    });
+  });
+
+  EAQ.state.speakerProfiles = profiles;
+
+  const errorBox = qs('speakerDrawerError');
+  if(missing.length){
+    if(!opts.silent && errorBox){
+      const label = missing.length === 1 ? missing[0] : `${missing.slice(0,-1).join(', ')} and ${missing.slice(-1)[0]}`;
+      errorBox.textContent = `Select gender, age band, and dialect for ${label}. Unknown is allowed.`;
+      errorBox.classList.remove('hide');
+    }
+    return false;
+  }
+  if(errorBox){ errorBox.classList.add('hide'); errorBox.textContent = ''; }
+  return true;
 }
 
 function emotionCuesToVTT(cues){
