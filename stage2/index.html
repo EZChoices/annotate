@@ -55,8 +55,38 @@
     .speaker-card label:last-of-type{margin-bottom:0}
     .speaker-drawer__submit{width:100%;padding:.85rem;font-size:1rem}
     .speaker-drawer__error{font-size:.9rem}
+    .emotion-safety{display:flex;flex-direction:column;gap:1.25rem;margin:1rem 0}
+    .emotion-button-grid,.safety-button-grid{display:flex;flex-wrap:wrap;gap:.5rem}
+    .emotion-button-grid button,.safety-button-grid button{flex:1 1 calc(50% - .5rem);min-width:120px}
+    .emotion-safety__timeline{border:1px solid var(--border);border-radius:12px;background:var(--card);padding:1rem;display:flex;flex-direction:column;gap:1rem}
+    .emotion-lane{display:flex;flex-direction:column;gap:.4rem}
+    .emotion-lane__label{font-size:.85rem;color:var(--muted);display:flex;align-items:center;justify-content:space-between}
+    .emotion-lane__track{position:relative;height:44px;border-radius:10px;background:rgba(0,0,0,0.03);overflow:hidden}
+    .emotion-span{position:absolute;top:6px;bottom:6px;border-radius:8px;color:#fff;font-weight:600;font-size:.8rem;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 1px rgba(0,0,0,0.12);cursor:pointer;transition:box-shadow .15s ease}
+    .emotion-span.selected{box-shadow:0 0 0 2px var(--accent)}
+    .emotion-span__label{pointer-events:none;padding:0 .5rem;text-transform:capitalize}
+    .emotion-span__handle{position:absolute;top:0;bottom:0;width:18px;background:rgba(255,255,255,0.75);cursor:ew-resize}
+    .emotion-span__handle.start{left:0;border-radius:8px 0 0 8px}
+    .emotion-span__handle.end{right:0;border-radius:0 8px 8px 0}
+    .emotion-span.dragging{opacity:.85}
+    .emotion-span.preview{opacity:.6;border-style:dashed}
+    .safety-lane__track{position:relative;height:40px;border-radius:10px;background:rgba(0,0,0,0.03);overflow:hidden}
+    .safety-event{position:absolute;top:8px;bottom:8px;border-radius:6px;min-width:12px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:.75rem;cursor:grab;transition:box-shadow .15s ease}
+    .safety-event.selected{box-shadow:0 0 0 2px var(--accent)}
+    .safety-event__label{pointer-events:none;padding:0 .4rem;text-transform:uppercase;font-size:.65rem}
+    .safety-event.dragging{opacity:.9;cursor:grabbing}
+    .safety-event__handle{position:absolute;top:0;bottom:0;width:16px;background:rgba(255,255,255,0.75);cursor:ew-resize}
+    .safety-event__handle.start{left:0;border-radius:6px 0 0 6px}
+    .safety-event__handle.end{right:0;border-radius:0 6px 6px 0}
+    .flag-toggle{display:flex;align-items:center;gap:.5rem;font-size:.95rem}
+    .flag-toggle input{width:1.25rem;height:1.25rem}
+    .emotion-safety__actions{display:flex;flex-wrap:wrap;gap:.5rem}
+    .emotion-safety__actions button{flex:1 1 calc(33.33% - .5rem);min-width:120px}
+    .emotion-safety__empty{font-size:.9rem;color:var(--muted)}
     @media (min-width:720px){
       .speaker-card{padding:1rem}
+      .emotion-button-grid button,.safety-button-grid button{flex:0 0 auto;min-width:140px}
+      .emotion-safety__actions button{flex:0 0 auto;min-width:140px}
     }
   </style>
 </head>
@@ -135,37 +165,50 @@
       </aside>
     </div>
 
-    <div class="screen hide" id="screen_emotion">
-      <h3>Emotion (optional)</h3>
+    <div class="screen hide" id="screen_emotionSafety">
+      <h3>Emotion &amp; Safety (optional)</h3>
+      <p class="notice">Mark emotion changes by pressing and holding a button, and tap to add safety or PII events. These annotations are optional.</p>
+      <section class="emotion-safety">
+        <div>
+          <h4 style="margin:0 0 .5rem 0;">Emotion spans</h4>
+          <p style="margin:.25rem 0 0 0;font-size:.9rem;color:var(--muted);">Press and hold while the emotion lasts. Release to finish and drag edges up to 200&nbsp;ms to fine-tune.</p>
+          <div class="emotion-button-grid" id="emotionButtons"></div>
+        </div>
+        <div>
+          <h4 style="margin:0 0 .5rem 0;">Safety &amp; PII events</h4>
+          <p style="margin:.25rem 0 0 0;font-size:.9rem;color:var(--muted);">Tap a button at the moment the content occurs. Events are short (0.5&nbsp;s) markers you can drag on the timeline.</p>
+          <div class="safety-button-grid" id="safetyButtons"></div>
+          <label class="flag-toggle"><input type="checkbox" id="clipFlagToggle"> Flag clip for safety review</label>
+        </div>
+        <div class="emotion-safety__timeline" id="emotionSafetyTimeline">
+          <div class="emotion-lane">
+            <div class="emotion-lane__label">
+              <span>Emotion</span>
+              <span id="emotionEmptyNotice" class="emotion-safety__empty hide">No emotion spans</span>
+            </div>
+            <div class="emotion-lane__track" id="emotionLane" aria-label="Emotion timeline" role="list"></div>
+          </div>
+          <div class="emotion-lane">
+            <div class="emotion-lane__label">
+              <span>Safety / PII</span>
+              <span id="safetyEmptyNotice" class="emotion-safety__empty hide">No events</span>
+            </div>
+            <div class="safety-lane__track" id="safetyLane" aria-label="Safety timeline" role="list"></div>
+          </div>
+        </div>
+        <div class="emotion-safety__actions">
+          <button class="secondary" id="emotionUndo">Emotion Undo</button>
+          <button class="secondary" id="emotionRedo">Emotion Redo</button>
+          <button class="secondary" id="emotionDelete">Delete Emotion</button>
+        </div>
+        <div class="emotion-safety__actions">
+          <button class="secondary" id="safetyUndo">Event Undo</button>
+          <button class="secondary" id="safetyRedo">Event Redo</button>
+          <button class="secondary" id="safetyDelete">Delete Event</button>
+        </div>
+      </section>
       <div class="controls">
-        <button id="btnNeutral" class="secondary">Neutral</button>
-        <button id="btnHappy" class="secondary">Happy</button>
-        <button id="btnAngry" class="secondary">Angry</button>
-        <button id="btnSad" class="secondary">Sad</button>
-        <button id="btnExcited" class="secondary">Excited</button>
-        <button id="btnOtherEmo" class="secondary">Other</button>
-        <button id="emoUndo" class="secondary">Undo</button>
-      </div>
-      <label>Emotion Spans (WebVTT)</label>
-      <textarea id="emotionVTT" class="vtt" placeholder="WEBVTT\n\n00:00.000 --> 00:01.500\nneutral\n"></textarea>
-      <div class="controls">
-        <button id="emotionNext" class="primary">Continue</button>
-      </div>
-    </div>
-    <div class="screen hide" id="screen_pii">
-      <h3>Optional PII / Safety Events</h3>
-      <div class="controls">
-        <button class="secondary" data-evt="pii_name">PII: Name</button>
-        <button class="secondary" data-evt="pii_phone">PII: Phone</button>
-        <button class="secondary" data-evt="minor_face">Minor Face</button>
-        <button class="secondary" data-evt="political_slogan">Political</button>
-        <button class="secondary" data-evt="religious_content">Religious</button>
-        <button class="secondary" data-evt="explicit">Explicit</button>
-      </div>
-      <label>Events (WebVTT)</label>
-      <textarea id="eventsVTT" class="vtt" placeholder="WEBVTT\n\n00:01.000 --> 00:03.200\npii_name"></textarea>
-      <div class="controls">
-        <button id="piiNext" class="primary">Continue</button>
+        <button id="emotionSafetyNext" class="primary">Continue</button>
       </div>
     </div>
 
