@@ -1264,6 +1264,18 @@ function bindUI(){
     }
     const ok = await enqueueAndSync(lint);
     if(!ok){ return; }
+    if(typeof window !== 'undefined' && window.QAMetrics && typeof window.QAMetrics.generateReport === 'function'){
+      try{
+        const qaReport = window.QAMetrics.generateReport({
+          manifest: EAQ.state.manifest,
+          annotations: { lint },
+          annotator: EAQ.state.annotator
+        });
+        localStorage.setItem('qa_report', JSON.stringify(qaReport));
+      }catch(err){
+        console.warn('Failed to generate QA report', err);
+      }
+    }
     EAQ.state.idx = (EAQ.state.idx + 1) % Math.max(1, EAQ.state.manifest.items.length);
     qs('transcriptVTT').value = '';
     qs('translationVTT').value = '';

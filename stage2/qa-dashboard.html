@@ -8,12 +8,18 @@
   <link rel="stylesheet" href="/public/styles.css">
   <style>
     .screen{max-width:720px;margin:0 auto}
+    .hide{display:none}
     .stage-menu{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 auto 1rem auto;max-width:720px}
     .stage-menu__link{display:inline-flex;align-items:center;justify-content:center;padding:.45rem .9rem;border-radius:999px;border:1px solid var(--border);background:var(--card);color:inherit;text-decoration:none;font-size:.9rem;transition:background .15s ease,border-color .15s ease,color .15s ease}
     .stage-menu__link:hover{border-color:var(--accent);color:var(--accent)}
     .stage-menu__link.active{background:var(--accent);border-color:var(--accent);color:#fff}
     .qa-dashboard__intro{margin-bottom:1rem;font-size:1rem}
     .qa-dashboard__empty{padding:1.25rem;border:1px dashed var(--border);border-radius:12px;text-align:center;color:var(--muted);background:var(--card)}
+    .qa-report-table{width:100%;border-collapse:collapse;margin:1rem 0;background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+    .qa-report-table caption{padding:.75rem 1rem;font-weight:600;text-align:left;background:rgba(0,0,0,0.02)}
+    .qa-report-table th,.qa-report-table td{padding:.65rem 1rem;text-align:left;border-bottom:1px solid var(--border);font-size:.95rem}
+    .qa-report-table tbody tr:last-child th,.qa-report-table tbody tr:last-child td{border-bottom:none}
+    .qa-report-table thead{background:rgba(0,0,0,0.03);font-size:.85rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
   </style>
 </head>
 <body>
@@ -25,11 +31,34 @@
     <section class="screen" aria-labelledby="qaDashboardTitle">
       <h2 id="qaDashboardTitle">QA Dashboard</h2>
       <p class="notice qa-dashboard__intro">QA metrics will appear here once they're available. This placeholder screen reserves space for charts and summaries.</p>
-      <div class="qa-dashboard__empty" role="status">No QA metrics to display yet.</div>
+      <div class="qa-dashboard__empty" id="qaReportEmpty" role="status">No QA metrics to display yet.</div>
+      <table class="qa-report-table hide" id="qaSummaryTable">
+        <caption>Latest QA Summary</caption>
+        <thead>
+          <tr>
+            <th scope="col">Metric</th>
+            <th scope="col">Value</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <table class="qa-report-table hide" id="qaClipsTable">
+        <caption>Gold Clip Checks</caption>
+        <thead>
+          <tr>
+            <th scope="col">Clip</th>
+            <th scope="col">Language</th>
+            <th scope="col">QA Status</th>
+            <th scope="col">Comment</th>
+          </tr>
+        </thead>
+        <tbody id="qaReportClips"></tbody>
+      </table>
     </section>
   </div>
   <script src="/public/env.js"></script>
   <script src="/public/config.js"></script>
+  <script src="/stage2/qa_metrics.js"></script>
   <script>
     (function(){
       const c = document.createElement('div');
@@ -47,6 +76,90 @@
         <a href="${base}/api/clip?annotator=${encodeURIComponent(id)}" target="_blank">Clip API</a> ·
         <a href="${base}/api/debug?annotator=${encodeURIComponent(id)}" target="_blank">Debug</a>`;
       document.body.appendChild(c);
+    })();
+  </script>
+  <script>
+    (function(){
+      const storageKey = 'qa_report';
+      const emptyState = document.getElementById('qaReportEmpty');
+      const summaryTable = document.getElementById('qaSummaryTable');
+      const summaryBody = summaryTable ? summaryTable.querySelector('tbody') : null;
+      const clipsTable = document.getElementById('qaClipsTable');
+      const clipsBody = document.getElementById('qaReportClips');
+
+      let report = null;
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if(raw){
+          report = JSON.parse(raw);
+        }
+      } catch(err) {
+        console.warn('Failed to load QA report from storage', err);
+      }
+
+      if(!report){
+        if(emptyState){ emptyState.classList.remove('hide'); }
+        if(summaryTable){ summaryTable.classList.add('hide'); }
+        if(clipsTable){ clipsTable.classList.add('hide'); }
+        return;
+      }
+
+      if(emptyState){ emptyState.classList.add('hide'); }
+      if(summaryTable && summaryBody){
+        const formatScore = (value)=>{
+          if(typeof value === 'number'){ return `${Math.round(value * 100)}%`; }
+          if(typeof value === 'string' && value.trim() !== ''){ return value; }
+          return 'N/A';
+        };
+        const rows = [
+          ['Generated At', report.generatedAt ? new Date(report.generatedAt).toLocaleString() : 'Unknown'],
+          ['Annotator', report.annotator || 'anonymous'],
+          ['Total Gold Clips', report.summary && report.summary.totalGoldClips != null ? report.summary.totalGoldClips : '0'],
+          ['Reviewed Clips', report.summary && report.summary.reviewedClips != null ? report.summary.reviewedClips : '0'],
+          ['Accuracy Score', formatScore(report.summary && report.summary.accuracyScore)],
+          ['Consistency Score', formatScore(report.summary && report.summary.consistencyScore)],
+          ['Notes', report.summary && report.summary.notes ? report.summary.notes : 'No notes available']
+        ];
+        summaryBody.innerHTML = '';
+        rows.forEach(([label, value])=>{
+          const tr = document.createElement('tr');
+          const th = document.createElement('th');
+          th.scope = 'row';
+          th.textContent = label;
+          const td = document.createElement('td');
+          td.textContent = value;
+          tr.appendChild(th);
+          tr.appendChild(td);
+          summaryBody.appendChild(tr);
+        });
+        summaryTable.classList.remove('hide');
+      }
+
+      if(clipsTable && clipsBody){
+        clipsBody.innerHTML = '';
+        if(Array.isArray(report.clips) && report.clips.length){
+          report.clips.forEach((clip, index)=>{
+            const tr = document.createElement('tr');
+            const clipCell = document.createElement('th');
+            clipCell.scope = 'row';
+            clipCell.textContent = clip.title || clip.clipId || `Clip ${index + 1}`;
+            const langCell = document.createElement('td');
+            langCell.textContent = clip.language || 'unknown';
+            const statusCell = document.createElement('td');
+            statusCell.textContent = clip.qaStatus || 'Pending';
+            const commentCell = document.createElement('td');
+            commentCell.textContent = clip.comment || '—';
+            tr.appendChild(clipCell);
+            tr.appendChild(langCell);
+            tr.appendChild(statusCell);
+            tr.appendChild(commentCell);
+            clipsBody.appendChild(tr);
+          });
+          clipsTable.classList.remove('hide');
+        } else {
+          clipsTable.classList.add('hide');
+        }
+      }
     })();
   </script>
   <script>
