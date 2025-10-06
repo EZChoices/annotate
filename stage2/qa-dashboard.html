@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EchoAtlas Stage 2 — QA Dashboard</title>
+  <link rel="manifest" href="/public/manifest.webmanifest">
+  <link rel="stylesheet" href="/public/styles.css">
+  <style>
+    .screen{max-width:720px;margin:0 auto}
+    .stage-menu{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 auto 1rem auto;max-width:720px}
+    .stage-menu__link{display:inline-flex;align-items:center;justify-content:center;padding:.45rem .9rem;border-radius:999px;border:1px solid var(--border);background:var(--card);color:inherit;text-decoration:none;font-size:.9rem;transition:background .15s ease,border-color .15s ease,color .15s ease}
+    .stage-menu__link:hover{border-color:var(--accent);color:var(--accent)}
+    .stage-menu__link.active{background:var(--accent);border-color:var(--accent);color:#fff}
+    .qa-dashboard__intro{margin-bottom:1rem;font-size:1rem}
+    .qa-dashboard__empty{padding:1.25rem;border:1px dashed var(--border);border-radius:12px;text-align:center;color:var(--muted);background:var(--card)}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <nav class="stage-menu" aria-label="Stage 2 menu">
+      <a href="/stage2/index.html" class="stage-menu__link">Annotation Workspace</a>
+      <a href="/stage2/qa-dashboard.html" class="stage-menu__link active">QA Dashboard</a>
+    </nav>
+    <section class="screen" aria-labelledby="qaDashboardTitle">
+      <h2 id="qaDashboardTitle">QA Dashboard</h2>
+      <p class="notice qa-dashboard__intro">QA metrics will appear here once they're available. This placeholder screen reserves space for charts and summaries.</p>
+      <div class="qa-dashboard__empty" role="status">No QA metrics to display yet.</div>
+    </section>
+  </div>
+  <script src="/public/env.js"></script>
+  <script src="/public/config.js"></script>
+  <script>
+    (function(){
+      const c = document.createElement('div');
+      c.className = 'notice';
+      const base = location.origin;
+      const annotKey = 'ea_stage2_annotator_id';
+      let id = 'anonymous';
+      try { id = localStorage.getItem(annotKey) || 'anonymous'; } catch{}
+      if(new URLSearchParams(location.search).get('links')==='0') return;
+      c.innerHTML = `Quick Links:
+        <a href="${base}/meta-v2/index.html">Meta V2</a> ·
+        <a href="${base}/">Stage 2</a> ·
+        <a href="${base}/stage2/qa-dashboard.html">QA Dashboard</a> ·
+        <a href="${base}/api/tasks?stage=2&annotator_id=${encodeURIComponent(id)}&limit=5" target="_blank">Tasks API</a> ·
+        <a href="${base}/api/clip?annotator=${encodeURIComponent(id)}" target="_blank">Clip API</a> ·
+        <a href="${base}/api/debug?annotator=${encodeURIComponent(id)}" target="_blank">Debug</a>`;
+      document.body.appendChild(c);
+    })();
+  </script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/public/sw.js').catch(()=>{});
+    }
+  </script>
+</body>
+</html>

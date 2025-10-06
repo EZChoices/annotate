@@ -14,6 +14,10 @@
     .notice{background:var(--card);border:1px solid var(--border);padding:.6rem .9rem;border-radius:10px}
     .notice.error{border-color:#c0392b;color:#7f1d1d}
     .notice.warn{border-color:#f39c12;color:#7a4f00}
+    .stage-menu{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 auto 1rem auto;max-width:720px}
+    .stage-menu__link{display:inline-flex;align-items:center;justify-content:center;padding:.45rem .9rem;border-radius:999px;border:1px solid var(--border);background:var(--card);color:inherit;text-decoration:none;font-size:.9rem;transition:background .15s ease,border-color .15s ease,color .15s ease}
+    .stage-menu__link:hover{border-color:var(--accent);color:var(--accent)}
+    .stage-menu__link.active{background:var(--accent);border-color:var(--accent);color:#fff}
     .translation-list{display:flex;flex-direction:column;gap:.75rem;margin:.75rem 0}
     .translation-row{display:grid;gap:.5rem;grid-template-columns:1fr;align-items:start;border:1px solid var(--border);border-radius:10px;padding:.75rem;background:var(--card)}
     .translation-row__header{display:flex;justify-content:space-between;align-items:center;gap:.75rem;font-size:.9rem;color:var(--muted);flex-wrap:wrap}
@@ -92,6 +96,10 @@
 </head>
 <body>
   <div class="container">
+    <nav class="stage-menu" aria-label="Stage 2 menu">
+      <a href="/stage2/index.html" class="stage-menu__link active">Annotation Workspace</a>
+      <a href="/stage2/qa-dashboard.html" class="stage-menu__link">QA Dashboard</a>
+    </nav>
     <div class="screen" id="screen_welcome">
       <h2>Verify transcript, translation, and mark code-switches.</h2>
       <p class="notice hide" id="offlineNotice">You're offline. Work is saved locally and will sync automatically.</p>
@@ -254,8 +262,9 @@
       c.innerHTML = `Quick Links:
         <a href="${base}/meta-v2/index.html">Meta V2</a> ·
         <a href="${base}/">Stage 2</a> ·
-        <a href="${base}/api/tasks?stage=2&annotator_id=${encodeURIComponent(id)}&limit=5" target="_blank">Tasks API</a> · 
-        <a href="${base}/api/clip?annotator=${encodeURIComponent(id)}" target="_blank">Clip API</a> · 
+        <a href="${base}/stage2/qa-dashboard.html">QA Dashboard</a> ·
+        <a href="${base}/api/tasks?stage=2&annotator_id=${encodeURIComponent(id)}&limit=5" target="_blank">Tasks API</a> ·
+        <a href="${base}/api/clip?annotator=${encodeURIComponent(id)}" target="_blank">Clip API</a> ·
         <a href="${base}/api/debug?annotator=${encodeURIComponent(id)}" target="_blank">Debug</a>`;
       document.body.appendChild(c);
     })();

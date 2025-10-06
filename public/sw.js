@@ -7,6 +7,7 @@ const STATIC_ASSETS = [
   '/',
   '/stage2',
   '/stage2/index.html',
+  '/stage2/qa-dashboard.html',
   '/public/styles.css',
   '/public/idb.js',
   '/stage2/app.js'
