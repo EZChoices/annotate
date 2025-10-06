@@ -22,6 +22,13 @@
     .translation-row.missing .translation-row__header{color:#b04a00}
     .translation-row__alert{color:#b04a00;font-size:.85rem;margin-top:.25rem}
     .translation-sticky{position:sticky;top:0;background:var(--bg);padding:.5rem 0;z-index:5}
+    .diar-timeline{position:relative;height:24px;border:1px solid var(--border);border-radius:8px;background:var(--card);margin:.75rem 0 .25rem;overflow:hidden}
+    .diar-timeline.empty{opacity:.65}
+    .diar-seg{position:absolute;top:0;bottom:0;border-radius:6px;background:var(--diar-color,rgba(52,152,219,0.55));box-shadow:0 0 0 1px rgba(0,0,0,0.18);cursor:pointer;transition:box-shadow .15s ease,transform .15s ease}
+    .diar-seg:hover{box-shadow:0 0 0 2px rgba(0,0,0,0.2);transform:translateY(-1px)}
+    .diar-seg.selected{box-shadow:0 0 0 2px var(--accent)}
+    .diar-row{display:flex;gap:.5rem;align-items:center;margin:.25rem 0;padding:.1rem .3rem;border-radius:6px;transition:background .15s ease}
+    .diar-row.selected{background:rgba(43,124,255,0.08)}
     .cs-timeline{position:relative;height:72px;border:1px solid var(--border);border-radius:10px;background:var(--card);margin:.75rem 0;overflow:hidden}
     .cs-span{position:absolute;top:12px;height:48px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:.85rem;color:#fff;cursor:pointer;box-shadow:0 0 0 1px rgba(0,0,0,0.12);transition:box-shadow .15s ease}
     .cs-span__label{pointer-events:none}
@@ -113,6 +120,7 @@
         <button class="secondary" id="nudgeEndMinus">End -200ms</button>
         <button class="secondary" id="nudgeEndPlus">End +200ms</button>
       </div>
+      <div id="diarTimeline" class="diar-timeline" aria-label="Speaker diarization timeline"></div>
       <div id="codeSwitchTimeline" class="cs-timeline" aria-live="polite"></div>
       <div id="codeSwitchNotice" class="notice warn hide"></div>
       <textarea id="codeSwitchVTT" class="vtt hide" aria-hidden="true" tabindex="-1"></textarea>
