@@ -1210,8 +1210,8 @@ function bindUI(){
     }
     if(speakerError){ speakerError.classList.add('hide'); speakerError.textContent = ''; }
     runValidationAndDisplay('screen_codeswitch');
-    show('screen_emotion');
-    runValidationAndDisplay('screen_emotion');
+    show('screen_emotionSafety');
+    runValidationAndDisplay('screen_emotionSafety');
   });
 
   const timelineEl = qs('timeline');
