@@ -12,6 +12,8 @@
     .controls{display:flex;gap:.5rem;margin:.5rem 0}
     textarea.vtt{width:100%;min-height:140px}
     .notice{background:var(--card);border:1px solid var(--border);padding:.6rem .9rem;border-radius:10px}
+    .notice.error{border-color:#c0392b;color:#7f1d1d}
+    .notice.warn{border-color:#f39c12;color:#7a4f00}
   </style>
 </head>
 <body>
@@ -35,6 +37,7 @@
       </div>
       <div class="controls">
         <button id="splitBtn" class="secondary">Split</button>
+        <button id="splitAllBtn" class="secondary">Split All</button>
         <button id="mergeBtn" class="secondary">Merge</button>
         <button id="rewindBtn" class="secondary">Rewind 3s</button>
         <button id="undoBtn" class="secondary">Undo</button>
@@ -127,7 +130,7 @@
 
     <div class="screen hide" id="screen_review">
       <h3>Review & Submit</h3>
-      <div id="errorsList" class="notice"></div>
+      <div id="errorsList" class="notice hide"></div>
       <div class="controls">
         <button id="submitBtn" class="primary">Submit & Next</button>
       </div>

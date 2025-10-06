@@ -4,16 +4,24 @@
 const EAIDB = (function(){
   const DB_NAME = 'ea_stage2_db';
   const STORE = 'ea_stage2_queue';
+  const LINT_STORE = 'ea_stage2_lint';
   let dbp = null;
 
   function open(){
     if(dbp) return dbp;
     dbp = new Promise((resolve, reject)=>{
-      const req = indexedDB.open(DB_NAME, 1);
-      req.onupgradeneeded = () => {
+      const req = indexedDB.open(DB_NAME, 2);
+      req.onupgradeneeded = (ev) => {
         const db = req.result;
-        if(!db.objectStoreNames.contains(STORE)){
-          db.createObjectStore(STORE, { keyPath: '_id', autoIncrement: true });
+        if(ev.oldVersion < 1){
+          if(!db.objectStoreNames.contains(STORE)){
+            db.createObjectStore(STORE, { keyPath: '_id', autoIncrement: true });
+          }
+        }
+        if(ev.oldVersion < 2){
+          if(!db.objectStoreNames.contains(LINT_STORE)){
+            db.createObjectStore(LINT_STORE, { keyPath: 'asset_id' });
+          }
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -63,6 +71,39 @@ const EAIDB = (function(){
     });
   }
 
-  return { enqueue, peekBatch, removeBatch };
+  async function saveLintReport(assetId, lint){
+    if(!assetId) return false;
+    const db = await open();
+    return new Promise((resolve, reject)=>{
+      try{
+        const tx = db.transaction(LINT_STORE, 'readwrite');
+        const store = tx.objectStore(LINT_STORE);
+        const record = { asset_id: assetId, lint: lint || { errors: [], warnings: [] }, ts: Date.now() };
+        store.put(record);
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => reject(tx.error);
+      }catch(err){
+        resolve(false);
+      }
+    });
+  }
+
+  async function getLintReport(assetId){
+    if(!assetId) return null;
+    const db = await open();
+    return new Promise((resolve)=>{
+      try{
+        const tx = db.transaction(LINT_STORE, 'readonly');
+        const store = tx.objectStore(LINT_STORE);
+        const req = store.get(assetId);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+      }catch(err){
+        resolve(null);
+      }
+    });
+  }
+
+  return { enqueue, peekBatch, removeBatch, saveLintReport, getLintReport };
 })();
 
