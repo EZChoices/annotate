@@ -1,6 +1,8 @@
 "use strict";
 
 const CACHE_NAME = 'ea-stage2-v1';
+const ASSET_CACHE = 'ea-stage2-assets';
+const ASSET_EXTENSIONS = ['.opus', '.mp3', '.mp4', '.m3u8', '.ts', '.vtt', '.ctm', '.rttm', '.json'];
 const STATIC_ASSETS = [
   '/',
   '/stage2',
@@ -27,6 +29,26 @@ self.addEventListener('fetch', (e)=>{
   // Network-first for API
   if(url.pathname.startsWith('/api/')){
     e.respondWith(fetch(e.request).catch(()=> caches.match(e.request)));
+    return;
+  }
+  // Stage 2 assets: cache-first with LRU eviction
+  if(e.request.method === 'GET' && ASSET_EXTENSIONS.some(ext => url.pathname.toLowerCase().endsWith(ext))){
+    e.respondWith((async()=>{
+      const cache = await caches.open(ASSET_CACHE);
+      const cached = await cache.match(e.request);
+      if(cached){
+        return cached;
+      }
+      const response = await fetch(e.request);
+      if(response && response.ok){
+        await cache.put(e.request, response.clone());
+        const keys = await cache.keys();
+        if(keys.length > 30){
+          await cache.delete(keys[0]);
+        }
+      }
+      return response;
+    })());
     return;
   }
   // Static: stale-while-revalidate
