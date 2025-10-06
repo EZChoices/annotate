@@ -30,14 +30,30 @@
     </nav>
     <section class="screen" aria-labelledby="qaDashboardTitle">
       <h2 id="qaDashboardTitle">QA Dashboard</h2>
-      <p class="notice qa-dashboard__intro">QA metrics will appear here once they're available. This placeholder screen reserves space for charts and summaries.</p>
-      <div class="qa-dashboard__empty" id="qaReportEmpty" role="status">No QA metrics to display yet.</div>
+      <p class="notice qa-dashboard__intro">Review your gold-clip QA results and detailed per-metric scores. Metrics update automatically after each submission.</p>
+      <div class="qa-dashboard__empty" id="qaReportEmpty" role="status">No QA metrics to display yet. Complete a gold clip to populate this dashboard.</div>
       <table class="qa-report-table hide" id="qaSummaryTable">
         <caption>Latest QA Summary</caption>
         <thead>
           <tr>
             <th scope="col">Metric</th>
             <th scope="col">Value</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <table class="qa-report-table hide" id="qaAnnotatorsTable">
+        <caption>Per-Annotator Averages</caption>
+        <thead>
+          <tr>
+            <th scope="col">Annotator</th>
+            <th scope="col">Clips</th>
+            <th scope="col">Pass Rate</th>
+            <th scope="col">Avg F1</th>
+            <th scope="col">Diar MAE (s)</th>
+            <th scope="col">Cue Δ (s)</th>
+            <th scope="col">Translation %</th>
+            <th scope="col">Char Coverage %</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -49,7 +65,12 @@
             <th scope="col">Clip</th>
             <th scope="col">Language</th>
             <th scope="col">QA Status</th>
-            <th scope="col">Comment</th>
+            <th scope="col">Code-Switch F1</th>
+            <th scope="col">Diar MAE (s)</th>
+            <th scope="col">Cue Δ (s)</th>
+            <th scope="col">Translation %</th>
+            <th scope="col">Char Coverage %</th>
+            <th scope="col">Time Spent</th>
           </tr>
         </thead>
         <tbody id="qaReportClips"></tbody>
@@ -84,6 +105,8 @@
       const emptyState = document.getElementById('qaReportEmpty');
       const summaryTable = document.getElementById('qaSummaryTable');
       const summaryBody = summaryTable ? summaryTable.querySelector('tbody') : null;
+      const annotatorsTable = document.getElementById('qaAnnotatorsTable');
+      const annotatorsBody = annotatorsTable ? annotatorsTable.querySelector('tbody') : null;
       const clipsTable = document.getElementById('qaClipsTable');
       const clipsBody = document.getElementById('qaReportClips');
 
@@ -105,20 +128,30 @@
       }
 
       if(emptyState){ emptyState.classList.add('hide'); }
+      const formatPercent = (value, digits = 1)=>{
+        if(typeof value !== 'number' || !Number.isFinite(value)) return 'N/A';
+        return `${(value * 100).toFixed(digits)}%`;
+      };
+      const formatSeconds = (value, digits = 2)=>{
+        if(typeof value !== 'number' || !Number.isFinite(value)) return 'N/A';
+        return `${value.toFixed(digits)} s`;
+      };
+
       if(summaryTable && summaryBody){
-        const formatScore = (value)=>{
-          if(typeof value === 'number'){ return `${Math.round(value * 100)}%`; }
-          if(typeof value === 'string' && value.trim() !== ''){ return value; }
-          return 'N/A';
-        };
+        const summary = report.summary || {};
         const rows = [
           ['Generated At', report.generatedAt ? new Date(report.generatedAt).toLocaleString() : 'Unknown'],
           ['Annotator', report.annotator || 'anonymous'],
-          ['Total Gold Clips', report.summary && report.summary.totalGoldClips != null ? report.summary.totalGoldClips : '0'],
-          ['Reviewed Clips', report.summary && report.summary.reviewedClips != null ? report.summary.reviewedClips : '0'],
-          ['Accuracy Score', formatScore(report.summary && report.summary.accuracyScore)],
-          ['Consistency Score', formatScore(report.summary && report.summary.consistencyScore)],
-          ['Notes', report.summary && report.summary.notes ? report.summary.notes : 'No notes available']
+          ['Total Gold Clips', summary.totalGoldClips != null ? summary.totalGoldClips : '0'],
+          ['Reviewed Clips', summary.reviewedClips != null ? summary.reviewedClips : '0'],
+          ['Pass Rate', formatPercent(summary.passRate || 0)],
+          ['Average Code-Switch F1', formatPercent(summary.averageCodeSwitchF1 || 0)],
+          ['Average Diarization MAE', formatSeconds(summary.averageDiarizationMAE || 0)],
+          ['Average Cue Length', formatSeconds(summary.averageCueLengthSec || 0)],
+          ['Average Cue Δ', formatSeconds(summary.averageCueDiffSec || 0)],
+          ['Translation Completeness', formatPercent(summary.translationCompletenessAvg || 0)],
+          ['Translation Char Coverage', formatPercent(summary.translationCharRatioAvg || 0)],
+          ['Average Time Spent', formatSeconds(summary.averageTimeSpentSec || 0)]
         ];
         summaryBody.innerHTML = '';
         rows.forEach(([label, value])=>{
@@ -135,6 +168,42 @@
         summaryTable.classList.remove('hide');
       }
 
+      if(annotatorsTable && annotatorsBody){
+        annotatorsBody.innerHTML = '';
+        const perAnnotator = Array.isArray(report.perAnnotator) ? report.perAnnotator : [];
+        if(perAnnotator.length){
+          perAnnotator.forEach((row)=>{
+            const tr = document.createElement('tr');
+            const cells = [
+              row.annotator_id || 'anonymous',
+              row.clips != null ? row.clips : '0',
+              formatPercent(row.passRate || 0),
+              formatPercent(row.averageCodeSwitchF1 || 0),
+              formatSeconds(row.averageDiarizationMAE || 0),
+              formatSeconds(row.averageCueDiffSec || 0),
+              formatPercent(row.translationCompletenessAvg || 0),
+              formatPercent(row.translationCharRatioAvg || 0)
+            ];
+            cells.forEach((value, idx)=>{
+              const cell = document.createElement('td');
+              if(idx === 0){
+                const th = document.createElement('th');
+                th.scope = 'row';
+                th.textContent = value;
+                tr.appendChild(th);
+              } else {
+                cell.textContent = value;
+                tr.appendChild(cell);
+              }
+            });
+            annotatorsBody.appendChild(tr);
+          });
+          annotatorsTable.classList.remove('hide');
+        } else {
+          annotatorsTable.classList.add('hide');
+        }
+      }
+
       if(clipsTable && clipsBody){
         clipsBody.innerHTML = '';
         if(Array.isArray(report.clips) && report.clips.length){
@@ -146,13 +215,29 @@
             const langCell = document.createElement('td');
             langCell.textContent = clip.language || 'unknown';
             const statusCell = document.createElement('td');
-            statusCell.textContent = clip.qaStatus || 'Pending';
-            const commentCell = document.createElement('td');
-            commentCell.textContent = clip.comment || '—';
+            statusCell.textContent = (clip.qaStatus || 'pending').toString().toUpperCase();
+            const codeSwitchCell = document.createElement('td');
+            const diarCell = document.createElement('td');
+            const cueCell = document.createElement('td');
+            const translationCell = document.createElement('td');
+            const translationCharCell = document.createElement('td');
+            const timeCell = document.createElement('td');
+            const metrics = clip.metrics || {};
+            codeSwitchCell.textContent = typeof metrics.codeswitch_f1 === 'number' ? formatPercent(metrics.codeswitch_f1, 1) : 'N/A';
+            diarCell.textContent = typeof metrics.diarization_mae === 'number' ? formatSeconds(metrics.diarization_mae, 2) : 'N/A';
+            cueCell.textContent = typeof metrics.cue_diff_sec === 'number' ? formatSeconds(metrics.cue_diff_sec, 2) : 'N/A';
+            translationCell.textContent = typeof metrics.translation_completeness === 'number' ? formatPercent(metrics.translation_completeness, 1) : 'N/A';
+            translationCharCell.textContent = typeof metrics.translation_char_ratio === 'number' ? formatPercent(metrics.translation_char_ratio, 1) : 'N/A';
+            timeCell.textContent = typeof clip.timeSpentSec === 'number' ? formatSeconds(clip.timeSpentSec, 0) : 'N/A';
             tr.appendChild(clipCell);
             tr.appendChild(langCell);
             tr.appendChild(statusCell);
-            tr.appendChild(commentCell);
+            tr.appendChild(codeSwitchCell);
+            tr.appendChild(diarCell);
+            tr.appendChild(cueCell);
+            tr.appendChild(translationCell);
+            tr.appendChild(translationCharCell);
+            tr.appendChild(timeCell);
             clipsBody.appendChild(tr);
           });
           clipsTable.classList.remove('hide');
