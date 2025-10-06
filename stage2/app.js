@@ -34,6 +34,25 @@ const SPEAKER_GENDERS = ['male','female','nonbinary','unknown'];
 const SPEAKER_AGE_BANDS = ['child','teen','young_adult','adult','elderly','unknown'];
 const SPEAKER_DIALECTS = ['Levantine','Iraqi','Gulf','Yemeni','Egyptian','Maghrebi','MSA','Mixed','Other','Unknown'];
 
+const MANIFEST_STORAGE_KEY = 'ea_stage2_manifest';
+
+function saveManifestToStorage(manifest){
+  if(!manifest) return;
+  try{
+    localStorage.setItem(MANIFEST_STORAGE_KEY, JSON.stringify(manifest));
+  }catch{}
+}
+
+function loadManifestFromStorage(){
+  try{
+    const raw = localStorage.getItem(MANIFEST_STORAGE_KEY);
+    if(!raw) return null;
+    return JSON.parse(raw);
+  }catch{
+    return null;
+  }
+}
+
 function getAnnotatorId(){
   try{
     const k = 'ea_stage2_annotator_id';
@@ -78,20 +97,54 @@ function show(id){
 async function loadManifest(){
   const annot = encodeURIComponent(EAQ.state.annotator);
   const url = `/api/tasks?stage=2&annotator_id=${annot}`;
-  const res = await fetch(url, {cache:'no-store'});
-  if(!res.ok) throw new Error('tasks fetch');
-  EAQ.state.manifest = await res.json();
-  return EAQ.state.manifest;
+  try{
+    const res = await fetch(url, {cache:'no-store'});
+    if(!res.ok) throw new Error('tasks fetch');
+    const manifest = await res.json();
+    EAQ.state.manifest = manifest;
+    saveManifestToStorage(manifest);
+    return manifest;
+  }catch(err){
+    const cached = loadManifestFromStorage();
+    if(cached){
+      EAQ.state.manifest = cached;
+      return cached;
+    }
+    throw err;
+  }
 }
 
 function currentItem(){
   const m = EAQ.state.manifest; if(!m||!m.items) return null; return m.items[EAQ.state.idx]||null;
 }
 
+function prefetchAssetsForItem(item){
+  if(!item) return;
+  const media = item.media || {};
+  const prefill = item.prefill || {};
+  const urls = [
+    media.audio_proxy_url,
+    media.video_hls_url,
+    prefill.diarization_rttm_url,
+    prefill.transcript_vtt_url,
+    prefill.transcript_ctm_url,
+    prefill.translation_vtt_url,
+    prefill.code_switch_vtt_url
+  ];
+  urls.forEach((url)=>{
+    if(!url) return;
+    try{
+      fetchWithProxy(url).catch(()=>{});
+    }catch{}
+  });
+}
+
 async function prefetchNext(){
   try{
-    const it = EAQ.state.manifest.items[EAQ.state.idx+1];
-    if(it && it.media && it.media.audio_proxy_url){ fetch(it.media.audio_proxy_url).catch(()=>{}); }
+    const manifest = EAQ.state.manifest;
+    if(!manifest || !Array.isArray(manifest.items)) return;
+    const it = manifest.items[EAQ.state.idx+1];
+    if(it){ prefetchAssetsForItem(it); }
   }catch{}
 }
 
@@ -101,6 +154,7 @@ function loadAudio(){
   EAQ.audio = a;
   a.src = it.media && it.media.audio_proxy_url ? it.media.audio_proxy_url : '/public/sample.mp4';
   a.play().catch(()=>{});
+  prefetchAssetsForItem(it);
   const wave = qs('wave'); if(wave){ Wave.attach(wave); Wave.load(a.src); }
   const tl = qs('timeline');
   if(tl){
