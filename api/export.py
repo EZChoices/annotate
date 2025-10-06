@@ -2,6 +2,7 @@ from fastapi import FastAPI, Query
 from fastapi.responses import StreamingResponse, JSONResponse
 import io, json, zipfile, os, requests
 from datetime import datetime
+from collections import defaultdict
 
 app = FastAPI()
 
@@ -19,6 +20,87 @@ def _headers():
         "apikey": SUPABASE_KEY or "",
         "Authorization": f"Bearer {SUPABASE_KEY}" if SUPABASE_KEY else "",
         "Accept": "application/json",
+    }
+
+
+def _average(values):
+    vals = [v for v in values if isinstance(v, (int, float))]
+    if not vals:
+        return 0
+    return sum(vals) / len(vals)
+
+
+def _build_qa_report(data):
+    qa_payload = data.get("qa") if isinstance(data, dict) else None
+    if not qa_payload:
+        return None
+
+    clip_entries = qa_payload if isinstance(qa_payload, list) else [qa_payload]
+    clips = []
+    annotator_groups = defaultdict(list)
+
+    for entry in clip_entries:
+        if not isinstance(entry, dict):
+            continue
+        clip_id = entry.get("clip_id") or entry.get("clipId") or data.get("asset_id")
+        metrics = entry.get("metrics") or {}
+        if not isinstance(metrics, dict):
+            metrics = {}
+        cues_metrics = metrics.get("cues") if isinstance(metrics.get("cues"), dict) else {}
+        qa_entry = {
+            "clipId": clip_id,
+            "annotator_id": entry.get("annotator_id"),
+            "gold_target": entry.get("gold_target"),
+            "gold_check": entry.get("gold_check"),
+            "time_spent_sec": entry.get("time_spent_sec"),
+            "codeswitch_f1": entry.get("codeswitch_f1"),
+            "diarization_mae": entry.get("diarization_mae"),
+            "cue_diff_sec": entry.get("cue_diff_sec") or cues_metrics.get("targetDiffSec"),
+            "translation_completeness": entry.get("translation_completeness"),
+            "translation_char_ratio": entry.get("translation_char_ratio") or cues_metrics.get("translationCompleteness"),
+            "translation_correctness": entry.get("translation_correctness")
+        }
+        clips.append(qa_entry)
+        annotator = qa_entry.get("annotator_id") or "anonymous"
+        annotator_groups[annotator].append(qa_entry)
+
+    if not clips:
+        return None
+
+    summary = {
+        "totalGoldClips": sum(1 for clip in clips if clip.get("gold_target")),
+        "reviewedClips": len(clips),
+        "passCount": sum(1 for clip in clips if clip.get("gold_check") == "pass"),
+        "averageCodeSwitchF1": _average([clip.get("codeswitch_f1") for clip in clips]),
+        "averageDiarizationMAE": _average([clip.get("diarization_mae") for clip in clips]),
+        "averageCueDiffSec": _average([clip.get("cue_diff_sec") for clip in clips]),
+        "translationCompletenessAvg": _average([clip.get("translation_completeness") for clip in clips]),
+        "translationCorrectnessAvg": _average([clip.get("translation_correctness") for clip in clips]),
+        "translationCharRatioAvg": _average([clip.get("translation_char_ratio") for clip in clips])
+    }
+    summary["passRate"] = (
+        summary["passCount"] / summary["reviewedClips"] if summary["reviewedClips"] else 0
+    )
+
+    per_annotator = []
+    for annotator, items in annotator_groups.items():
+        per_summary = {
+            "annotator_id": annotator,
+            "clips": len(items),
+            "passRate": _average([1 if clip.get("gold_check") == "pass" else 0 for clip in items]),
+            "averageCodeSwitchF1": _average([clip.get("codeswitch_f1") for clip in items]),
+            "averageDiarizationMAE": _average([clip.get("diarization_mae") for clip in items]),
+            "averageCueDiffSec": _average([clip.get("cue_diff_sec") for clip in items]),
+            "translationCompletenessAvg": _average([clip.get("translation_completeness") for clip in items]),
+            "translationCharRatioAvg": _average([clip.get("translation_char_ratio") for clip in items])
+        }
+        per_annotator.append(per_summary)
+
+    return {
+        "generatedAt": datetime.utcnow().isoformat() + "Z",
+        "summary": summary,
+        "perAnnotator": per_annotator,
+        "clips": clips
     }
 
 
@@ -56,6 +138,9 @@ async def export_asset(asset_id: str = Query(...)):
             z.writestr("diarization.rttm", files.get("diarization_rttm"))
         if files.get("code_switch_spans_json"):
             z.writestr("code_switch_spans.json", files.get("code_switch_spans_json"))
+        qa_report = _build_qa_report(data)
+        if qa_report:
+            z.writestr("qa_report.json", json.dumps(qa_report, ensure_ascii=False, indent=2))
 
     mem.seek(0)
     fname = f"export_{asset_id}_{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.zip"
