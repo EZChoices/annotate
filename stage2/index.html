@@ -14,6 +14,27 @@
     .notice{background:var(--card);border:1px solid var(--border);padding:.6rem .9rem;border-radius:10px}
     .notice.error{border-color:#c0392b;color:#7f1d1d}
     .notice.warn{border-color:#f39c12;color:#7a4f00}
+    .translation-list{display:flex;flex-direction:column;gap:.75rem;margin:.75rem 0}
+    .translation-row{display:grid;gap:.5rem;grid-template-columns:1fr;align-items:start;border:1px solid var(--border);border-radius:10px;padding:.75rem;background:var(--card)}
+    .translation-row__header{display:flex;justify-content:space-between;align-items:center;gap:.75rem;font-size:.9rem;color:var(--muted);flex-wrap:wrap}
+    .translation-row__original{background:rgba(0,0,0,0.04);padding:.5rem .65rem;border-radius:6px;font-size:.95rem;line-height:1.4}
+    .translation-row__input{width:100%;min-height:72px}
+    .translation-row.missing .translation-row__header{color:#b04a00}
+    .translation-row__alert{color:#b04a00;font-size:.85rem;margin-top:.25rem}
+    .translation-sticky{position:sticky;top:0;background:var(--bg);padding:.5rem 0;z-index:5}
+    .cs-timeline{position:relative;height:72px;border:1px solid var(--border);border-radius:10px;background:var(--card);margin:.75rem 0;overflow:hidden}
+    .cs-span{position:absolute;top:12px;height:48px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:.85rem;color:#fff;cursor:pointer;box-shadow:0 0 0 1px rgba(0,0,0,0.12);transition:box-shadow .15s ease}
+    .cs-span__label{pointer-events:none}
+    .cs-span.selected{box-shadow:0 0 0 2px var(--accent)}
+    .cs-span.active-preview{opacity:.6;pointer-events:none}
+    .cs-span--eng{background:rgba(43,124,255,0.35);border:1px solid rgba(43,124,255,0.6)}
+    .cs-span--fra{background:rgba(155,89,182,0.35);border:1px solid rgba(155,89,182,0.6)}
+    .cs-span--other{background:rgba(22,160,133,0.35);border:1px solid rgba(22,160,133,0.6)}
+    .cs-handle{position:absolute;top:0;width:10px;height:100%;background:rgba(255,255,255,0.85);cursor:ew-resize}
+    .cs-handle.start{left:0;border-radius:8px 0 0 8px}
+    .cs-handle.end{right:0;border-radius:0 8px 8px 0}
+    .cs-toast{position:fixed;left:50%;bottom:1.5rem;transform:translateX(-50%);background:rgba(33,33,33,0.92);color:#fff;padding:.6rem 1.2rem;border-radius:999px;box-shadow:0 8px 24px rgba(0,0,0,0.25);opacity:0;pointer-events:none;transition:opacity .2s ease}
+    .cs-toast.show{opacity:1}
   </style>
 </head>
 <body>
@@ -53,8 +74,9 @@
     <div class="screen hide" id="screen_translation">
       <h3>Translation — one translation per cue</h3>
       <label style="display:flex;align-items:center;gap:.5rem"><input type="checkbox" id="lockTranslation" checked> Lock translation timings to transcript</label>
-      <label>Translation (WebVTT)</label>
-      <textarea id="translationVTT" class="vtt" placeholder="WEBVTT\n\n00:00.000 --> 00:02.000\nHello"></textarea>
+      <div class="translation-sticky notice warn hide" id="translationStickyNotice"></div>
+      <div id="translationList" class="translation-list" aria-live="polite"></div>
+      <textarea id="translationVTT" class="vtt hide" aria-hidden="true" tabindex="-1"></textarea>
       <div class="controls">
         <button id="translationNext" class="primary">Approve Translation</button>
       </div>
@@ -63,19 +85,25 @@
     <div class="screen hide" id="screen_codeswitch">
       <h3>Code-Switch — press while the switch lasts</h3>
       <div class="controls">
-        <button id="btnEN" class="secondary">EN</button>
-        <button id="btnFR" class="secondary">FR</button>
-        <button id="btnOther" class="secondary">Other</button>
-        <button id="nudgeMinus" class="secondary">-200ms</button>
-        <button id="nudgePlus" class="secondary">+200ms</button>
-        <button id="csUndo" class="secondary">Undo</button>
+        <button class="secondary" data-lang="eng" id="btnEN">EN</button>
+        <button class="secondary" data-lang="fra" id="btnFR">FR</button>
+        <button class="secondary" data-lang="other" id="btnOther">Other</button>
+        <button class="secondary" id="csUndo">Undo</button>
+        <button class="secondary" id="csRedo">Redo</button>
       </div>
-      <label>Code-Switch Spans (WebVTT)</label>
-      <textarea id="codeSwitchVTT" class="vtt" placeholder="WEBVTT\n\n00:03.200 --> 00:04.000\nEN"></textarea>
+      <div class="controls">
+        <button class="secondary" id="nudgeStartMinus">Start -200ms</button>
+        <button class="secondary" id="nudgeStartPlus">Start +200ms</button>
+        <button class="secondary" id="nudgeEndMinus">End -200ms</button>
+        <button class="secondary" id="nudgeEndPlus">End +200ms</button>
+      </div>
+      <div id="codeSwitchTimeline" class="cs-timeline" aria-live="polite"></div>
+      <div id="codeSwitchNotice" class="notice warn hide"></div>
+      <textarea id="codeSwitchVTT" class="vtt hide" aria-hidden="true" tabindex="-1"></textarea>
       <div class="controls">
         <button id="csNext" class="primary">Continue</button>
       </div>
-    </d
+    </div>
       
           <div class="screen hide" id="screen_speaker">
       <h3>Speaker Attributes (per speaker)</h3>
@@ -139,6 +167,7 @@
       </div>
     </div>
   </div>
+  <div id="csToast" class="cs-toast" role="status" aria-live="polite"></div>
 
   <script src="/public/idb.js"></script>
   <script src="/public/env.js"></script>

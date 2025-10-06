@@ -16,10 +16,23 @@ const Timeline = (function(){
       const c = cues[i];
       const seg = document.createElement('div');
       seg.className = 'tl-seg';
+      seg.dataset.index = String(i);
       seg.style.left = pct(c.start);
       seg.style.width = `calc(${pct(c.end)} - ${pct(c.start)})`;
       const h = document.createElement('div'); h.className='tl-handle'; h.dataset.index = String(i);
       seg.appendChild(h);
+      seg.addEventListener('mousedown', (ev)=>{
+        if(ev.target && ev.target.classList.contains('tl-handle')) return;
+        root.dispatchEvent(new CustomEvent('tl:cue-select', { detail:{ index:i, cue:c }, bubbles:true }));
+      });
+      seg.addEventListener('touchstart', (ev)=>{
+        if(ev.target && ev.target.classList.contains('tl-handle')) return;
+        root.dispatchEvent(new CustomEvent('tl:cue-select', { detail:{ index:i, cue:c }, bubbles:true }));
+      }, { passive:true });
+      seg.addEventListener('click', (ev)=>{
+        if(ev.target && ev.target.classList.contains('tl-handle')) return;
+        root.dispatchEvent(new CustomEvent('tl:cue-select', { detail:{ index:i, cue:c }, bubbles:true }));
+      });
       frag.appendChild(seg);
     }
     root.appendChild(frag);
