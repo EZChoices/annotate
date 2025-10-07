@@ -66,6 +66,78 @@ function sumDurationsFromVTT(vttPath) {
   return total;
 }
 
+function normalizeVoiceTag(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (/^S\d+$/i.test(raw)) {
+    return raw.toUpperCase();
+  }
+  const spkMatch = /^SPK(\d+)$/i.exec(raw);
+  if (spkMatch) {
+    const num = Number(spkMatch[1]);
+    if (Number.isFinite(num) && num > 0) {
+      return `S${num}`;
+    }
+  }
+  if (/^\d+$/.test(raw)) {
+    const num = Number(raw);
+    if (Number.isFinite(num) && num > 0) {
+      return `S${num}`;
+    }
+  }
+  if (/^[A-Za-z]$/.test(raw)) {
+    const num = raw.toUpperCase().charCodeAt(0) - 64;
+    if (num > 0) {
+      return `S${num}`;
+    }
+  }
+  return raw;
+}
+
+function parseVttCues(content) {
+  const cues = [];
+  if (!content) return cues;
+  const normalized = content.replace(/\r/g, '');
+  const blocks = normalized.split(/\n\n+/);
+  for (const block of blocks) {
+    const lines = block.split(/\n/).filter((line) => line.trim() !== '');
+    if (!lines.length) continue;
+    let timeIndex = lines.findIndex((line) => line.includes('-->'));
+    if (timeIndex === -1) continue;
+    const timeLine = lines[timeIndex];
+    const parts = timeLine.split('-->');
+    if (parts.length < 2) continue;
+    const start = parseVttTimestamp(parts[0]);
+    const end = parseVttTimestamp(parts[1]);
+    if (Number.isNaN(start) || Number.isNaN(end)) continue;
+    const text = lines.slice(timeIndex + 1).join('\n');
+    cues.push({ start, end, text });
+  }
+  return cues;
+}
+
+function extractVoiceTagsFromVtt(vttPath) {
+  if (!fs.existsSync(vttPath)) {
+    return [];
+  }
+  const content = fs.readFileSync(vttPath, 'utf-8');
+  const cues = parseVttCues(content);
+  const tags = [];
+  cues.forEach((cue) => {
+    const trimmed = String(cue.text || '').trim();
+    const match = /^<v\s+([^>]+)>/i.exec(trimmed);
+    if (!match) return;
+    const speaker = normalizeVoiceTag(match[1]);
+    if (!speaker) return;
+    const text = trimmed.replace(/^<v\s+[^>]+>/i, '').trim();
+    const start = Number.isFinite(cue.start) ? Number(cue.start.toFixed(3)) : null;
+    const end = Number.isFinite(cue.end) ? Number(cue.end.toFixed(3)) : null;
+    tags.push({ speaker, start, end, text });
+  });
+  return tags;
+}
+
 function hashToSplit(id, ratios, labels) {
   const hash = crypto.createHash('md5').update(id).digest('hex');
   const hashValue = parseInt(hash.slice(0, 8), 16);
@@ -252,6 +324,8 @@ function main() {
       files[fileName] = path.relative(datasetRoot, destPath);
     }
 
+    const voiceTags = extractVoiceTagsFromVtt(transcriptPath);
+
     datasetRecords.push({
       asset_id: assetId,
       split,
@@ -264,6 +338,7 @@ function main() {
         cue_delta_sec: Number(qa.cue_delta_sec),
         translation_pct_in_bounds: Number(qa.translation_pct_in_bounds),
       },
+      voice_tags: voiceTags,
       files,
     });
 

@@ -45,6 +45,7 @@ const EAQ = {
     diarSelectedIndex: null,
     diarColorMap: {},
     diarizationSourcePath: null,
+    diarDrag: null,
     speakerProfiles: [],
     startedAt: 0,
     lintReport: { errors: [], warnings: [] }
@@ -93,6 +94,10 @@ const CODE_SWITCH_LANGS = {
 };
 
 const CODE_SWITCH_MIN_DURATION = EAQ.SPEC.csMinSec || 0.4;
+const DIAR_MIN_DURATION = 0.4;
+const DIAR_SNAP_SEC = 0.12;
+
+let voiceHotkeyBound = false;
 
 const EMOTION_OPTIONS = [
   { id: 'neutral', label: 'Neutral', color: '#6b7280', background: 'rgba(107,114,128,0.35)' },
@@ -445,6 +450,165 @@ function stripSpeakerTags(text){
   return String(text||'').replace(/<\/?v[^>]*>/gi, '').trim();
 }
 
+function removeLeadingVoiceTag(text){
+  return String(text||'').replace(/^<v[^>]*>/i, '').replace(/^\s+/, '');
+}
+
+function extractVoiceTag(text){
+  const match = /^<v\s+([^>]+)>/i.exec(String(text||'').trim());
+  return match ? match[1].trim() : null;
+}
+
+function normalizeVoiceToken(token){
+  if(!token) return null;
+  const raw = String(token).trim();
+  if(!raw){ return null; }
+  if(/^s\d+$/i.test(raw)){ return raw.toUpperCase(); }
+  const spkMatch = /^spk(\d+)$/i.exec(raw);
+  if(spkMatch){
+    const idx = parseInt(spkMatch[1], 10);
+    return Number.isFinite(idx) && idx > 0 ? `S${idx}` : null;
+  }
+  if(/^\d+$/.test(raw)){ const num = parseInt(raw, 10); return num > 0 ? `S${num}` : null; }
+  if(/^[A-Za-z]$/.test(raw)){ const num = raw.toUpperCase().charCodeAt(0) - 64; return num > 0 ? `S${num}` : null; }
+  return null;
+}
+
+function normalizeCueVoiceTag(text){
+  const raw = String(text||'');
+  if(!raw.trim()){ return ''; }
+  const trimmed = raw.replace(/^\s+/, '');
+  const existing = /^<v\s+([^>]+)>([\s\S]*)$/i.exec(trimmed);
+  if(existing){
+    const voiceRaw = existing[1].trim();
+    const rest = existing[2].replace(/^\s+/, '');
+    const normalizedVoice = normalizeVoiceToken(voiceRaw) || voiceRaw;
+    return `<v ${normalizedVoice}>${rest}`;
+  }
+  const patterns = [
+    /^(?:speaker|spk|spkr|voice)\s*([A-Za-z0-9]+)\s*[:：\-]\s*([\s\S]*)$/i,
+    /^(S\d{1,2})\s*[:：\-]\s*([\s\S]*)$/i,
+    /^([A-Za-z])\s*[:：\-]\s*([\s\S]*)$/i
+  ];
+  for(const pattern of patterns){
+    const match = pattern.exec(trimmed);
+    if(match){
+      const voice = normalizeVoiceToken(match[1]);
+      if(voice){
+        const remainder = match[2] != null ? String(match[2]) : '';
+        return `<v ${voice}>${remainder.trim()}`;
+      }
+    }
+  }
+  return trimmed;
+}
+
+function normalizeTranscriptCues(cues, options){
+  const opts = Object.assign({ writeState: false, updateVtt: true, updateTextarea: true }, options||{});
+  const normalized = VTT.normalize(Array.isArray(cues) ? cues : []).map((cue)=>{
+    const text = typeof cue.text === 'string' ? cue.text : '';
+    return Object.assign({}, cue, { text: normalizeCueVoiceTag(text) });
+  });
+  if(opts.writeState){
+    EAQ.state.transcriptCues = normalized.map((cue)=> Object.assign({}, cue));
+    if(opts.updateVtt !== false){
+      const serialized = VTT.stringify(normalized);
+      EAQ.state.transcriptVTT = serialized;
+      if(opts.updateTextarea !== false){
+        const box = qs('transcriptVTT');
+        if(box){ box.value = serialized; }
+      }
+    }
+  }
+  return normalized;
+}
+
+function cloneTranscriptCues(list){
+  return (Array.isArray(list) ? list : []).map((cue)=> Object.assign({}, cue));
+}
+
+function getActiveCueIndex(){
+  if(Number.isFinite(EAQ.state.activeCueIndex)){
+    return EAQ.state.activeCueIndex;
+  }
+  const translationList = qs('translationList');
+  if(translationList){
+    const focused = translationList.querySelector('textarea:focus');
+    if(focused){
+      const idx = parseInt(focused.getAttribute('data-translation-index')||'-1', 10);
+      if(Number.isFinite(idx) && idx >= 0){ return idx; }
+    }
+  }
+  const cues = EAQ.state.transcriptCues || [];
+  const audio = EAQ.audio;
+  if(audio && Number.isFinite(audio.currentTime)){
+    const time = audio.currentTime;
+    const idx = cues.findIndex((cue)=> time >= (+cue.start||0) && time <= (+cue.end||+cue.start));
+    if(idx !== -1){ return idx; }
+  }
+  return cues.length ? 0 : null;
+}
+
+function resolveVoiceTagForCurrent(){
+  const segments = Array.isArray(EAQ.state.diarSegments) ? EAQ.state.diarSegments : [];
+  if(Number.isFinite(EAQ.state.diarSelectedIndex)){
+    const seg = segments[EAQ.state.diarSelectedIndex];
+    if(seg){ return speakerLabelForId(seg.speaker); }
+  }
+  const audio = EAQ.audio;
+  if(audio && Number.isFinite(audio.currentTime)){
+    const t = audio.currentTime;
+    const seg = segments.find((entry)=> t >= (Number(entry.start)||0) && t <= (Number(entry.end)||Number(entry.start)));
+    if(seg){ return speakerLabelForId(seg.speaker); }
+  }
+  return null;
+}
+
+function applyVoiceTagToCue(index, voiceTag){
+  const cues = cloneTranscriptCues(EAQ.state.transcriptCues || []);
+  if(index == null || index < 0 || index >= cues.length) return false;
+  const normalizedVoice = normalizeVoiceToken(voiceTag) || voiceTag;
+  const baseText = removeLeadingVoiceTag(cues[index].text);
+  const updatedText = normalizedVoice ? `<v ${normalizedVoice}>${baseText}` : baseText;
+  cues[index].text = updatedText;
+  EAQ.state.activeCueIndex = index;
+  normalizeTranscriptCues(cues, { writeState: true });
+  updateTranslationVTTFromState();
+  renderTranslationList({ preserveScroll: true });
+  refreshTimeline();
+  return true;
+}
+
+function handleVoiceTagHotkey(ev){
+  if(!ev || ev.defaultPrevented) return;
+  const isVoiceHotkey = ev.altKey && !ev.ctrlKey && !ev.metaKey && (ev.code === 'KeyV' || ev.key === 'v' || ev.key === 'V');
+  if(!isVoiceHotkey) return;
+  ev.preventDefault();
+  const activeIndex = getActiveCueIndex();
+  if(activeIndex == null){ return; }
+  let resolvedVoice = resolveVoiceTagForCurrent();
+  const speakerOptions = getUniqueSpeakersWithLabels();
+  if(!resolvedVoice && speakerOptions.length === 1){
+    resolvedVoice = speakerOptions[0].label || speakerOptions[0].speakerId;
+  }
+  if(!resolvedVoice && speakerOptions.length > 1){
+    const optionList = speakerOptions.map((opt)=> opt.label || opt.speakerId).join(', ');
+    const promptMessage = optionList
+      ? `Set voice tag for this cue. Available: ${optionList}. Enter S-number to assign or leave blank to remove.`
+      : 'Set voice tag for this cue (e.g., S1). Leave blank to remove.';
+    const response = window.prompt(promptMessage, '');
+    if(response == null){ return; }
+    const trimmed = response.trim();
+    if(!trimmed){
+      applyVoiceTagToCue(activeIndex, null);
+      return;
+    }
+    resolvedVoice = normalizeVoiceToken(trimmed) || trimmed;
+  }
+  if(!resolvedVoice){ return; }
+  applyVoiceTagToCue(activeIndex, resolvedVoice);
+}
+
 // Normalize diarization segment bounds and provide safe defaults.
 function sanitizeDiarSegment(segment){
   if(!segment || typeof segment !== 'object'){ return { start:0, end:0, duration:0, speaker:'spk', label:'S1' }; }
@@ -502,6 +666,46 @@ function colorForSpeaker(speakerId){
   return map[key] || '#7f8c8d';
 }
 
+function buildSpeakerLabelMap(){
+  const map = new Map();
+  const segments = Array.isArray(EAQ.state.diarSegments) ? EAQ.state.diarSegments : [];
+  segments.forEach((seg)=>{
+    if(!seg) return;
+    const id = seg.speaker ? String(seg.speaker) : 'spk';
+    if(!map.has(id)){
+      const match = /^spk(\d+)$/i.exec(id);
+      const fallback = match ? `S${parseInt(match[1], 10)}` : id;
+      const label = seg.label || fallback || id;
+      map.set(id, label);
+    }
+  });
+  return map;
+}
+
+function speakerLabelForId(speakerId){
+  const id = speakerId ? String(speakerId) : 'spk';
+  const map = buildSpeakerLabelMap();
+  if(map.has(id)){ return map.get(id); }
+  const spkMatch = /^spk(\d+)$/i.exec(id);
+  if(spkMatch){ return `S${parseInt(spkMatch[1], 10)}`; }
+  return id;
+}
+
+function getUniqueSpeakersWithLabels(){
+  const segments = Array.isArray(EAQ.state.diarSegments) ? EAQ.state.diarSegments : [];
+  const labelMap = buildSpeakerLabelMap();
+  const seen = new Set();
+  const list = [];
+  segments.forEach((seg)=>{
+    if(!seg) return;
+    const id = seg.speaker ? String(seg.speaker) : 'spk';
+    if(seen.has(id)) return;
+    seen.add(id);
+    list.push({ speakerId: id, label: labelMap.get(id) || speakerLabelForId(id) });
+  });
+  return list;
+}
+
 // Store diarization segments in state and refresh dependent UI (timeline + list).
 function setDiarSegments(segments, options){
   const opts = Object.assign({ preserveSelection: false, sourcePath: undefined, focusSegment: null }, options||{});
@@ -548,6 +752,26 @@ function setDiarSegments(segments, options){
   }
   renderDiarTimeline();
   renderDiarList();
+}
+
+function cloneDiarSegments(list){
+  return (Array.isArray(list) ? list : []).map((seg)=> Object.assign({}, seg));
+}
+
+function snapDiarTime(time){
+  if(!Number.isFinite(time)) return 0;
+  return Math.max(0, Math.round(time / DIAR_SNAP_SEC) * DIAR_SNAP_SEC);
+}
+
+function generateSpeakerId(){
+  const segments = Array.isArray(EAQ.state.diarSegments) ? EAQ.state.diarSegments : [];
+  const profiles = Array.isArray(EAQ.state.speakerProfiles) ? EAQ.state.speakerProfiles : [];
+  const existing = new Set();
+  segments.forEach((seg)=>{ if(seg && seg.speaker){ existing.add(String(seg.speaker)); } });
+  profiles.forEach((profile)=>{ if(profile && profile.speaker_id){ existing.add(String(profile.speaker_id)); } });
+  let idx = existing.size + 1;
+  while(existing.has(`spk${idx}`)){ idx += 1; }
+  return `spk${idx}`;
 }
 
 // Focus the nearest transcript cue and audio position for a diarization selection.
@@ -601,6 +825,166 @@ function scrollTranscriptToTime(timeSec){
   }
 }
 
+function diarSegmentDuration(seg){
+  if(!seg) return 0;
+  const start = Number(seg.start) || 0;
+  const end = Number(seg.end) || start;
+  return Math.max(0, end - start);
+}
+
+function addDiarBoundaryAt(time){
+  const duration = estimateMediaDuration();
+  if(!Number.isFinite(duration) || duration <= DIAR_MIN_DURATION * 2){
+    return false;
+  }
+  const segments = cloneDiarSegments(EAQ.state.diarSegments || []);
+  if(!segments.length){
+    const initialSpeaker = generateSpeakerId();
+    segments.push({ start: 0, end: duration, speaker: initialSpeaker });
+  }
+  const snapped = snapDiarTime(time);
+  const focusIndex = segments.findIndex((seg)=>{
+    if(!seg) return false;
+    const start = Number(seg.start) || 0;
+    const end = Number(seg.end) || start;
+    if(end - start < DIAR_MIN_DURATION * 2 - 0.001){ return false; }
+    return snapped > start + DIAR_MIN_DURATION - 0.0005 && snapped < end - DIAR_MIN_DURATION + 0.0005;
+  });
+  if(focusIndex === -1){ return false; }
+  const target = segments[focusIndex];
+  const newBoundary = Math.max(target.start + DIAR_MIN_DURATION, Math.min(target.end - DIAR_MIN_DURATION, snapped));
+  if(newBoundary <= target.start + DIAR_MIN_DURATION - 0.0005 || newBoundary >= target.end - DIAR_MIN_DURATION + 0.0005){
+    return false;
+  }
+  const newSpeaker = generateSpeakerId();
+  const left = Object.assign({}, target, { end: newBoundary });
+  const right = Object.assign({}, target, { start: newBoundary, speaker: newSpeaker });
+  segments.splice(focusIndex, 1, left, right);
+  setDiarSegments(segments, { preserveSelection: false, focusSegment: right });
+  return true;
+}
+
+function mergeDiarSegments(index, direction){
+  const segments = cloneDiarSegments(EAQ.state.diarSegments || []);
+  if(!segments.length) return false;
+  const idx = Number.isFinite(index) ? index : EAQ.state.diarSelectedIndex;
+  if(!Number.isFinite(idx) || idx < 0 || idx >= segments.length){ return false; }
+  if(direction === 'prev'){
+    const prevIdx = idx - 1;
+    if(prevIdx < 0) return false;
+    const prev = segments[prevIdx];
+    const current = segments[idx];
+    const merged = Object.assign({}, prev, { end: Math.max(prev.end, current.end) });
+    segments.splice(prevIdx, 2, merged);
+    setDiarSegments(segments, { preserveSelection: false, focusSegment: merged });
+    return true;
+  }
+  const nextIdx = idx + 1;
+  if(nextIdx >= segments.length) return false;
+  const current = segments[idx];
+  const next = segments[nextIdx];
+  const merged = Object.assign({}, current, { end: Math.max(current.end, next.end) });
+  segments.splice(idx, 2, merged);
+  setDiarSegments(segments, { preserveSelection: false, focusSegment: merged });
+  return true;
+}
+
+function selectAdjacentDiarSegment(step){
+  const segments = Array.isArray(EAQ.state.diarSegments) ? EAQ.state.diarSegments : [];
+  if(!segments.length) return;
+  const current = Number.isFinite(EAQ.state.diarSelectedIndex) ? EAQ.state.diarSelectedIndex : -1;
+  const nextIndex = Math.max(0, Math.min(segments.length - 1, current + step));
+  selectDiarSegment(nextIndex, { focusTranscript: false });
+}
+
+function beginDiarDrag(index, edge, ev){
+  if(ev){ ev.preventDefault(); ev.stopPropagation(); }
+  const segments = cloneDiarSegments(EAQ.state.diarSegments || []);
+  if(index < 0 || index >= segments.length) return;
+  const container = qs('diarTimeline');
+  if(!container) return;
+  const rect = container.getBoundingClientRect();
+  EAQ.state.diarDrag = {
+    index,
+    edge,
+    pointerId: ev ? ev.pointerId : null,
+    rect,
+    original: cloneDiarSegments(segments),
+    working: cloneDiarSegments(segments)
+  };
+  selectDiarSegment(index, { focusTranscript: false });
+  document.addEventListener('pointermove', onDiarDragMove);
+  document.addEventListener('pointerup', endDiarDrag);
+  document.addEventListener('pointercancel', cancelDiarDrag);
+}
+
+function onDiarDragMove(ev){
+  const drag = EAQ.state.diarDrag;
+  if(!drag) return;
+  if(drag.pointerId != null && ev.pointerId != null && ev.pointerId !== drag.pointerId) return;
+  const container = qs('diarTimeline');
+  const rect = drag.rect || (container ? container.getBoundingClientRect() : null);
+  if(!rect) return;
+  const segments = cloneDiarSegments(drag.working || EAQ.state.diarSegments || []);
+  if(!segments.length) return;
+  const segment = segments[drag.index];
+  if(!segment) return;
+  const duration = Math.max(estimateMediaDuration() || 0, segments[segments.length - 1] ? Number(segments[segments.length - 1].end) || 0 : 0);
+  if(duration <= 0) return;
+  const clientX = ev.clientX != null ? ev.clientX : (ev.touches && ev.touches[0] ? ev.touches[0].clientX : rect.left);
+  const ratio = rect.width > 0 ? Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) : 0;
+  const pointerTime = snapDiarTime(ratio * duration);
+  const prev = drag.index > 0 ? segments[drag.index - 1] : null;
+  const next = drag.index < segments.length - 1 ? segments[drag.index + 1] : null;
+  if(drag.edge === 'start'){
+    const minStart = prev ? Math.max(Number(prev.start) + DIAR_MIN_DURATION, 0) : 0;
+    const maxStart = (Number(segment.end) || 0) - DIAR_MIN_DURATION;
+    if(prev && maxStart < minStart){ return; }
+    const newStart = Math.max(minStart, Math.min(maxStart, pointerTime));
+    if(!Number.isFinite(newStart)) return;
+    segment.start = newStart;
+    if(prev){ prev.end = newStart; }
+  } else {
+    const minEnd = (Number(segment.start) || 0) + DIAR_MIN_DURATION;
+    const cap = next ? (Number(next.end) || 0) - DIAR_MIN_DURATION : Math.max(duration, Number(segment.end) || duration);
+    if(next && cap < minEnd){ return; }
+    const newEnd = Math.max(minEnd, Math.min(cap, pointerTime));
+    if(!Number.isFinite(newEnd)) return;
+    segment.end = newEnd;
+    if(next){ next.start = newEnd; }
+  }
+  drag.working = segments;
+  setDiarSegments(segments, { preserveSelection: true, focusSegment: segments[drag.index] });
+}
+
+function endDiarDrag(){
+  const drag = EAQ.state.diarDrag;
+  if(!drag) return;
+  document.removeEventListener('pointermove', onDiarDragMove);
+  document.removeEventListener('pointerup', endDiarDrag);
+  document.removeEventListener('pointercancel', cancelDiarDrag);
+  EAQ.state.diarDrag = null;
+  if(drag.working){
+    const segments = cloneDiarSegments(drag.working);
+    const focus = segments[Math.min(drag.index, segments.length - 1)] || null;
+    setDiarSegments(segments, { preserveSelection: true, focusSegment: focus });
+  }
+}
+
+function cancelDiarDrag(){
+  const drag = EAQ.state.diarDrag;
+  if(!drag) return;
+  document.removeEventListener('pointermove', onDiarDragMove);
+  document.removeEventListener('pointerup', endDiarDrag);
+  document.removeEventListener('pointercancel', cancelDiarDrag);
+  EAQ.state.diarDrag = null;
+  if(drag.original){
+    const segments = cloneDiarSegments(drag.original);
+    const focus = segments[Math.min(drag.index, segments.length - 1)] || null;
+    setDiarSegments(segments, { preserveSelection: false, focusSegment: focus });
+  }
+}
+
 function selectDiarSegment(index, options){
   const segments = Array.isArray(EAQ.state.diarSegments) ? EAQ.state.diarSegments : [];
   const valid = Number.isFinite(index) && index >= 0 && index < segments.length;
@@ -609,6 +993,29 @@ function selectDiarSegment(index, options){
   renderDiarList();
   if(valid && (!options || options.focusTranscript !== false)){
     scrollTranscriptToTime(segments[index].start);
+  }
+  updateDiarControlsAvailability();
+}
+
+function updateDiarControlsAvailability(){
+  const addBtn = qs('diarAddBoundary');
+  const mergePrevBtn = qs('diarMergePrev');
+  const mergeNextBtn = qs('diarMergeNext');
+  if(!addBtn && !mergePrevBtn && !mergeNextBtn) return;
+  const segments = Array.isArray(EAQ.state.diarSegments) ? EAQ.state.diarSegments : [];
+  const duration = estimateMediaDuration();
+  const hasSegments = segments.length > 0;
+  const canAdd = hasSegments || (Number.isFinite(duration) && duration >= DIAR_MIN_DURATION * 2);
+  if(addBtn){
+    addBtn.disabled = !canAdd;
+    addBtn.title = canAdd ? 'Add a diarization boundary at the playhead.' : 'Load audio to enable diarization edits.';
+  }
+  const selectedIndex = Number.isFinite(EAQ.state.diarSelectedIndex) ? EAQ.state.diarSelectedIndex : null;
+  if(mergePrevBtn){
+    mergePrevBtn.disabled = !hasSegments || selectedIndex == null || selectedIndex <= 0;
+  }
+  if(mergeNextBtn){
+    mergeNextBtn.disabled = !hasSegments || selectedIndex == null || selectedIndex >= segments.length - 1;
   }
 }
 
@@ -619,6 +1026,7 @@ function renderDiarTimeline(){
   const segments = Array.isArray(EAQ.state.diarSegments) ? EAQ.state.diarSegments : [];
   container.innerHTML = '';
   container.classList.toggle('empty', segments.length === 0);
+  updateDiarControlsAvailability();
   if(!segments.length) return;
   const duration = estimateMediaDuration();
   if(!Number.isFinite(duration) || duration <= 0){ return; }
@@ -650,6 +1058,18 @@ function renderDiarTimeline(){
         selectDiarSegment(idx, { focusTranscript: true });
       }
     });
+    const startHandle = document.createElement('div');
+    startHandle.className = 'diar-handle start';
+    startHandle.setAttribute('aria-hidden', 'true');
+    startHandle.addEventListener('pointerdown', (ev)=> beginDiarDrag(idx, 'start', ev));
+    startHandle.addEventListener('click', (ev)=> ev.stopPropagation());
+    const endHandle = document.createElement('div');
+    endHandle.className = 'diar-handle end';
+    endHandle.setAttribute('aria-hidden', 'true');
+    endHandle.addEventListener('pointerdown', (ev)=> beginDiarDrag(idx, 'end', ev));
+    endHandle.addEventListener('click', (ev)=> ev.stopPropagation());
+    el.appendChild(startHandle);
+    el.appendChild(endHandle);
     frag.appendChild(el);
   });
   container.appendChild(frag);
@@ -838,8 +1258,7 @@ function loadAudio(){
   const tl = qs('timeline');
   if(tl){
     const attachTl = ()=> Timeline.attach(tl, a.duration||0, EAQ.state.transcriptCues, (cues)=>{
-      EAQ.state.transcriptCues = VTT.normalize(cues);
-      qs('transcriptVTT').value = VTT.stringify(EAQ.state.transcriptCues);
+      normalizeTranscriptCues(cues, { writeState: true });
       alignTranslationToTranscript({ preserveScroll: true });
     });
     if(isFinite(a.duration) && a.duration>0){ attachTl(); }
@@ -961,32 +1380,43 @@ function validateAnnotation(){
   });
   report.codeSwitchIssues = csIssues;
 
-  const diarSpeakers = listUniqueSpeakers();
-  if(diarSpeakers.length){
-    const profiles = Array.isArray(EAQ.state.speakerProfiles) ? EAQ.state.speakerProfiles : [];
-    const missingSpeakers = [];
-    const invalidSpeakers = [];
-    diarSpeakers.forEach((speakerId, idx)=>{
-      const profile = profiles.find(p=> p && p.speaker_id === speakerId);
-      const display = profile && profile.display_label ? profile.display_label : `S${idx+1}`;
-      if(!profile){
-        missingSpeakers.push(display);
-        return;
-      }
-      const gender = normalizeSpeakerGender(profile.apparent_gender);
-      const age = normalizeSpeakerAge(profile.apparent_age_band);
-      const dialect = normalizeSpeakerDialect(profile.dialect_subregion);
-      if(!SPEAKER_GENDER_SET.has(gender) || !SPEAKER_AGE_SET.has(age) || !SPEAKER_DIALECT_SET.has(dialect)){
-        invalidSpeakers.push(display);
-      }
-    });
-    if(missingSpeakers.length){
-      const label = missingSpeakers.join(', ');
-      pushIssue(report.errors, `Speaker attributes missing for ${label}.`);
+  const diarSegments = cloneDiarSegments(EAQ.state.diarSegments || []).sort((a,b)=> (a.start - b.start) || (a.end - b.end));
+  diarSegments.forEach((seg, idx)=>{
+    const duration = diarSegmentDuration(seg);
+    const label = speakerLabelForId(seg.speaker);
+    if(duration < DIAR_MIN_DURATION - 0.01){
+      pushIssue(report.errors, `Speaker segment #${idx+1} (${label}) is ${duration.toFixed(2)}s (< ${DIAR_MIN_DURATION.toFixed(2)}s).`);
     }
-    if(invalidSpeakers.length){
-      const label = invalidSpeakers.join(', ');
-      pushIssue(report.errors, `Review gender, age band, and dialect selections for ${label}. Unknown is allowed.`);
+    if(idx > 0){
+      const prev = diarSegments[idx-1];
+      if(seg.start < (Number(prev.end) || 0) - 0.01){
+        pushIssue(report.errors, `Speaker segments #${idx} and #${idx+1} overlap. Adjust diarization boundaries.`);
+      }
+    }
+  });
+  const segmentsBySpeaker = new Map();
+  diarSegments.forEach((seg)=>{
+    const id = seg && seg.speaker ? String(seg.speaker) : 'spk';
+    if(!segmentsBySpeaker.has(id)){ segmentsBySpeaker.set(id, []); }
+    segmentsBySpeaker.get(id).push(seg);
+  });
+  segmentsBySpeaker.forEach((list, speakerId)=>{
+    list.sort((a,b)=> (a.start - b.start) || (a.end - b.end));
+    for(let i=1;i<list.length;i++){
+      if(list[i].start < (Number(list[i-1].end) || 0) - 0.01){
+        const label = speakerLabelForId(speakerId);
+        pushIssue(report.errors, `${label} has overlapping turns in diarization.`);
+        break;
+      }
+    }
+  });
+  const profileStats = evaluateSpeakerProfileStats();
+  if(profileStats.total){
+    if(profileStats.missing.length){
+      pushIssue(report.errors, `Speaker attributes missing for ${profileStats.missing.join(', ')}.`);
+    }
+    if(profileStats.invalid.length){
+      pushIssue(report.errors, `Review gender, age band, and dialect selections for ${profileStats.invalid.join(', ')}. Unknown is allowed.`);
     }
   }
 
@@ -1074,6 +1504,7 @@ async function enqueueAndSync(lintReport){
   EAQ.state.codeSwitchSummary = csExports.summary;
   const csJsonText = JSON.stringify(csExports.summary);
   setCodeSwitchSpans(csSnapshot, { pushHistory: false });
+  const speakerStats = evaluateSpeakerProfileStats();
   const files = {
     diarization_rttm: rttmStringify(EAQ.state.diarSegments||[], it.asset_id || 'rec'),
     diarization_rttm_source: EAQ.state.diarizationSourcePath || null,
@@ -1115,7 +1546,10 @@ async function enqueueAndSync(lintReport){
       gold_check: !!it.gold_target ? 'pending' : 'not_applicable',
       time_spent_sec: timeSpentSec,
       clip_id: it.asset_id || it.id || it.clip_id || it.clipId || null,
-      lint: lintSummary
+      lint: lintSummary,
+      speaker_profiles_total: speakerStats.total,
+      speaker_profiles_complete: speakerStats.complete,
+      speaker_profiles_completion_rate: speakerStats.total ? speakerStats.complete / speakerStats.total : 1
     },
     lint: lintSummary,
     client_meta: { device: navigator.userAgent }
@@ -1236,7 +1670,7 @@ function bindUI(){
   qs('transcriptNext').addEventListener('click', ()=>{
     const box = qs('transcriptVTT');
     EAQ.state.transcriptVTT = box ? box.value : '';
-    EAQ.state.transcriptCues = VTT.normalize(parseVttSafe(EAQ.state.transcriptVTT));
+    normalizeTranscriptCues(parseVttSafe(EAQ.state.transcriptVTT), { writeState: true });
     alignTranslationToTranscript({ focusIndex: 0 });
     show('screen_translation');
     runValidationAndDisplay('screen_translation');
@@ -1260,6 +1694,50 @@ function bindUI(){
     renderSpeakerCards();
     runValidationAndDisplay('screen_codeswitch');
   });
+
+  const diarAddButton = qs('diarAddBoundary');
+  if(diarAddButton){
+    diarAddButton.addEventListener('click', ()=>{
+      const audio = qs('audio');
+      let targetTime = audio && Number.isFinite(audio.currentTime) ? audio.currentTime : null;
+      const segments = Array.isArray(EAQ.state.diarSegments) ? EAQ.state.diarSegments : [];
+      const selectedIndex = Number.isFinite(EAQ.state.diarSelectedIndex) ? EAQ.state.diarSelectedIndex : null;
+      const selected = selectedIndex != null ? segments[selectedIndex] : null;
+      if(targetTime == null && selected){
+        const start = Number(selected.start) || 0;
+        const end = Number(selected.end) || start;
+        targetTime = (start + end) / 2;
+      }
+      if(targetTime == null && segments.length){
+        const first = segments[0];
+        const start = Number(first.start) || 0;
+        const end = Number(first.end) || start;
+        targetTime = (start + end) / 2;
+      }
+      if(targetTime == null){ targetTime = 0; }
+      const added = addDiarBoundaryAt(targetTime);
+      if(!added){
+        console.warn('Unable to add diarization boundary at', targetTime);
+      }
+      updateDiarControlsAvailability();
+    });
+  }
+
+  const diarMergePrevBtn = qs('diarMergePrev');
+  if(diarMergePrevBtn){
+    diarMergePrevBtn.addEventListener('click', ()=>{
+      mergeDiarSegments(EAQ.state.diarSelectedIndex, 'prev');
+      updateDiarControlsAvailability();
+    });
+  }
+
+  const diarMergeNextBtn = qs('diarMergeNext');
+  if(diarMergeNextBtn){
+    diarMergeNextBtn.addEventListener('click', ()=>{
+      mergeDiarSegments(EAQ.state.diarSelectedIndex, 'next');
+      updateDiarControlsAvailability();
+    });
+  }
 
   const speakerError = qs('speakerDrawerError');
   qs('csNext').addEventListener('click', ()=>{
@@ -1315,7 +1793,7 @@ function bindUI(){
     const csBox = qs('codeSwitchVTT');
     EAQ.state.transcriptVTT = transcriptBox ? transcriptBox.value : EAQ.state.transcriptVTT;
     EAQ.state.codeSwitchVTT = csBox ? csBox.value : EAQ.state.codeSwitchVTT;
-    EAQ.state.transcriptCues = VTT.normalize(parseVttSafe(EAQ.state.transcriptVTT));
+    normalizeTranscriptCues(parseVttSafe(EAQ.state.transcriptVTT), { writeState: true });
     collectTranslationInputs();
     updateTranslationVTTFromState();
     const csSnapshotSubmit = snapshotCodeSwitchSpans();
@@ -1366,6 +1844,13 @@ function bindUI(){
     show('screen_transcript');
     refreshTimeline();
   });
+
+  if(!voiceHotkeyBound){
+    document.addEventListener('keydown', handleVoiceTagHotkey);
+    voiceHotkeyBound = true;
+  }
+
+  updateDiarControlsAvailability();
 }
 
 window.addEventListener('load', ()=>{
@@ -1392,10 +1877,7 @@ window.addEventListener('load', ()=>{
         const left = { start:c.start, end:t, text:c.text };
         const right = { start:t, end:c.end, text:c.text };
         cues.splice(i,1,left,right);
-        EAQ.state.transcriptCues = VTT.normalize(cues);
-        const serialized = VTT.stringify(EAQ.state.transcriptCues);
-        EAQ.state.transcriptVTT = serialized;
-        if(box) box.value = serialized;
+        normalizeTranscriptCues(cues, { writeState: true });
         alignTranslationToTranscript({ preserveScroll: true });
         refreshTimeline();
         runValidationAndDisplay('screen_transcript');
@@ -1410,10 +1892,7 @@ window.addEventListener('load', ()=>{
       const source = EAQ.state.transcriptCues.length ? EAQ.state.transcriptCues : parseVttSafe(box ? box.value : '');
       const splitted = autoSplitCues(source);
       if(!splitted.length) return;
-      EAQ.state.transcriptCues = splitted;
-      const serialized = VTT.stringify(splitted);
-      EAQ.state.transcriptVTT = serialized;
-      if(box) box.value = serialized;
+      normalizeTranscriptCues(splitted, { writeState: true });
       alignTranslationToTranscript({ preserveScroll: true });
       refreshTimeline();
       runValidationAndDisplay('screen_transcript');
@@ -1427,10 +1906,7 @@ window.addEventListener('load', ()=>{
       if(Math.abs(cur.end - nxt.start) < 0.25){
         const merged = { start: cur.start, end: nxt.end, text: `${cur.text}\n${nxt.text}`.trim() };
         cues.splice(i,2,merged);
-        EAQ.state.transcriptCues = VTT.normalize(cues);
-        const serialized = VTT.stringify(EAQ.state.transcriptCues);
-        EAQ.state.transcriptVTT = serialized;
-        if(box) box.value = serialized;
+        normalizeTranscriptCues(cues, { writeState: true });
         alignTranslationToTranscript({ preserveScroll: true });
         refreshTimeline();
         runValidationAndDisplay('screen_transcript');
@@ -1558,14 +2034,13 @@ async function loadPrefillForCurrent(){
       const res = await fetchWithProxy(prefill.transcript_vtt_url);
       if(res) vttText = await res.text();
       EAQ.state.transcriptVTT = vttText;
-      qs('transcriptVTT').value = vttText;
-      if(vttText.trim()){ EAQ.state.transcriptCues = VTT.normalize(VTT.parse(vttText)); }
-      else { EAQ.state.transcriptCues = []; }
+      const parsed = vttText.trim() ? VTT.parse(vttText) : [];
+      normalizeTranscriptCues(parsed, { writeState: true });
     } catch{}
   } else if(typeof prefill.transcript_vtt === 'string' && prefill.transcript_vtt.trim()){
     EAQ.state.transcriptVTT = prefill.transcript_vtt;
-    qs('transcriptVTT').value = prefill.transcript_vtt;
-    try{ EAQ.state.transcriptCues = VTT.normalize(VTT.parse(prefill.transcript_vtt)); }catch{}
+    try{ normalizeTranscriptCues(VTT.parse(prefill.transcript_vtt), { writeState: true }); }
+    catch{ normalizeTranscriptCues([], { writeState: true }); }
   }
 
   const needsSplit = (EAQ.state.transcriptCues||[]).some(c=>{
@@ -1575,11 +2050,7 @@ async function loadPrefillForCurrent(){
   if(needsSplit){
     const splitCues = autoSplitCues(EAQ.state.transcriptCues||[]);
     if(splitCues.length){
-      EAQ.state.transcriptCues = splitCues;
-      const updated = VTT.stringify(splitCues);
-      EAQ.state.transcriptVTT = updated;
-      const transcriptBox = qs('transcriptVTT');
-      if(transcriptBox) transcriptBox.value = updated;
+      normalizeTranscriptCues(splitCues, { writeState: true });
     }
   }
 
@@ -2534,9 +3005,12 @@ function renderDiarList(){
   if(!segments.length){
     el.innerHTML = '<em>No diarization loaded.</em>';
     renderSpeakerCards();
+    updateDiarControlsAvailability();
     return;
   }
   const frag = document.createDocumentFragment();
+  const labelMap = buildSpeakerLabelMap();
+  const speakerOptions = getUniqueSpeakersWithLabels();
   segments.forEach((seg, idx)=>{
     const row = document.createElement('div');
     row.className = 'diar-row';
@@ -2544,64 +3018,83 @@ function renderDiarList(){
     row.dataset.diarIndex = String(idx);
 
     const badge = document.createElement('code');
-    badge.textContent = seg.label || `S${idx+1}`;
+    const speakerId = seg.speaker ? String(seg.speaker) : '';
+    const displayLabel = labelMap.get(speakerId) || seg.label || `S${idx+1}`;
+    badge.textContent = displayLabel;
     badge.style.background = colorForSpeaker(seg.speaker);
     badge.style.color = '#fff';
     badge.style.padding = '0 6px';
     badge.style.borderRadius = '4px';
     badge.style.fontWeight = '600';
-    badge.title = seg.speaker || badge.textContent;
+    badge.title = speakerId || displayLabel;
+
+    const select = document.createElement('select');
+    select.style.marginLeft = '.5rem';
+    select.setAttribute('aria-label', `Speaker for ${displayLabel}`);
+    const ensureOption = (id, label)=>{
+      const option = document.createElement('option');
+      option.value = id;
+      option.textContent = label;
+      return option;
+    };
+    speakerOptions.forEach((opt)=>{
+      select.appendChild(ensureOption(opt.speakerId, opt.label));
+    });
+    if(!speakerOptions.some(opt=> opt.speakerId === speakerId) && speakerId){
+      select.appendChild(ensureOption(speakerId, speakerLabelForId(speakerId)));
+    }
+    const newOption = document.createElement('option');
+    newOption.value = '__new__';
+    newOption.textContent = '+ New speaker';
+    select.appendChild(newOption);
+    select.value = speakerId || (speakerOptions[0] ? speakerOptions[0].speakerId : '');
+    select.addEventListener('change', (ev)=>{
+      ev.stopPropagation();
+      let nextId = select.value;
+      if(nextId === '__new__'){
+        nextId = generateSpeakerId();
+      }
+      const updated = cloneDiarSegments(EAQ.state.diarSegments || []);
+      if(updated[idx]){
+        updated[idx].speaker = nextId;
+      }
+      setDiarSegments(updated, { preserveSelection: true, focusSegment: updated[idx] });
+    });
 
     const info = document.createElement('span');
-    info.textContent = `${secToLabel(seg.start)} → ${secToLabel(seg.end)} (${seg.speaker})`;
+    info.textContent = `${secToLabel(seg.start)} → ${secToLabel(seg.end)}`;
     info.style.flex = '1 1 auto';
     info.style.minWidth = '0';
+    info.style.marginLeft = '.75rem';
 
     const duration = document.createElement('span');
     duration.style.marginLeft = 'auto';
     duration.style.fontSize = '.85rem';
     duration.style.color = 'var(--muted, #666)';
-    duration.textContent = `${Math.max(0, seg.end - seg.start).toFixed(2)}s`;
+    duration.textContent = `${diarSegmentDuration(seg).toFixed(2)}s`;
 
-    const minusBtn = document.createElement('button');
-    minusBtn.textContent = '-50ms';
-    minusBtn.addEventListener('click', (ev)=>{
+    const mergePrev = document.createElement('button');
+    mergePrev.textContent = 'Merge ◀';
+    mergePrev.disabled = idx === 0;
+    mergePrev.addEventListener('click', (ev)=>{
       ev.stopPropagation();
-      const segmentsCopy = (EAQ.state.diarSegments||[]).map((entry, entryIdx)=>{
-        if(entryIdx !== idx) return Object.assign({}, entry);
-        const candidate = Math.max(0, entry.start - 0.05);
-        const maxStart = Math.max(0, entry.end - 0.05);
-        const newStart = Math.min(candidate, maxStart);
-        if(Math.abs(newStart - entry.start) > 0.5) return Object.assign({}, entry);
-        if(newStart >= entry.end) return Object.assign({}, entry);
-        return Object.assign({}, entry, { start: newStart });
-      });
-      const focusSegment = segmentsCopy[idx];
-      setDiarSegments(segmentsCopy, { preserveSelection: true, focusSegment });
+      mergeDiarSegments(idx, 'prev');
     });
 
-    const plusBtn = document.createElement('button');
-    plusBtn.textContent = '+50ms';
-    plusBtn.addEventListener('click', (ev)=>{
+    const mergeNext = document.createElement('button');
+    mergeNext.textContent = 'Merge ▶';
+    mergeNext.disabled = idx === segments.length - 1;
+    mergeNext.addEventListener('click', (ev)=>{
       ev.stopPropagation();
-      const segmentsCopy = (EAQ.state.diarSegments||[]).map((entry, entryIdx)=>{
-        if(entryIdx !== idx) return Object.assign({}, entry);
-        const candidate = Math.max(0, entry.start + 0.05);
-        const maxStart = Math.max(0, entry.end - 0.05);
-        const newStart = Math.min(candidate, maxStart);
-        if(Math.abs(newStart - entry.start) > 0.5) return Object.assign({}, entry);
-        if(newStart >= entry.end) return Object.assign({}, entry);
-        return Object.assign({}, entry, { start: newStart });
-      });
-      const focusSegment = segmentsCopy[idx];
-      setDiarSegments(segmentsCopy, { preserveSelection: true, focusSegment });
+      mergeDiarSegments(idx, 'next');
     });
 
     row.appendChild(badge);
-    row.appendChild(minusBtn);
-    row.appendChild(plusBtn);
+    row.appendChild(select);
     row.appendChild(info);
     row.appendChild(duration);
+    row.appendChild(mergePrev);
+    row.appendChild(mergeNext);
 
     row.addEventListener('click', ()=> selectDiarSegment(idx, { focusTranscript: true }));
     frag.appendChild(row);
@@ -2609,38 +3102,21 @@ function renderDiarList(){
   el.innerHTML = '';
   el.appendChild(frag);
   renderSpeakerCards();
+  updateDiarControlsAvailability();
 }
 
 function listUniqueSpeakers(){
-  const segments = Array.isArray(EAQ.state.diarSegments) ? EAQ.state.diarSegments : [];
-  const labelMap = new Map();
-  segments.forEach(seg=>{
-    if(!seg) return;
-    const speakerId = seg.speaker ? String(seg.speaker) : 'spk';
-    if(!labelMap.has(speakerId)){
-      labelMap.set(speakerId, seg.label || speakerId);
-    }
-  });
-  const seen = [];
-  const seenSet = new Set();
-  for(const seg of segments){
-    if(!seg) continue;
-    const speakerId = seg.speaker!=null ? String(seg.speaker) : 'spk';
-    if(!seenSet.has(speakerId)){
-      seenSet.add(speakerId);
-      seen.push(speakerId);
-    }
-  }
-  return seen;
+  return getUniqueSpeakersWithLabels().map((info)=> info.speakerId);
 }
+
 
 function renderSpeakerCards(){
   const container = qs('speakerCards');
   if(!container) return;
 
-  const speakers = listUniqueSpeakers();
+  const speakerInfo = getUniqueSpeakersWithLabels();
   const errorBox = qs('speakerDrawerError');
-  if(!speakers.length){
+  if(!speakerInfo.length){
     container.innerHTML = '<em>No diarization loaded. Speaker attributes unavailable.</em>';
     EAQ.state.speakerProfiles = [];
     if(errorBox){ errorBox.classList.add('hide'); errorBox.textContent = ''; }
@@ -2648,21 +3124,15 @@ function renderSpeakerCards(){
   }
 
   const existing = Array.isArray(EAQ.state.speakerProfiles) ? EAQ.state.speakerProfiles : [];
-  const normalized = speakers.map((speakerId, idx)=>{
-    const found = existing.find((p)=> p && p.speaker_id === speakerId) || {};
-    const defaultLabel = labelMap.get(speakerId) || `S${idx+1}`;
-    const display = String(found.display_label || defaultLabel);
-    const genderSel = normalizeValue(found.apparent_gender, 'unknown', allowedGenderVals);
-    const ageSel = normalizeValue(found.apparent_age_band, 'unknown', allowedAgeVals);
-    const dialectSel = normalizeValue(found.dialect_subregion, 'unknown', allowedDialectVals);
-    return Object.assign({}, found, {
-    const display = String(found.display_label || `S${idx+1}`);
+  const existingMap = new Map(existing.map((p)=> [String(p.speaker_id), p]));
+  const normalized = speakerInfo.map((info, idx)=>{
+    const found = existingMap.get(info.speakerId) || {};
     const gender = normalizeSpeakerGender(found.apparent_gender);
     const age = normalizeSpeakerAge(found.apparent_age_band);
     const dialect = normalizeSpeakerDialect(found.dialect_subregion);
     return {
-      speaker_id: String(speakerId),
-      display_label: display,
+      speaker_id: info.speakerId,
+      display_label: info.label || `S${idx+1}`,
       apparent_gender: SPEAKER_GENDER_SET.has(gender) ? gender : 'unknown',
       apparent_age_band: SPEAKER_AGE_SET.has(age) ? age : 'unknown',
       dialect_subregion: SPEAKER_DIALECT_SET.has(dialect) ? dialect : 'unknown'
@@ -2670,45 +3140,48 @@ function renderSpeakerCards(){
   });
   EAQ.state.speakerProfiles = normalized;
 
-  const renderOptions = (options, selected)=>{
-    const active = selected && typeof selected === 'string' ? selected : 'unknown';
-    return options.map((opt)=>{
-      const attrs = [`value="${escapeHtml(opt.value)}"`];
-      if(opt.value === active){ attrs.push('selected'); }
-      return `<option ${attrs.join(' ')}>${escapeHtml(opt.label)}</option>`;
-    }).join('');
-  };
+  container.innerHTML = '';
+  normalized.forEach((profile, idx)=>{
+    const card = document.createElement('section');
+    card.className = 'speaker-card';
+    card.dataset.speakerCard = 'true';
+    card.dataset.speakerId = profile.speaker_id;
+    card.dataset.displayLabel = profile.display_label || `S${idx+1}`;
 
-  const cards = normalized.map((profile, idx)=>{
-    const display = String(profile.display_label || `S${idx+1}`);
-    const speakerId = String(profile.speaker_id || `spk${idx+1}`);
-    const accent = colorForSpeaker(speakerId);
-    const cardStyle = `margin-bottom:1rem;border-left:6px solid ${escapeHtml(accent)};padding-left:.75rem;`;
-    const genderSel = normalizeValue(profile.apparent_gender, 'unknown', allowedGenderVals);
-    const ageSel = normalizeValue(profile.apparent_age_band, 'unknown', allowedAgeVals);
-    const dialectSel = normalizeValue(profile.dialect_subregion, 'unknown', allowedDialectVals);
-    const genderOptionsHtml = renderOptions(genderOptions, genderSel);
-    const ageOptionsHtml = renderOptions(ageOptions, ageSel);
-    const dialectOptionsHtml = renderOptions(dialectOptions, dialectSel);
-    return `<div class="notice" data-speaker-card data-speaker-id="${escapeHtml(speakerId)}" data-display-label="${escapeHtml(display)}" style="${cardStyle}">`+
-      `<h4 style="margin:0 0 .5rem 0;">${escapeHtml(display)} <small style="font-weight:normal;color:var(--text-muted,inherit);">(Diar speaker: ${escapeHtml(speakerId)})</small></h4>`+
-      `<label style="display:block;margin-bottom:.5rem;">Apparent gender <select name="apparent_gender">${genderOptionsHtml}</select></label>`+
-      `<label style="display:block;margin-bottom:.5rem;">Apparent age band <select name="apparent_age_band">${ageOptionsHtml}</select></label>`+
-      `<label style="display:block;margin-bottom:.5rem;">Dialect sub-region <select name="dialect_subregion">${dialectOptionsHtml}</select></label>`+
-    `</div>`;
-    const display = profile.display_label || `S${idx+1}`;
-    const speakerId = profile.speaker_id || `spk${idx+1}`;
-    const genderOptions = renderOptions(SPEAKER_GENDER_OPTIONS, profile.apparent_gender || 'unknown');
-    const ageOptions = renderOptions(SPEAKER_AGE_OPTIONS, profile.apparent_age_band || 'unknown');
-    const dialectOptions = renderOptions(SPEAKER_DIALECT_OPTIONS, profile.dialect_subregion || 'unknown');
-    return `<section class="speaker-card" data-speaker-card data-speaker-id="${escapeHtml(speakerId)}" data-display-label="${escapeHtml(display)}">`+
-      `<p class="speaker-card__title"><strong>${escapeHtml(display)}</strong><span class="speaker-card__subtitle">Diar speaker: ${escapeHtml(speakerId)}</span></p>`+
-      `<label>Apparent gender<select name="apparent_gender" class="speaker-card__select">${genderOptions}</select></label>`+
-      `<label>Apparent age band<select name="apparent_age_band" class="speaker-card__select">${ageOptions}</select></label>`+
-      `<label>Dialect sub-region<select name="dialect_subregion" class="speaker-card__select">${dialectOptions}</select></label>`+
-    `</section>`;
-  }).join('');
-  container.innerHTML = cards;
+    const title = document.createElement('p');
+    title.className = 'speaker-card__title';
+    const strong = document.createElement('strong');
+    strong.textContent = profile.display_label || `S${idx+1}`;
+    const subtitle = document.createElement('span');
+    subtitle.className = 'speaker-card__subtitle';
+    subtitle.textContent = `Diar speaker: ${profile.speaker_id}`;
+    title.appendChild(strong);
+    title.appendChild(subtitle);
+    card.appendChild(title);
+
+    const appendSelect = (labelText, name, options, value)=>{
+      const label = document.createElement('label');
+      label.textContent = labelText;
+      const select = document.createElement('select');
+      select.name = name;
+      select.className = 'speaker-card__select';
+      options.forEach((opt)=>{
+        const option = document.createElement('option');
+        option.value = opt.value;
+        option.textContent = opt.label;
+        if(opt.value === value){ option.selected = true; }
+        select.appendChild(option);
+      });
+      label.appendChild(select);
+      card.appendChild(label);
+    };
+
+    appendSelect('Apparent gender', 'apparent_gender', SPEAKER_GENDER_OPTIONS, profile.apparent_gender || 'unknown');
+    appendSelect('Apparent age band', 'apparent_age_band', SPEAKER_AGE_OPTIONS, profile.apparent_age_band || 'unknown');
+    appendSelect('Dialect sub-region', 'dialect_subregion', SPEAKER_DIALECT_OPTIONS, profile.dialect_subregion || 'unknown');
+
+    container.appendChild(card);
+  });
 
   container.querySelectorAll('select').forEach((selectEl)=>{
     selectEl.addEventListener('change', ()=>{
@@ -2777,6 +3250,35 @@ function syncSpeakerProfilesFromUI(options){
   }
   if(errorBox){ errorBox.classList.add('hide'); errorBox.textContent = ''; }
   return true;
+}
+
+function evaluateSpeakerProfileStats(){
+  const info = getUniqueSpeakersWithLabels();
+  const profiles = Array.isArray(EAQ.state.speakerProfiles) ? EAQ.state.speakerProfiles : [];
+  const profileMap = new Map(profiles.map((p)=> [String(p.speaker_id), p]));
+  const missing = [];
+  const invalid = [];
+  let complete = 0;
+  info.forEach((entry, idx)=>{
+    const profile = profileMap.get(entry.speakerId);
+    const label = entry.label || `S${idx+1}`;
+    if(!profile){
+      missing.push(label);
+      return;
+    }
+    const gender = normalizeSpeakerGender(profile.apparent_gender);
+    const age = normalizeSpeakerAge(profile.apparent_age_band);
+    const dialect = normalizeSpeakerDialect(profile.dialect_subregion);
+    const valid = SPEAKER_GENDER_SET.has(gender) && SPEAKER_AGE_SET.has(age) && SPEAKER_DIALECT_SET.has(dialect);
+    if(valid){ complete += 1; }
+    else { invalid.push(label); }
+  });
+  return {
+    total: info.length,
+    complete,
+    missing,
+    invalid
+  };
 }
 
 function normalizeEmotionLabel(label){

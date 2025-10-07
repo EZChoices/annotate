@@ -31,6 +31,10 @@
     .diar-seg{position:absolute;top:0;bottom:0;border-radius:6px;background:var(--diar-color,rgba(52,152,219,0.55));box-shadow:0 0 0 1px rgba(0,0,0,0.18);cursor:pointer;transition:box-shadow .15s ease,transform .15s ease}
     .diar-seg:hover{box-shadow:0 0 0 2px rgba(0,0,0,0.2);transform:translateY(-1px)}
     .diar-seg.selected{box-shadow:0 0 0 2px var(--accent)}
+    .diar-seg .diar-handle{position:absolute;top:0;bottom:0;width:12px;background:rgba(255,255,255,0.85);border:1px solid rgba(0,0,0,0.12);box-shadow:0 0 0 1px rgba(0,0,0,0.05);cursor:ew-resize;touch-action:none;opacity:0;transition:opacity .12s ease}
+    .diar-seg:hover .diar-handle,.diar-seg.selected .diar-handle{opacity:1}
+    .diar-seg .diar-handle.start{left:0;border-radius:6px 0 0 6px}
+    .diar-seg .diar-handle.end{right:0;border-radius:0 6px 6px 0}
     .diar-row{display:flex;gap:.5rem;align-items:center;margin:.25rem 0;padding:.1rem .3rem;border-radius:6px;transition:background .15s ease}
     .diar-row.selected{background:rgba(43,124,255,0.08)}
     .cs-timeline{position:relative;height:72px;border:1px solid var(--border);border-radius:10px;background:var(--card);margin:.75rem 0;overflow:hidden}
@@ -151,6 +155,11 @@
         <button class="secondary" data-lang="other" id="btnOther">Other</button>
         <button class="secondary" id="csUndo">Undo</button>
         <button class="secondary" id="csRedo">Redo</button>
+      </div>
+      <div class="controls" id="diarControls">
+        <button class="secondary" id="diarAddBoundary" type="button">Add boundary @ playhead</button>
+        <button class="secondary" id="diarMergePrev" type="button">Merge with previous</button>
+        <button class="secondary" id="diarMergeNext" type="button">Merge with next</button>
       </div>
       <div class="controls">
         <button class="secondary" id="nudgeStartMinus">Start -200ms</button>

@@ -99,6 +99,7 @@
             <th scope="col">Cue Δ (s)</th>
             <th scope="col">Translation %</th>
             <th scope="col">Char Coverage %</th>
+            <th scope="col">Speaker Cards</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -268,6 +269,7 @@
           ['Average Cue Δ', formatSeconds(summary.averageCueDiffSec || 0)],
           ['Translation Completeness', formatPercent(summary.translationCompletenessAvg || 0)],
           ['Translation Char Coverage', formatPercent(summary.translationCharRatioAvg || 0)],
+          ['Speaker Card Completion', formatPercent(summary.speakerProfileCompletionRate || 0)],
           ['Average Time Spent', formatSeconds(summary.averageTimeSpentSec || 0)]
         ];
         summaryBody.innerHTML = '';
@@ -303,7 +305,8 @@
             formatSeconds(row.averageDiarizationMAE || 0),
             formatSeconds(row.averageCueDiffSec || 0),
             formatPercent(row.translationCompletenessAvg || 0),
-            formatPercent(row.translationCharRatioAvg || 0)
+            formatPercent(row.translationCharRatioAvg || 0),
+            formatPercent(row.speakerProfileCompletionRate || 0)
           ];
           cells.forEach((value, idx)=>{
             if(idx === 0){
