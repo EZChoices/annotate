@@ -1308,6 +1308,7 @@ function bindUI(){
   const diarNext = qs('diarNext'); if(diarNext) diarNext.addEventListener('click', ()=>{ runValidationAndDisplay('screen_review'); show('screen_review'); });
 
   qs('submitBtn').addEventListener('click', async ()=>{
+    const submittedClip = currentItem();
     const transcriptBox = qs('transcriptVTT');
     const translationBox = qs('translationVTT');
     const csBox = qs('codeSwitchVTT');
