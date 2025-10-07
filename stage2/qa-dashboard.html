@@ -15,11 +15,51 @@
     .stage-menu__link.active{background:var(--accent);border-color:var(--accent);color:#fff}
     .qa-dashboard__intro{margin-bottom:1rem;font-size:1rem}
     .qa-dashboard__empty{padding:1.25rem;border:1px dashed var(--border);border-radius:12px;text-align:center;color:var(--muted);background:var(--card)}
+    .qa-dashboard__actions{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin:1rem 0}
+    .qa-review-flagged{font-size:.9rem;color:var(--muted)}
+    .qa-review-summary{margin:1.25rem 0}
+    .qa-review-summary__grid{display:grid;gap:.75rem;grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+    .qa-review-summary__item{padding:.75rem 1rem;border:1px solid var(--border);border-radius:12px;background:var(--card)}
+    .qa-review-summary__label{display:block;font-size:.85rem;color:var(--muted);margin-bottom:.3rem}
+    .qa-review-summary__value{font-size:1.4rem;font-weight:600}
     .qa-report-table{width:100%;border-collapse:collapse;margin:1rem 0;background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden}
     .qa-report-table caption{padding:.75rem 1rem;font-weight:600;text-align:left;background:rgba(0,0,0,0.02)}
     .qa-report-table th,.qa-report-table td{padding:.65rem 1rem;text-align:left;border-bottom:1px solid var(--border);font-size:.95rem}
     .qa-report-table tbody tr:last-child th,.qa-report-table tbody tr:last-child td{border-bottom:none}
     .qa-report-table thead{background:rgba(0,0,0,0.03);font-size:.85rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+    .qa-review-modal{position:fixed;inset:0;padding:1.5rem;background:rgba(15,23,42,0.55);display:flex;align-items:center;justify-content:center;z-index:1000}
+    .qa-review-modal.hide{display:none}
+    .qa-review-modal__dialog{width:100%;max-width:1080px;max-height:90vh;background:var(--bg,#fff);color:inherit;border-radius:18px;box-shadow:0 22px 45px rgba(0,0,0,0.25);display:flex;flex-direction:column;overflow:hidden}
+    .qa-review-modal__header{padding:1rem 1.25rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:.5rem}
+    .qa-review-modal__header h3{margin:0;font-size:1.2rem}
+    .qa-review-close{border:none;background:none;font-size:1.4rem;cursor:pointer;line-height:1;padding:.2rem .4rem;border-radius:999px}
+    .qa-review-modal__body{flex:1;display:flex;overflow:hidden}
+    .qa-review-sidebar{width:260px;border-right:1px solid var(--border);display:flex;flex-direction:column;background:var(--card)}
+    .qa-review-sidebar__header{padding:1rem 1.25rem;border-bottom:1px solid var(--border);font-weight:600}
+    .qa-review-list{list-style:none;margin:0;padding:0;flex:1;overflow:auto}
+    .qa-review-list__item{border-bottom:1px solid var(--border)}
+    .qa-review-list__button{width:100%;border:none;background:none;text-align:left;padding:.75rem 1.25rem;display:flex;flex-direction:column;gap:.3rem;cursor:pointer;font-size:.95rem}
+    .qa-review-list__button:hover,.qa-review-list__button:focus{background:rgba(43,124,255,0.08);outline:none}
+    .qa-review-list__button.active{background:rgba(43,124,255,0.15)}
+    .qa-review-metrics{font-size:.85rem;color:var(--muted);display:flex;gap:.5rem;flex-wrap:wrap}
+    .qa-review-main{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--bg,#fff)}
+    .qa-review-main__content{flex:1;overflow:auto;padding:1.25rem;display:flex;flex-direction:column;gap:1rem}
+    .qa-review-meta{font-size:.9rem;color:var(--muted)}
+    .qa-review-toggle{display:flex;align-items:center;gap:.5rem}
+    .qa-review-status-bar{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center}
+    .qa-review-status-buttons{display:flex;flex-wrap:wrap;gap:.5rem}
+    .qa-review-status-buttons button{min-width:120px}
+    .qa-review-status-buttons button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+    .qa-review-field{display:flex;flex-direction:column;gap:.35rem}
+    .qa-review-field textarea{width:100%;min-height:120px;border-radius:12px;border:1px solid var(--border);padding:.75rem;font-family:monospace;font-size:.9rem;line-height:1.4;resize:vertical}
+    .qa-review-field textarea[readonly]{background:rgba(0,0,0,0.03)}
+    .qa-review-actions{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.75rem}
+    .qa-review-footer{padding:1rem 1.25rem;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:.5rem}
+    .qa-review-empty{padding:1rem 1.25rem;color:var(--muted)}
+    @media(max-width:900px){
+      .qa-review-modal__body{flex-direction:column}
+      .qa-review-sidebar{width:100%;max-height:240px;border-right:none;border-bottom:1px solid var(--border)}
+    }
   </style>
 </head>
 <body>
@@ -31,6 +71,11 @@
     <section class="screen" aria-labelledby="qaDashboardTitle">
       <h2 id="qaDashboardTitle">QA Dashboard</h2>
       <p class="notice qa-dashboard__intro">Review your gold-clip QA results and detailed per-metric scores. Metrics update automatically after each submission.</p>
+      <div class="qa-dashboard__actions">
+        <button id="qaReviewButton" class="secondary" type="button">Review Flagged Clips</button>
+        <span id="qaReviewFlaggedCount" class="qa-review-flagged hide" role="status" aria-live="polite"></span>
+      </div>
+      <div id="qaReviewSummary" class="qa-review-summary hide" aria-live="polite"></div>
       <div class="qa-dashboard__empty" id="qaReportEmpty" role="status">No QA metrics to display yet. Complete a gold clip to populate this dashboard.</div>
       <table class="qa-report-table hide" id="qaSummaryTable">
         <caption>Latest QA Summary</caption>
@@ -77,6 +122,68 @@
       </table>
     </section>
   </div>
+  <div id="qaReviewModal" class="qa-review-modal hide" role="dialog" aria-modal="true" aria-labelledby="qaReviewModalTitle">
+    <div class="qa-review-modal__dialog">
+      <header class="qa-review-modal__header">
+        <h3 id="qaReviewModalTitle">Flagged Clip Review</h3>
+        <button type="button" class="qa-review-close" data-action="close" aria-label="Close review overlay">×</button>
+      </header>
+      <div class="qa-review-modal__body">
+        <aside class="qa-review-sidebar">
+          <div class="qa-review-sidebar__header">Flagged Clips</div>
+          <div class="qa-review-empty hide" id="qaReviewEmpty">No flagged clips to review.</div>
+          <ul class="qa-review-list" id="qaReviewClipList"></ul>
+        </aside>
+        <div class="qa-review-main">
+          <div class="qa-review-main__content" id="qaReviewContent">
+            <p class="qa-review-meta" id="qaReviewMeta">Select a clip to load its annotations.</p>
+            <label class="qa-review-toggle">
+              <input type="checkbox" id="qaReviewEnableEdit">
+              <span>Enable Edit</span>
+            </label>
+            <div class="qa-review-status-bar">
+              <div class="qa-review-status-buttons" role="group" aria-label="Review decision">
+                <button type="button" class="secondary" data-review-status="accepted">Accept</button>
+                <button type="button" class="secondary" data-review-status="corrected">Correct</button>
+                <button type="button" class="secondary" data-review-status="rejected">Reject</button>
+              </div>
+              <span id="qaReviewStatusLabel" class="qa-review-meta"></span>
+            </div>
+            <div class="qa-review-actions">
+              <div></div>
+              <div>
+                <button type="button" class="primary" id="qaReviewSave" disabled>Save</button>
+                <button type="button" class="secondary" id="qaReviewCancel" disabled>Cancel</button>
+              </div>
+            </div>
+            <div class="qa-review-field">
+              <label for="qaReviewTranscript">Transcript (transcript.vtt)</label>
+              <textarea id="qaReviewTranscript" readonly></textarea>
+            </div>
+            <div class="qa-review-field">
+              <label for="qaReviewTranslation">Translation (translation.vtt)</label>
+              <textarea id="qaReviewTranslation" readonly></textarea>
+            </div>
+            <div class="qa-review-field">
+              <label for="qaReviewCodeSwitch">Code Switch (code_switch.vtt)</label>
+              <textarea id="qaReviewCodeSwitch" readonly></textarea>
+            </div>
+            <div class="qa-review-field">
+              <label for="qaReviewCodeSwitchSpans">Code Switch Spans (code_switch_spans.json)</label>
+              <textarea id="qaReviewCodeSwitchSpans" readonly></textarea>
+            </div>
+            <div class="qa-review-field">
+              <label for="qaReviewDiarization">Diarization (diarization.rttm)</label>
+              <textarea id="qaReviewDiarization" readonly></textarea>
+            </div>
+          </div>
+          <footer class="qa-review-footer">
+            <button type="button" class="secondary" data-action="close">Close</button>
+          </footer>
+        </div>
+      </div>
+    </div>
+  </div>
   <script src="/public/env.js"></script>
   <script src="/public/config.js"></script>
   <script src="/stage2/qa_metrics.js"></script>
@@ -100,7 +207,7 @@
     })();
   </script>
   <script>
-    (function(){
+    (function(global){
       const storageKey = 'qa_report';
       const emptyState = document.getElementById('qaReportEmpty');
       const summaryTable = document.getElementById('qaSummaryTable');
@@ -109,25 +216,30 @@
       const annotatorsBody = annotatorsTable ? annotatorsTable.querySelector('tbody') : null;
       const clipsTable = document.getElementById('qaClipsTable');
       const clipsBody = document.getElementById('qaReportClips');
+      const reviewSummaryNode = document.getElementById('qaReviewSummary');
+      const flaggedCountNode = document.getElementById('qaReviewFlaggedCount');
+      const reviewButton = document.getElementById('qaReviewButton');
 
-      let report = null;
-      try {
-        const raw = localStorage.getItem(storageKey);
-        if(raw){
-          report = JSON.parse(raw);
+      function safeParse(raw){
+        if(!raw) return null;
+        try{
+          return JSON.parse(raw);
+        }catch(err){
+          console.warn('Failed to parse QA report from storage', err);
+          return null;
         }
-      } catch(err) {
-        console.warn('Failed to load QA report from storage', err);
       }
 
-      if(!report){
-        if(emptyState){ emptyState.classList.remove('hide'); }
-        if(summaryTable){ summaryTable.classList.add('hide'); }
-        if(clipsTable){ clipsTable.classList.add('hide'); }
-        return;
+      function loadReport(){
+        try{
+          const raw = localStorage.getItem(storageKey);
+          return safeParse(raw);
+        }catch(err){
+          console.warn('Failed to load QA report from storage', err);
+          return null;
+        }
       }
 
-      if(emptyState){ emptyState.classList.add('hide'); }
       const formatPercent = (value, digits = 1)=>{
         if(typeof value !== 'number' || !Number.isFinite(value)) return 'N/A';
         return `${(value * 100).toFixed(digits)}%`;
@@ -137,7 +249,12 @@
         return `${value.toFixed(digits)} s`;
       };
 
-      if(summaryTable && summaryBody){
+      function renderSummaryTable(report){
+        if(!summaryTable || !summaryBody){ return; }
+        if(!report){
+          summaryTable.classList.add('hide');
+          return;
+        }
         const summary = report.summary || {};
         const rows = [
           ['Generated At', report.generatedAt ? new Date(report.generatedAt).toLocaleString() : 'Unknown'],
@@ -168,85 +285,197 @@
         summaryTable.classList.remove('hide');
       }
 
-      if(annotatorsTable && annotatorsBody){
+      function renderAnnotatorTable(report){
+        if(!annotatorsTable || !annotatorsBody){ return; }
         annotatorsBody.innerHTML = '';
-        const perAnnotator = Array.isArray(report.perAnnotator) ? report.perAnnotator : [];
-        if(perAnnotator.length){
-          perAnnotator.forEach((row)=>{
-            const tr = document.createElement('tr');
-            const cells = [
-              row.annotator_id || 'anonymous',
-              row.clips != null ? row.clips : '0',
-              formatPercent(row.passRate || 0),
-              formatPercent(row.averageCodeSwitchF1 || 0),
-              formatSeconds(row.averageDiarizationMAE || 0),
-              formatSeconds(row.averageCueDiffSec || 0),
-              formatPercent(row.translationCompletenessAvg || 0),
-              formatPercent(row.translationCharRatioAvg || 0)
-            ];
-            cells.forEach((value, idx)=>{
-              if(idx === 0){
-                const th = document.createElement('th');
-                th.scope = 'row';
-                th.textContent = value;
-                tr.appendChild(th);
-              } else {
-                const td = document.createElement('td');
-                td.textContent = value;
-                tr.appendChild(td);
-              }
-            });
-            annotatorsBody.appendChild(tr);
-          });
-          annotatorsTable.classList.remove('hide');
-        } else {
+        const perAnnotator = report && Array.isArray(report.perAnnotator) ? report.perAnnotator : [];
+        if(!perAnnotator.length){
           annotatorsTable.classList.add('hide');
+          return;
+        }
+        perAnnotator.forEach((row)=>{
+          const tr = document.createElement('tr');
+          const cells = [
+            row.annotator_id || 'anonymous',
+            row.clips != null ? row.clips : '0',
+            formatPercent(row.passRate || 0),
+            formatPercent(row.averageCodeSwitchF1 || 0),
+            formatSeconds(row.averageDiarizationMAE || 0),
+            formatSeconds(row.averageCueDiffSec || 0),
+            formatPercent(row.translationCompletenessAvg || 0),
+            formatPercent(row.translationCharRatioAvg || 0)
+          ];
+          cells.forEach((value, idx)=>{
+            if(idx === 0){
+              const th = document.createElement('th');
+              th.scope = 'row';
+              th.textContent = value;
+              tr.appendChild(th);
+            } else {
+              const td = document.createElement('td');
+              td.textContent = value;
+              tr.appendChild(td);
+            }
+          });
+          annotatorsBody.appendChild(tr);
+        });
+        annotatorsTable.classList.remove('hide');
+      }
+
+      function isClipFlagged(clip){
+        if(!clip || clip.locked){ return false; }
+        const metrics = clip.metrics || {};
+        const f1 = typeof metrics.codeswitch_f1 === 'number' ? metrics.codeswitch_f1 : null;
+        const diar = typeof metrics.diarization_mae === 'number' ? metrics.diarization_mae : null;
+        const status = (clip.qaStatus || '').toLowerCase();
+        if(Number.isFinite(f1) && f1 < 0.8) return true;
+        if(Number.isFinite(diar) && diar > 0.5) return true;
+        if(status === 'fail' || status === 'error') return true;
+        return false;
+      }
+
+      function renderClipsTable(report){
+        if(!clipsTable || !clipsBody){ return; }
+        clipsBody.innerHTML = '';
+        const clips = report && Array.isArray(report.clips) ? report.clips : [];
+        if(!clips.length){
+          clipsTable.classList.add('hide');
+          return;
+        }
+        clips.forEach((clip, index)=>{
+          const tr = document.createElement('tr');
+          const clipCell = document.createElement('th');
+          clipCell.scope = 'row';
+          clipCell.textContent = clip.title || clip.clipId || `Clip ${index + 1}`;
+          const langCell = document.createElement('td');
+          langCell.textContent = clip.language || 'unknown';
+          const statusCell = document.createElement('td');
+          const statusBits = [];
+          if(clip.qaStatus){ statusBits.push(clip.qaStatus.toString().toUpperCase()); }
+          if(clip.reviewStatus){ statusBits.push(`Review: ${clip.reviewStatus.toString().toUpperCase()}`); }
+          if(clip.locked){ statusBits.push('LOCKED'); }
+          statusCell.textContent = statusBits.join(' · ') || 'PENDING';
+          const codeSwitchCell = document.createElement('td');
+          const diarCell = document.createElement('td');
+          const cueCell = document.createElement('td');
+          const translationCell = document.createElement('td');
+          const translationCharCell = document.createElement('td');
+          const timeCell = document.createElement('td');
+          const metrics = clip.metrics || {};
+          codeSwitchCell.textContent = Number.isFinite(metrics.codeswitch_f1) ? formatPercent(metrics.codeswitch_f1, 1) : 'N/A';
+          diarCell.textContent = Number.isFinite(metrics.diarization_mae) ? formatSeconds(metrics.diarization_mae, 2) : 'N/A';
+          cueCell.textContent = Number.isFinite(metrics.cue_diff_sec) ? formatSeconds(metrics.cue_diff_sec, 2) : 'N/A';
+          translationCell.textContent = Number.isFinite(metrics.translation_completeness) ? formatPercent(metrics.translation_completeness, 1) : 'N/A';
+          translationCharCell.textContent = Number.isFinite(metrics.translation_char_ratio) ? formatPercent(metrics.translation_char_ratio, 1) : 'N/A';
+          timeCell.textContent = Number.isFinite(clip.timeSpentSec) ? formatSeconds(clip.timeSpentSec, 0) : 'N/A';
+          tr.appendChild(clipCell);
+          tr.appendChild(langCell);
+          tr.appendChild(statusCell);
+          tr.appendChild(codeSwitchCell);
+          tr.appendChild(diarCell);
+          tr.appendChild(cueCell);
+          tr.appendChild(translationCell);
+          tr.appendChild(translationCharCell);
+          tr.appendChild(timeCell);
+          clipsBody.appendChild(tr);
+        });
+        clipsTable.classList.remove('hide');
+      }
+
+      function renderReviewSummary(summary){
+        if(!reviewSummaryNode){ return; }
+        if(!summary || (summary.total || 0) === 0){
+          reviewSummaryNode.classList.add('hide');
+          reviewSummaryNode.innerHTML = '';
+          return;
+        }
+        reviewSummaryNode.classList.remove('hide');
+        const items = [
+          { key: 'accepted', label: 'Accepted' },
+          { key: 'corrected', label: 'Corrected' },
+          { key: 'rejected', label: 'Rejected' },
+          { key: 'pending', label: 'Pending' },
+          { key: 'locked', label: 'Locked' }
+        ];
+        const grid = document.createElement('div');
+        grid.className = 'qa-review-summary__grid';
+        items.forEach((item)=>{
+          const value = summary[item.key] != null ? summary[item.key] : 0;
+          const card = document.createElement('div');
+          card.className = 'qa-review-summary__item';
+          const label = document.createElement('span');
+          label.className = 'qa-review-summary__label';
+          label.textContent = item.label;
+          const count = document.createElement('span');
+          count.className = 'qa-review-summary__value';
+          count.textContent = value.toString();
+          card.appendChild(label);
+          card.appendChild(count);
+          grid.appendChild(card);
+        });
+        reviewSummaryNode.innerHTML = '';
+        reviewSummaryNode.appendChild(grid);
+      }
+
+      function renderFlaggedCount(report){
+        if(!flaggedCountNode){ return; }
+        const clips = report && Array.isArray(report.clips) ? report.clips : [];
+        const flagged = clips.filter(isClipFlagged);
+        if(flagged.length){
+          flaggedCountNode.textContent = `${flagged.length} flagged clip${flagged.length === 1 ? '' : 's'} pending review`;
+          flaggedCountNode.classList.remove('hide');
+        } else {
+          flaggedCountNode.textContent = '';
+          flaggedCountNode.classList.add('hide');
         }
       }
 
-      if(clipsTable && clipsBody){
-        clipsBody.innerHTML = '';
-        if(Array.isArray(report.clips) && report.clips.length){
-          report.clips.forEach((clip, index)=>{
-            const tr = document.createElement('tr');
-            const clipCell = document.createElement('th');
-            clipCell.scope = 'row';
-            clipCell.textContent = clip.title || clip.clipId || `Clip ${index + 1}`;
-            const langCell = document.createElement('td');
-            langCell.textContent = clip.language || 'unknown';
-            const statusCell = document.createElement('td');
-            statusCell.textContent = (clip.qaStatus || 'pending').toString().toUpperCase();
-            const codeSwitchCell = document.createElement('td');
-            const diarCell = document.createElement('td');
-            const cueCell = document.createElement('td');
-            const translationCell = document.createElement('td');
-            const translationCharCell = document.createElement('td');
-            const timeCell = document.createElement('td');
-            const metrics = clip.metrics || {};
-            codeSwitchCell.textContent = typeof metrics.codeswitch_f1 === 'number' ? formatPercent(metrics.codeswitch_f1, 1) : 'N/A';
-            diarCell.textContent = typeof metrics.diarization_mae === 'number' ? formatSeconds(metrics.diarization_mae, 2) : 'N/A';
-            cueCell.textContent = typeof metrics.cue_diff_sec === 'number' ? formatSeconds(metrics.cue_diff_sec, 2) : 'N/A';
-            translationCell.textContent = typeof metrics.translation_completeness === 'number' ? formatPercent(metrics.translation_completeness, 1) : 'N/A';
-            translationCharCell.textContent = typeof metrics.translation_char_ratio === 'number' ? formatPercent(metrics.translation_char_ratio, 1) : 'N/A';
-            timeCell.textContent = typeof clip.timeSpentSec === 'number' ? formatSeconds(clip.timeSpentSec, 0) : 'N/A';
-            tr.appendChild(clipCell);
-            tr.appendChild(langCell);
-            tr.appendChild(statusCell);
-            tr.appendChild(codeSwitchCell);
-            tr.appendChild(diarCell);
-            tr.appendChild(cueCell);
-            tr.appendChild(translationCell);
-            tr.appendChild(translationCharCell);
-            tr.appendChild(timeCell);
-            clipsBody.appendChild(tr);
-          });
-          clipsTable.classList.remove('hide');
-        } else {
-          clipsTable.classList.add('hide');
+      function render(report){
+        if(!report){
+          if(emptyState){ emptyState.classList.remove('hide'); }
+          if(summaryTable){ summaryTable.classList.add('hide'); }
+          if(annotatorsTable){ annotatorsTable.classList.add('hide'); }
+          if(clipsTable){ clipsTable.classList.add('hide'); }
+          if(reviewSummaryNode){ reviewSummaryNode.classList.add('hide'); }
+          renderFlaggedCount(null);
+          return;
         }
+        if(emptyState){ emptyState.classList.add('hide'); }
+        renderSummaryTable(report);
+        renderAnnotatorTable(report);
+        renderClipsTable(report);
+        renderReviewSummary(report.reviewSummary || null);
+        renderFlaggedCount(report);
       }
-    })();
+
+      function refresh(){
+        const report = loadReport();
+        render(report);
+        return report;
+      }
+
+      const api = {
+        refresh,
+        render,
+        loadReport,
+        formatPercent,
+        formatSeconds,
+        isClipFlagged,
+      };
+      global.Stage2QADashboard = api;
+
+      refresh();
+
+      if(reviewButton){
+        reviewButton.addEventListener('click', ()=>{
+          if(global.Stage2Review && typeof global.Stage2Review.open === 'function'){
+            global.Stage2Review.open();
+          }
+        });
+      }
+    })(window);
   </script>
+  <script src="/stage2/review.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/public/sw.js').catch(()=>{});
