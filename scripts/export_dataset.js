@@ -79,6 +79,14 @@ const SENSITIVE_EVENT_CATEGORIES = [
   'explicit',
 ];
 
+const PROVENANCE_FIELDS = [
+  'collection_mode',
+  'license_type',
+  'license_document_id',
+  'processing_location_country',
+  'takedown_supported',
+];
+
 function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -350,6 +358,263 @@ function parseCsv(content) {
   return rows;
 }
 
+function sanitizeProvenanceString(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length ? trimmed : null;
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? String(value) : null;
+  }
+  if (typeof value === 'boolean') {
+    return value ? 'true' : 'false';
+  }
+  if (typeof value === 'object') {
+    return null;
+  }
+  const text = String(value).trim();
+  return text.length ? text : null;
+}
+
+function normalizeTakedownValue(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return null;
+    if (value === 1) return true;
+    if (value === 0) return false;
+    return value;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    const lower = trimmed.toLowerCase();
+    if (['true', 'yes', 'y', '1', 'supported'].includes(lower)) {
+      return true;
+    }
+    if (['false', 'no', 'n', '0', 'unsupported', 'not supported'].includes(lower)) {
+      return false;
+    }
+    return trimmed;
+  }
+  return value;
+}
+
+function normalizeProvenanceRecord(raw) {
+  const source =
+    raw && typeof raw === 'object'
+      ? raw.provenance && typeof raw.provenance === 'object'
+        ? raw.provenance
+        : raw
+      : {};
+
+  const pick = (...keys) => {
+    for (const key of keys) {
+      if (source[key] !== undefined && source[key] !== null) {
+        return source[key];
+      }
+    }
+    return null;
+  };
+
+  const collectionMode = sanitizeProvenanceString(
+    pick('collection_mode', 'collectionMode', 'collection-mode')
+  );
+  const licenseType = sanitizeProvenanceString(
+    pick('license_type', 'licenseType', 'license-type')
+  );
+  const licenseDocumentId = sanitizeProvenanceString(
+    pick(
+      'license_document_id',
+      'licenseDocumentId',
+      'license_document',
+      'licenseDocId',
+      'license_documentid'
+    )
+  );
+  const consentRef = sanitizeProvenanceString(
+    pick('consent_ref', 'consentRef', 'consent_reference')
+  );
+  const processingLocation = sanitizeProvenanceString(
+    pick(
+      'processing_location_country',
+      'processing_location',
+      'processing_country',
+      'processingLocationCountry',
+      'processingLocation'
+    )
+  );
+  const takedownSupported = normalizeTakedownValue(
+    pick('takedown_supported', 'takedownSupported', 'takedown_support', 'takedown', 'takedownSupport')
+  );
+
+  return {
+    collection_mode: collectionMode ?? null,
+    license_type: licenseType ?? null,
+    license_document_id:
+      licenseDocumentId != null ? licenseDocumentId : consentRef ?? null,
+    processing_location_country: processingLocation ?? null,
+    takedown_supported: takedownSupported ?? null,
+  };
+}
+
+function formatProvenanceCountKey(value) {
+  if (value === null || value === undefined) {
+    return 'null';
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? String(value) : 'null';
+  }
+  if (typeof value === 'boolean') {
+    return value ? 'true' : 'false';
+  }
+  try {
+    return JSON.stringify(value);
+  } catch (err) {
+    return String(value);
+  }
+}
+
+async function loadProvenanceLedger(filePath) {
+  if (!filePath) {
+    return {};
+  }
+
+  const resolvedPath = path.resolve(filePath);
+  let content;
+  try {
+    content = await fsp.readFile(resolvedPath, 'utf-8');
+  } catch (err) {
+    throw new Error(`Failed to read provenance ledger at ${resolvedPath}: ${err.message}`);
+  }
+
+  const assignRecord = (mapping, clipId, record) => {
+    if (!clipId) return;
+    const normalizedClipId = String(clipId).trim();
+    if (!normalizedClipId) return;
+    mapping[normalizedClipId] = normalizeProvenanceRecord(record || {});
+  };
+
+  const ext = path.extname(resolvedPath).toLowerCase();
+  const mapping = {};
+
+  if (ext === '.json') {
+    let parsed;
+    try {
+      parsed = JSON.parse(content);
+    } catch (err) {
+      throw new Error(`Invalid JSON provenance ledger: ${err.message}`);
+    }
+
+    if (Array.isArray(parsed)) {
+      parsed.forEach((entry) => {
+        if (!entry || typeof entry !== 'object') return;
+        const clipId =
+          entry.clip_id ||
+          entry.clipId ||
+          entry.asset_id ||
+          entry.assetId ||
+          entry.id;
+        assignRecord(mapping, clipId, entry);
+      });
+      return mapping;
+    }
+
+    if (parsed && typeof parsed === 'object') {
+      Object.entries(parsed).forEach(([clipId, record]) => {
+        assignRecord(mapping, clipId, record);
+      });
+      return mapping;
+    }
+
+    throw new Error('Provenance JSON must be an object or array.');
+  }
+
+  if (ext === '.csv') {
+    const rows = parseCsv(content);
+    if (!rows.length) {
+      return {};
+    }
+
+    const headers = rows[0].map((header) => header.trim());
+    const lowerHeaders = headers.map((header) => header.toLowerCase());
+    const findIndex = (...candidates) => {
+      for (const candidate of candidates) {
+        const idx = lowerHeaders.indexOf(candidate.toLowerCase());
+        if (idx !== -1) {
+          return idx;
+        }
+      }
+      return -1;
+    };
+
+    const clipIndex = findIndex('clip_id', 'clipid', 'asset_id', 'assetid', 'id');
+    if (clipIndex === -1) {
+      throw new Error('Provenance CSV must include a clip_id column.');
+    }
+
+    const collectionModeIndex = findIndex('collection_mode', 'collectionmode', 'collection-mode');
+    const licenseTypeIndex = findIndex('license_type', 'licensetype', 'license-type');
+    const licenseDocIndex = findIndex(
+      'license_document_id',
+      'license_document',
+      'license_doc_id',
+      'licensedocumentid'
+    );
+    const consentRefIndex = findIndex('consent_ref', 'consentref', 'consent_reference');
+    const processingIndex = findIndex(
+      'processing_location_country',
+      'processing_country',
+      'processing_location',
+      'processinglocationcountry'
+    );
+    const takedownIndex = findIndex('takedown_supported', 'takedownsupported', 'takedown_support', 'takedown');
+
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || row.length <= clipIndex) continue;
+      const clipValue = row[clipIndex];
+      const clipId = clipValue != null ? String(clipValue).trim() : '';
+      if (!clipId) continue;
+
+      const record = {
+        collection_mode:
+          collectionModeIndex !== -1 && row.length > collectionModeIndex
+            ? row[collectionModeIndex]
+            : null,
+        license_type:
+          licenseTypeIndex !== -1 && row.length > licenseTypeIndex ? row[licenseTypeIndex] : null,
+        license_document_id:
+          licenseDocIndex !== -1 && row.length > licenseDocIndex ? row[licenseDocIndex] : null,
+        consent_ref:
+          consentRefIndex !== -1 && row.length > consentRefIndex ? row[consentRefIndex] : null,
+        processing_location_country:
+          processingIndex !== -1 && row.length > processingIndex ? row[processingIndex] : null,
+        takedown_supported:
+          takedownIndex !== -1 && row.length > takedownIndex ? row[takedownIndex] : null,
+      };
+
+      assignRecord(mapping, clipId, record);
+    }
+
+    return mapping;
+  }
+
+  throw new Error('Unsupported provenance ledger format. Use CSV or JSON.');
+}
+
 async function loadRightsMetadata(filePath) {
   if (!filePath) {
     return {};
@@ -466,6 +731,7 @@ async function main() {
       minF1: { type: 'string', default: '0.80' },
       splitRatio: { type: 'string', default: '0.8,0.1,0.1' },
       rights: { type: 'string' },
+      provenance: { type: 'string' },
       public: { type: 'boolean', default: false },
     },
   });
@@ -520,6 +786,16 @@ async function main() {
     } catch (err) {
       console.warn(err.message);
       rightsByAsset = {};
+    }
+  }
+
+  let provenanceByClip = {};
+  if (values.provenance) {
+    try {
+      provenanceByClip = await loadProvenanceLedger(values.provenance);
+    } catch (err) {
+      console.warn(err.message);
+      provenanceByClip = {};
     }
   }
 
@@ -622,6 +898,11 @@ async function main() {
   };
   const splitCounts = {};
   const rightsCounts = {};
+  const provenanceValueCounts = {};
+  PROVENANCE_FIELDS.forEach((field) => {
+    provenanceValueCounts[field] = {};
+  });
+  let provenanceCompleteCount = 0;
 
   const MIN_PUBLIC_DURATION_SEC = 30 * 60;
   const MAX_PUBLIC_DURATION_SEC = 60 * 60;
@@ -699,6 +980,29 @@ async function main() {
       files,
       rights: clip.rightsList,
     };
+
+    const provenanceEntry = provenanceByClip[clip.assetId] || {};
+    const provenanceForRecord = {};
+    PROVENANCE_FIELDS.forEach((field) => {
+      const value = provenanceEntry[field];
+      provenanceForRecord[field] = value !== undefined ? value : null;
+    });
+    Object.assign(record, provenanceForRecord);
+
+    let hasCompleteProvenance = true;
+    PROVENANCE_FIELDS.forEach((field) => {
+      const value = record[field];
+      if (value === null || value === undefined) {
+        hasCompleteProvenance = false;
+        return;
+      }
+      const counts = provenanceValueCounts[field];
+      const key = formatProvenanceCountKey(value);
+      counts[key] = (counts[key] || 0) + 1;
+    });
+    if (hasCompleteProvenance) {
+      provenanceCompleteCount += 1;
+    }
 
     if (isPublic) {
       record.blurred = true;
@@ -826,6 +1130,19 @@ async function main() {
     compliance_notes: 'Ensure usage complies with internal data handling and privacy policies.',
     rights_distribution: rightsCounts,
   };
+
+  const provenanceCountsForSummary = {};
+  PROVENANCE_FIELDS.forEach((field) => {
+    provenanceCountsForSummary[field] = { ...provenanceValueCounts[field] };
+  });
+  const provenanceCompleteProportion =
+    datasetRecords.length > 0
+      ? Number((provenanceCompleteCount / datasetRecords.length).toFixed(4))
+      : 0;
+
+  trainingSummary.provenance_value_counts = provenanceCountsForSummary;
+  trainingSummary.provenance_complete_count = provenanceCompleteCount;
+  trainingSummary.provenance_complete_proportion = provenanceCompleteProportion;
 
   fs.writeFileSync(trainingSummaryPath, JSON.stringify(trainingSummary, null, 2));
 
