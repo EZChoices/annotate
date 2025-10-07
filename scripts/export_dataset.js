@@ -68,6 +68,129 @@ function sumDurationsFromVTT(vttPath) {
   return total;
 }
 
+const SENSITIVE_EVENT_CATEGORIES = [
+  'pii_name',
+  'pii_phone',
+  'pii_email',
+  'pii_address',
+  'minor_face',
+  'political',
+  'religious',
+  'explicit',
+];
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function redactSensitiveText(content) {
+  if (!content) return content;
+  const patternSegments = SENSITIVE_EVENT_CATEGORIES.map((category) => escapeRegex(category));
+  patternSegments.push('pii_[a-z0-9_]+');
+  patternSegments.push('safety_pii_[a-z0-9_]+');
+  patternSegments.push('safety_minor_[a-z0-9_]+');
+  patternSegments.push('safety_(?:explicit|political|religious)');
+  const categoriesPattern = patternSegments.join('|');
+  if (!categoriesPattern) {
+    return content;
+  }
+  let sanitized = content;
+
+  const classRegex = new RegExp(
+    `(<c[^>]*\\b(?:${categoriesPattern})\\b[^>]*>)([\\s\\S]*?)(</c>)`,
+    'gi'
+  );
+  sanitized = sanitized.replace(classRegex, (match, openTag, _inner, closeTag) => `${openTag}[REDACTED]${closeTag}`);
+
+  const dataAttrRegex = new RegExp(
+    `(<(?!/)[^>]*\\bdata-category\\s*=\\s*"(?:${categoriesPattern})"[^>]*>)([\\s\\S]*?)(</[^>]+>)`,
+    'gi'
+  );
+  sanitized = sanitized.replace(dataAttrRegex, (match, openTag, _inner, closeTag) => `${openTag}[REDACTED]${closeTag}`);
+
+  const noteRegex = new RegExp(
+    `(NOTE[^\n]*\\b(?:${categoriesPattern})\\b[^\n]*:?)\\s*([^\n]*)`,
+    'gi'
+  );
+  sanitized = sanitized.replace(noteRegex, (match, prefix) => `${prefix} [REDACTED]`);
+
+  const inlineLabelRegex = new RegExp(
+    `(\\b(?:${categoriesPattern})\\b\\s*:\\s*)([^\n]+)`,
+    'gi'
+  );
+  sanitized = sanitized.replace(inlineLabelRegex, (match, prefix) => `${prefix}[REDACTED]`);
+
+  return sanitized;
+}
+
+function redactVtt(vttPath) {
+  if (!fs.existsSync(vttPath)) {
+    return '';
+  }
+  const content = fs.readFileSync(vttPath, 'utf-8');
+  return redactSensitiveText(content);
+}
+
+function blurVideoPlaceholder(assetPath) {
+  if (!assetPath) return;
+  if (!fs.existsSync(assetPath)) {
+    return;
+  }
+  // Placeholder for future video redaction logic.
+}
+
+function samplePublicSubset(clips, minSec, maxSec) {
+  if (!Array.isArray(clips) || clips.length === 0) {
+    return [];
+  }
+  const shuffled = [...clips];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+
+  const selected = [];
+  let total = 0;
+  for (const clip of shuffled) {
+    const projected = total + (clip.totalDurationSec || 0);
+    if (total >= minSec && projected > maxSec) {
+      continue;
+    }
+    selected.push(clip);
+    total = projected;
+    if (total >= minSec && total <= maxSec) {
+      break;
+    }
+  }
+
+  if (total < minSec) {
+    for (const clip of shuffled) {
+      if (selected.includes(clip)) continue;
+      selected.push(clip);
+      total += clip.totalDurationSec || 0;
+      if (total >= minSec) {
+        break;
+      }
+    }
+  }
+
+  return selected.length ? selected : shuffled;
+}
+
+function findFirstVideoAsset(dirPath) {
+  if (!fs.existsSync(dirPath)) {
+    return null;
+  }
+  const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    if (/\.(mp4|mov|mkv|webm)$/i.test(entry.name)) {
+      return entry.name;
+    }
+  }
+  return null;
+}
+
 function normalizeVoiceTag(value) {
   if (!value) return null;
   const raw = String(value).trim();
@@ -343,6 +466,7 @@ async function main() {
       minF1: { type: 'string', default: '0.80' },
       splitRatio: { type: 'string', default: '0.8,0.1,0.1' },
       rights: { type: 'string' },
+      public: { type: 'boolean', default: false },
     },
   });
 
@@ -354,6 +478,13 @@ async function main() {
 
   const sourceDir = path.resolve(values.source || 'data/stage2_output');
   const outDir = path.resolve(values.out || 'datasets');
+  const publicRaw = values.public;
+  const isPublic =
+    typeof publicRaw === 'boolean'
+      ? publicRaw
+      : publicRaw === undefined
+      ? false
+      : String(publicRaw).toLowerCase() !== 'false';
   const includeGoldRaw = values['include-gold'];
   const includeGold =
     typeof includeGoldRaw === 'boolean'
@@ -377,7 +508,8 @@ async function main() {
 
   const splitLabels = getSplitLabels(splitRatios.length);
 
-  const datasetRoot = path.join(outDir, version);
+  const datasetFolderName = isPublic ? `${version}-public` : version;
+  const datasetRoot = path.join(outDir, datasetFolderName);
   const clipsDestRoot = path.join(datasetRoot, 'clips');
   ensureDir(clipsDestRoot);
 
@@ -391,18 +523,18 @@ async function main() {
     }
   }
 
-  const datasetRecords = [];
-  const qaGlobal = {
-    f1Values: [],
-    maeValues: [],
-    pctInBoundsValues: [],
-    cueDeltaValues: [],
-  };
-  let totalDurationSec = 0;
-  const splitCounts = {};
-  const rightsCounts = {};
-  const logEntries = [];
+  const requiredFiles = [
+    'transcript.vtt',
+    'translation.vtt',
+    'code_switch.vtt',
+    'code_switch_spans.json',
+    'diarization.rttm',
+    'speaker_profiles.json',
+    'qa_result.json',
+  ];
 
+  const logEntries = [];
+  const clipCandidates = [];
   const clipDirs = listSubdirs(sourceDir).filter(isAssetId);
   for (const assetId of clipDirs) {
     const clipSource = path.join(sourceDir, assetId);
@@ -455,16 +587,6 @@ async function main() {
       continue;
     }
 
-    const requiredFiles = [
-      'transcript.vtt',
-      'translation.vtt',
-      'code_switch.vtt',
-      'code_switch_spans.json',
-      'diarization.rttm',
-      'speaker_profiles.json',
-      'qa_result.json',
-    ];
-
     const missingFile = requiredFiles.find((file) => !fs.existsSync(path.join(clipSource, file)));
     if (missingFile) {
       logEntries.push(`SKIPPED ${assetId} reason=missing_file file=${missingFile}`);
@@ -472,52 +594,135 @@ async function main() {
     }
 
     const totalDuration = sumDurationsFromVTT(transcriptPath);
-    totalDurationSec += totalDuration;
-
     const split = hashToSplit(assetId, splitRatios, splitLabels);
-    splitCounts[split] = (splitCounts[split] || 0) + 1;
+    const rightsList = Array.isArray(rightsByAsset[assetId]) ? [...rightsByAsset[assetId]] : [];
+    const qaMetrics = {
+      f1,
+      mae: Number(qa.diarization_boundary_mae_sec),
+      cueDelta: Number(qa.cue_delta_sec),
+      translationPct: Number(qa.translation_pct_in_bounds),
+    };
 
-    const destinationClipDir = path.join(clipsDestRoot, assetId);
+    clipCandidates.push({
+      assetId,
+      clipSource,
+      totalDurationSec: totalDuration,
+      split,
+      qaMetrics,
+      rightsList,
+    });
+  }
+
+  const datasetRecords = [];
+  const qaGlobal = {
+    f1Values: [],
+    maeValues: [],
+    pctInBoundsValues: [],
+    cueDeltaValues: [],
+  };
+  const splitCounts = {};
+  const rightsCounts = {};
+
+  const MIN_PUBLIC_DURATION_SEC = 30 * 60;
+  const MAX_PUBLIC_DURATION_SEC = 60 * 60;
+  let selectedClips = clipCandidates;
+  if (isPublic) {
+    selectedClips = samplePublicSubset(clipCandidates, MIN_PUBLIC_DURATION_SEC, MAX_PUBLIC_DURATION_SEC);
+    const selectedSet = new Set(selectedClips.map((clip) => clip.assetId));
+    clipCandidates.forEach((clip) => {
+      if (selectedSet.has(clip.assetId)) {
+        logEntries.push(
+          `PUBLIC_SELECTED ${clip.assetId} duration_sec=${clip.totalDurationSec.toFixed(3)}`
+        );
+      } else {
+        logEntries.push(`PUBLIC_NOT_SELECTED ${clip.assetId}`);
+      }
+    });
+    const selectedDurationSec = selectedClips.reduce(
+      (acc, clip) => acc + (clip.totalDurationSec || 0),
+      0
+    );
+    if (selectedDurationSec < MIN_PUBLIC_DURATION_SEC) {
+      logEntries.push(
+        `PUBLIC_WARNING insufficient_duration selected_sec=${selectedDurationSec.toFixed(3)}`
+      );
+    } else if (selectedDurationSec > MAX_PUBLIC_DURATION_SEC) {
+      logEntries.push(
+        `PUBLIC_WARNING duration_above_max selected_sec=${selectedDurationSec.toFixed(3)}`
+      );
+    }
+  }
+
+  let totalDurationSec = 0;
+  for (const clip of selectedClips) {
+    const destinationClipDir = path.join(clipsDestRoot, clip.assetId);
     ensureDir(destinationClipDir);
 
     const files = {};
     for (const fileName of requiredFiles) {
-      const srcPath = path.join(clipSource, fileName);
+      const srcPath = path.join(clip.clipSource, fileName);
       const destPath = path.join(destinationClipDir, fileName);
-      fs.copyFileSync(srcPath, destPath);
+      if (isPublic && (fileName === 'transcript.vtt' || fileName === 'translation.vtt')) {
+        const redactedContent = redactVtt(srcPath);
+        fs.writeFileSync(destPath, redactedContent);
+      } else {
+        fs.copyFileSync(srcPath, destPath);
+      }
       files[fileName] = path.relative(datasetRoot, destPath);
     }
 
-    const voiceTags = extractVoiceTagsFromVtt(transcriptPath);
+    const videoFileName = findFirstVideoAsset(clip.clipSource);
+    if (videoFileName) {
+      const srcVideoPath = path.join(clip.clipSource, videoFileName);
+      blurVideoPlaceholder(srcVideoPath);
+      const destVideoPath = path.join(destinationClipDir, videoFileName);
+      fs.copyFileSync(srcVideoPath, destVideoPath);
+      files[videoFileName] = path.relative(datasetRoot, destVideoPath);
+    }
 
-    const rightsList = Array.isArray(rightsByAsset[assetId]) ? [...rightsByAsset[assetId]] : [];
-    rightsList.forEach((right) => {
-      rightsCounts[right] = (rightsCounts[right] || 0) + 1;
-    });
+    const transcriptDestPath = path.join(destinationClipDir, 'transcript.vtt');
+    const voiceTags = extractVoiceTagsFromVtt(transcriptDestPath);
 
-    datasetRecords.push({
-      asset_id: assetId,
-      split,
+    const record = {
+      asset_id: clip.assetId,
+      split: clip.split,
       summary: {
-        total_duration_sec: totalDuration,
+        total_duration_sec: clip.totalDurationSec,
       },
       qa: {
-        code_switch_f1_at300ms: f1,
-        diarization_boundary_mae_sec: Number(qa.diarization_boundary_mae_sec),
-        cue_delta_sec: Number(qa.cue_delta_sec),
-        translation_pct_in_bounds: Number(qa.translation_pct_in_bounds),
+        code_switch_f1_at300ms: clip.qaMetrics.f1,
+        diarization_boundary_mae_sec: clip.qaMetrics.mae,
+        cue_delta_sec: clip.qaMetrics.cueDelta,
+        translation_pct_in_bounds: clip.qaMetrics.translationPct,
       },
       voice_tags: voiceTags,
       files,
-      rights: rightsList,
+      rights: clip.rightsList,
+    };
+
+    if (isPublic) {
+      record.blurred = true;
+    }
+
+    datasetRecords.push(record);
+
+    qaGlobal.f1Values.push(clip.qaMetrics.f1);
+    qaGlobal.maeValues.push(clip.qaMetrics.mae);
+    qaGlobal.pctInBoundsValues.push(clip.qaMetrics.translationPct);
+    qaGlobal.cueDeltaValues.push(clip.qaMetrics.cueDelta);
+
+    totalDurationSec += clip.totalDurationSec;
+
+    splitCounts[clip.split] = (splitCounts[clip.split] || 0) + 1;
+
+    clip.rightsList.forEach((right) => {
+      rightsCounts[right] = (rightsCounts[right] || 0) + 1;
     });
 
-    qaGlobal.f1Values.push(f1);
-    qaGlobal.maeValues.push(Number(qa.diarization_boundary_mae_sec));
-    qaGlobal.pctInBoundsValues.push(Number(qa.translation_pct_in_bounds));
-    qaGlobal.cueDeltaValues.push(Number(qa.cue_delta_sec));
-
-    logEntries.push(`INCLUDED ${assetId} split=${split} duration_sec=${totalDuration.toFixed(3)}`);
+    const logLabel = isPublic ? 'PUBLIC_EXPORTED' : 'INCLUDED';
+    logEntries.push(
+      `${logLabel} ${clip.assetId} split=${clip.split} duration_sec=${clip.totalDurationSec.toFixed(3)}`
+    );
   }
 
   const datasetJsonlPath = path.join(datasetRoot, 'dataset.jsonl');
@@ -555,7 +760,21 @@ async function main() {
     .map(([name, count]) => `- ${name}: ${count}`)
     .join('\n');
 
-  const datasetCard = `# Stage 2 Dataset Export - Version ${version}\n\n` +
+  if (isPublic) {
+    const publicSummaryPath = path.join(datasetRoot, 'public_eval_summary.json');
+    const publicSummary = {
+      clip_count: datasetRecords.length,
+      total_minutes: Number((totalDurationSec / 60).toFixed(2)),
+      rights_distribution: rightsCounts,
+      duration_bounds_minutes: {
+        min: MIN_PUBLIC_DURATION_SEC / 60,
+        max: MAX_PUBLIC_DURATION_SEC / 60,
+      },
+    };
+    fs.writeFileSync(publicSummaryPath, JSON.stringify(publicSummary, null, 2));
+  }
+
+  let datasetCard = `# Stage 2 Dataset Export - Version ${version}\n\n` +
     `- Total clips: ${datasetRecords.length}\n` +
     `- Total duration (hours): ${durationHours.toFixed(2)}\n` +
     `- Mean code-switch F1 @300ms: ${qaSummary.mean_f1.toFixed(4)}\n` +
@@ -572,6 +791,15 @@ async function main() {
     `This dataset is derived from Stage 2 pipeline outputs. Ensure all downstream usage respects the original content rights and internal compliance policies.\n\n` +
     `Each dataset record includes associated rights metadata to enable downstream usage policy enforcement.`;
 
+  if (isPublic) {
+    datasetCard +=
+      `\n\n## Public Evaluation Subset\n` +
+      `This export represents the public evaluation subset of the Stage 2 dataset. ` +
+      `Transcripts and translations have safety- and privacy-sensitive spans replaced with [REDACTED], ` +
+      `and video assets are flagged for blurring to support safe external evaluation. ` +
+      `The subset is intended for public evaluation scenarios while protecting personal or sensitive content.`;
+  }
+
   fs.writeFileSync(datasetCardPath, datasetCard);
 
   const trainingSummary = {
@@ -579,7 +807,7 @@ async function main() {
     total_clips: datasetRecords.length,
     total_duration_hours: Number(durationHours.toFixed(2)),
     data_sources: ['Stage 2 aggregated outputs'],
-    license_types: ['Internal use only'],
+    license_types: [isPublic ? 'Public evaluation' : 'Internal use only'],
     languages: ['Code-switched (multiple)'],
     modalities: ['Audio', 'Text transcripts', 'Translations'],
     annotations: [
