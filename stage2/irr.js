@@ -1,244 +1,401 @@
-(function(global){
+(function (global) {
   "use strict";
 
+  // --- Storage keys & in-memory fallback ------------------------------------
   const RECORDS_KEY = "ea_stage2_irr_records";
-  const SUMMARY_KEY = "irr_summary.json";
-  const memoryStore = { records: [], summary: null };
+  const SUMMARY_KEY = "ea_stage2_irr_summary";
+  const memoryStore = { records: null, summary: null }; // records stored normalized
 
-  function hasLocalStorage(){
-    try{
+  // --- Environment guards ----------------------------------------------------
+  function hasLocalStorage() {
+    try {
       return typeof localStorage !== "undefined" && localStorage !== null;
-    }catch{
+    } catch {
       return false;
     }
   }
 
-  function loadRecords(){
-    if(hasLocalStorage()){
-      try{
-        const raw = localStorage.getItem(RECORDS_KEY);
-        if(raw){
-          const parsed = JSON.parse(raw);
-          if(Array.isArray(parsed)){
-            return parsed;
-          }
-        }
-      }catch(err){
-        console.warn("IRR: failed to load records from storage", err);
-      }
-    }
-    const mem = global.__IRR_RECORDS__;
-    if(Array.isArray(mem)){
-      return mem.slice();
-    }
-    return memoryStore.records.slice();
+  // --- Utils -----------------------------------------------------------------
+  function clamp01(value) {
+    if (!Number.isFinite(value)) return 0;
+    if (value < 0) return 0;
+    if (value > 1) return 1;
+    return value;
   }
 
-  function saveRecords(records){
-    const safe = Array.isArray(records) ? records.filter(Boolean) : [];
-    if(hasLocalStorage()){
-      try{
-        localStorage.setItem(RECORDS_KEY, JSON.stringify(safe));
-      }catch(err){
-        console.warn("IRR: failed to persist records", err);
-      }
-    }
-    memoryStore.records = safe.slice();
-    global.__IRR_RECORDS__ = memoryStore.records;
+  function clone(obj) {
+    return obj ? JSON.parse(JSON.stringify(obj)) : obj;
   }
 
-  function toFinite(value){
-    if(value == null) return null;
+  function average(values) {
+    const finite = (values || []).filter((v) => Number.isFinite(v));
+    if (!finite.length) return null;
+    const sum = finite.reduce((acc, v) => acc + v, 0);
+    return sum / finite.length;
+  }
+
+  function buildPairs(list) {
+    const pairs = [];
+    for (let i = 0; i < list.length; i += 1) {
+      for (let j = i + 1; j < list.length; j += 1) {
+        pairs.push([list[i], list[j]]);
+      }
+    }
+    return pairs;
+  }
+
+  function toFinite(value) {
+    if (value == null) return null;
     const num = typeof value === "string" ? parseFloat(value) : Number(value);
     return Number.isFinite(num) ? num : null;
   }
 
-  function sanitizeMetrics(metrics){
+  // Normalize arbitrary metric shapes to a canonical metric object
+  // Canonical keys: codeSwitchF1 [0..1], diarizationMae (sec), cueDeltaSec (sec), translationCompleteness [0..1]
+  function sanitizeMetrics(metrics) {
     const src = metrics && typeof metrics === "object" ? metrics : {};
-    return {
-      codeSwitchF1: toFinite(src.codeSwitchF1 ?? src.codeswitch_f1 ?? src.code_switch_f1),
-      diarizationMae: toFinite(src.diarizationMae ?? src.diarization_mae ?? src.diarMae),
-      cueDelta: toFinite(src.cueDelta ?? src.cue_diff_sec ?? src.cueDeltaSec),
-      translationCompleteness: toFinite(
-        src.translationCompleteness ??
+    const codeSwitchF1 =
+      toFinite(src.codeSwitchF1 ?? src.codeswitch_f1 ?? src.code_switch_f1);
+    const diarizationMae =
+      toFinite(src.diarizationMae ?? src.diarization_mae ?? src.diarMae);
+    const cueDeltaSec = toFinite(
+      src.cueDeltaSec ?? src.cueDelta ?? src.cue_delta ?? src.cue_diff_sec ?? src.cueDeltaSec
+    );
+    const translationCompleteness = toFinite(
+      src.translationCompleteness ??
         src.translation_completeness ??
         src.translationCompletenessRatio
-      )
+    );
+    return {
+      ...(Number.isFinite(codeSwitchF1) ? { codeSwitchF1 } : {}),
+      ...(Number.isFinite(diarizationMae) ? { diarizationMae } : {}),
+      ...(Number.isFinite(cueDeltaSec) ? { cueDeltaSec } : {}),
+      ...(Number.isFinite(translationCompleteness)
+        ? { translationCompleteness }
+        : {}),
     };
   }
 
-  function recordAnnotation(annotatorId, clipId, metrics){
-    if(!clipId){ return null; }
-    const id = annotatorId || "anonymous";
-    const normalized = sanitizeMetrics(metrics);
-    const records = loadRecords();
-    const timestamp = new Date().toISOString();
-    const payload = {
-      annotatorId: id,
-      clipId,
-      metrics: normalized,
-      recordedAt: timestamp
-    };
-    const idx = records.findIndex((entry)=> entry && entry.clipId === clipId && entry.annotatorId === id);
-    if(idx >= 0){
-      records[idx] = payload;
-    } else {
-      records.push(payload);
+  // --- Records model (normalized) -------------------------------------------
+  // We store records as:
+  // { clips: { [clipId]: { clipId, annotations: { [annotatorId]: { ...metrics, recordedAt } } } } }
+  let cache = null;
+
+  function normalizeRecords(records) {
+    if (!records) {
+      return { clips: {} };
     }
-    saveRecords(records);
-    const summary = computeIRRSummary(records);
-    saveIRRSummary(summary);
-    return payload;
+    // Legacy array form: [{clipId, annotatorId, metrics}, ...] or entries with .annotations map/array
+    if (Array.isArray(records)) {
+      const clips = {};
+      records.forEach((entry) => {
+        if (!entry || !entry.clipId) return;
+        const clipId = entry.clipId;
+        if (!clips[clipId]) clips[clipId] = { clipId, annotations: {} };
+
+        if (entry.annotatorId) {
+          clips[clipId].annotations[entry.annotatorId] =
+            sanitizeMetrics(entry.metrics) || {};
+        } else {
+          // If it's an entry with a nested annotations list/map
+          const items = Array.isArray(entry.annotations)
+            ? entry.annotations
+            : Object.entries(entry.annotations || {}).map(
+                ([annotatorId, metrics]) => ({
+                  annotatorId,
+                  metrics,
+                })
+              );
+          items.forEach((item) => {
+            if (!item || !item.annotatorId) return;
+            clips[clipId].annotations[item.annotatorId] =
+              sanitizeMetrics(item.metrics) || {};
+          });
+        }
+      });
+      return { clips };
+    }
+    // Already structured
+    if (records.clips && typeof records.clips === "object") {
+      const clips = {};
+      Object.keys(records.clips).forEach((clipId) => {
+        const clip = records.clips[clipId];
+        if (!clip) return;
+        const annotations = Array.isArray(clip.annotations)
+          ? clip.annotations.reduce((map, ann) => {
+              if (!ann || !ann.annotatorId) return map;
+              map[ann.annotatorId] = sanitizeMetrics(ann.metrics) || {};
+              return map;
+            }, {})
+          : Object.keys(clip.annotations || {}).reduce((map, annotatorId) => {
+              map[annotatorId] = sanitizeMetrics(
+                clip.annotations[annotatorId]
+              ) || {};
+              return map;
+            }, {});
+        clips[clipId] = { clipId, annotations };
+      });
+      return { clips };
+    }
+    return { clips: {} };
   }
 
-  function computeAlpha(values){
-    const arr = Array.isArray(values) ? values.map(Number).filter((v)=> Number.isFinite(v)) : [];
-    if(arr.length < 2){ return null; }
-    let agreementSum = 0;
-    let pairs = 0;
-    for(let i=0;i<arr.length;i++){
-      for(let j=i+1;j<arr.length;j++){
-        const a = arr[i];
-        const b = arr[j];
-        const diff = Math.abs(a - b);
-        const agreement = Math.max(0, Math.min(1, 1 - diff));
-        agreementSum += agreement;
-        pairs++;
+  function loadRecordsFromStorage() {
+    if (!hasLocalStorage()) return null;
+    try {
+      const raw = localStorage.getItem(RECORDS_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (err) {
+      console.warn("IRR: failed to load records from storage", err);
+      return null;
+    }
+  }
+
+  function ensureRecords() {
+    if (cache) return cache;
+    const stored = loadRecordsFromStorage();
+    cache = normalizeRecords(stored || memoryStore.records);
+    if (!cache || !cache.clips) cache = { clips: {} };
+    return cache;
+  }
+
+  function persistRecords(records) {
+    cache = normalizeRecords(records);
+    memoryStore.records = clone(cache);
+    if (hasLocalStorage()) {
+      try {
+        localStorage.setItem(RECORDS_KEY, JSON.stringify(cache));
+      } catch (err) {
+        console.warn("IRR: failed to persist records", err);
       }
     }
-    if(pairs === 0){ return null; }
-    return Number((agreementSum / pairs).toFixed(4));
+    // Also attach to global for debugging/legacy access
+    global.__IRR_RECORDS__ = clone(cache);
+    return cache;
   }
 
-  function normalizeMae(value){
-    const num = toFinite(value);
-    if(!Number.isFinite(num)){ return null; }
-    const range = 2; // seconds
-    const normalized = 1 - Math.min(Math.abs(num) / range, 1);
-    return Math.max(0, Math.min(1, normalized));
-  }
-
-  function normalizeCueDelta(value){
-    const num = toFinite(value);
-    if(!Number.isFinite(num)){ return null; }
-    const range = 1.5; // seconds
-    const normalized = 1 - Math.min(Math.abs(num) / range, 1);
-    return Math.max(0, Math.min(1, normalized));
-  }
-
-  function computeAverage(values){
-    if(!values || !values.length){ return null; }
-    const total = values.reduce((acc, v)=> acc + v, 0);
-    return Number((total / values.length).toFixed(4));
-  }
-
-  function computeIRRSummary(recordsInput){
-    const records = Array.isArray(recordsInput) ? recordsInput.filter(Boolean) : loadRecords();
-    const byClip = new Map();
-    records.forEach((entry)=>{
-      if(!entry || !entry.clipId){ return; }
-      if(!byClip.has(entry.clipId)){ byClip.set(entry.clipId, []); }
-      byClip.get(entry.clipId).push(entry);
+  // --- Public API: record annotation ----------------------------------------
+  function recordAnnotation(annotatorId, clipId, metrics) {
+    if (!clipId) return null;
+    const id = annotatorId || "anonymous";
+    const normalized = sanitizeMetrics(metrics);
+    const records = ensureRecords();
+    const clip = records.clips[clipId] || { clipId, annotations: {} };
+    clip.annotations[id] = Object.assign({}, normalized, {
+      recordedAt: Date.now(),
     });
+    records.clips[clipId] = clip;
+    persistRecords(records);
+    const summary = computeIRRSummary(records);
+    saveIRRSummary({ summary });
+    return { annotatorId: id, clipId, metrics: normalized };
+  }
+
+  // --- IRR math --------------------------------------------------------------
+  const DEFAULT_MAX_DIAR_SEC = 5; // seconds
+  const DEFAULT_MAX_CUE_DELTA = 4; // seconds
+
+  // Pairwise agreement proxy across metrics; returns alphas per metric and overall
+  function computeAlpha(annotationsList, options) {
+    const opts = options || {};
+    const maxDiar = Number.isFinite(opts.maxDiarizationSeconds)
+      ? opts.maxDiarizationSeconds
+      : DEFAULT_MAX_DIAR_SEC;
+    const maxCueDelta = Number.isFinite(opts.maxCueDeltaSec)
+      ? opts.maxCueDeltaSec
+      : DEFAULT_MAX_CUE_DELTA;
+
+    // Accept either [{annotatorId, metrics}, ...] OR map { annotatorId: metrics }
+    const annotations = Array.isArray(annotationsList)
+      ? annotationsList.filter((e) => e && e.metrics)
+      : Object.keys(annotationsList || {}).map((key) => ({
+          annotatorId: key,
+          metrics: annotationsList[key],
+        }));
+
+    const cleaned = annotations.filter((e) => e && e.metrics);
+    if (cleaned.length < 2) {
+      return {
+        codeSwitchAlpha: null,
+        diarizationAlpha: null,
+        cueAlpha: null,
+        translationAlpha: null,
+        overallAlpha: null,
+      };
+    }
+
+    const pairs = buildPairs(cleaned);
 
     const codeSwitchScores = [];
     const diarizationScores = [];
     const cueScores = [];
     const translationScores = [];
-    let clipCount = 0;
 
-    byClip.forEach((entries)=>{
-      const list = Array.isArray(entries) ? entries.filter(Boolean) : [];
-      if(list.length < 2){ return; }
-      clipCount++;
-      const codeValues = list
-        .map((entry)=>{
-          const value = entry.metrics ? entry.metrics.codeSwitchF1 : null;
-          if(!Number.isFinite(value)){ return null; }
-          return Math.max(0, Math.min(1, value));
-        })
-        .filter((v)=> Number.isFinite(v));
-      if(codeValues.length >= 2){
-        const alpha = computeAlpha(codeValues);
-        if(Number.isFinite(alpha)){ codeSwitchScores.push(alpha); }
+    pairs.forEach(([a, b]) => {
+      const ma = a.metrics || {};
+      const mb = b.metrics || {};
+
+      // Code-switch F1: closer means better; use midpoint then clamp
+      const f1a = Number(ma.codeSwitchF1);
+      const f1b = Number(mb.codeSwitchF1);
+      if (Number.isFinite(f1a) && Number.isFinite(f1b)) {
+        codeSwitchScores.push(clamp01((f1a + f1b) / 2));
       }
 
-      const diarValues = list
-        .map((entry)=> normalizeMae(entry.metrics ? entry.metrics.diarizationMae : null))
-        .filter((v)=> Number.isFinite(v));
-      if(diarValues.length >= 2){
-        const alpha = computeAlpha(diarValues);
-        if(Number.isFinite(alpha)){ diarizationScores.push(alpha); }
+      // Diarization MAE (sec): lower is better; invert by range
+      const maeA = Number(ma.diarizationMae);
+      const maeB = Number(mb.diarizationMae);
+      if (Number.isFinite(maeA) && Number.isFinite(maeB)) {
+        const invA = clamp01(1 - Math.min(Math.abs(maeA), maxDiar) / maxDiar);
+        const invB = clamp01(1 - Math.min(Math.abs(maeB), maxDiar) / maxDiar);
+        diarizationScores.push((invA + invB) / 2);
       }
 
-      const cueValues = list
-        .map((entry)=> normalizeCueDelta(entry.metrics ? entry.metrics.cueDelta : null))
-        .filter((v)=> Number.isFinite(v));
-      if(cueValues.length >= 2){
-        const alpha = computeAlpha(cueValues);
-        if(Number.isFinite(alpha)){ cueScores.push(alpha); }
+      // Cue delta (sec): lower is better; invert by range
+      const cueA = Number(
+        ma.cueDeltaSec ?? ma.cueDelta ?? ma.cue_delta ?? ma.cue_diff_sec
+      );
+      const cueB = Number(
+        mb.cueDeltaSec ?? mb.cueDelta ?? mb.cue_delta ?? mb.cue_diff_sec
+      );
+      if (Number.isFinite(cueA) && Number.isFinite(cueB)) {
+        const scoreA = clamp01(1 - Math.min(Math.abs(cueA), maxCueDelta) / maxCueDelta);
+        const scoreB = clamp01(1 - Math.min(Math.abs(cueB), maxCueDelta) / maxCueDelta);
+        cueScores.push((scoreA + scoreB) / 2);
       }
 
-      const translationValues = list
-        .map((entry)=>{
-          const value = entry.metrics ? entry.metrics.translationCompleteness : null;
-          if(!Number.isFinite(value)){ return null; }
-          return Math.max(0, Math.min(1, value));
-        })
-        .filter((v)=> Number.isFinite(v));
-      if(translationValues.length >= 2){
-        const alpha = computeAlpha(translationValues);
-        if(Number.isFinite(alpha)){ translationScores.push(alpha); }
+      // Translation completeness [0..1]: closer is better; 1 - abs diff
+      const transA = Number(ma.translationCompleteness);
+      const transB = Number(mb.translationCompleteness);
+      if (Number.isFinite(transA) && Number.isFinite(transB)) {
+        const diff = Math.abs(transA - transB);
+        translationScores.push(clamp01(1 - diff));
       }
     });
 
-    const summary = {
-      generatedAt: new Date().toISOString(),
-      clipCount,
-      codeSwitchAlpha: computeAverage(codeSwitchScores),
-      diarizationAlpha: computeAverage(diarizationScores),
-      cueAlpha: computeAverage(cueScores),
-      translationAlpha: computeAverage(translationScores),
-      overallAlpha: null
-    };
+    const codeSwitchAlpha = average(codeSwitchScores);
+    const diarizationAlpha = average(diarizationScores);
+    const cueAlpha = average(cueScores);
+    const translationAlpha = average(translationScores);
 
-    const overallValues = [
-      summary.codeSwitchAlpha,
-      summary.diarizationAlpha,
-      summary.cueAlpha,
-      summary.translationAlpha
-    ].filter((v)=> Number.isFinite(v));
-    summary.overallAlpha = computeAverage(overallValues);
-    return summary;
+    const components = [codeSwitchAlpha, diarizationAlpha, cueAlpha, translationAlpha].filter(
+      (v) => Number.isFinite(v)
+    );
+    const overallAlpha = components.length ? average(components) : null;
+
+    return {
+      codeSwitchAlpha: codeSwitchAlpha != null ? clamp01(codeSwitchAlpha) : null,
+      diarizationAlpha: diarizationAlpha != null ? clamp01(diarizationAlpha) : null,
+      cueAlpha: cueAlpha != null ? clamp01(cueAlpha) : null,
+      translationAlpha: translationAlpha != null ? clamp01(translationAlpha) : null,
+      overallAlpha: overallAlpha != null ? clamp01(overallAlpha) : null,
+    };
   }
 
-  function saveIRRSummary(summaryInput){
-    const summary = summaryInput || computeIRRSummary();
-    if(!summary){ return null; }
-    const serialized = JSON.stringify(summary);
-    if(hasLocalStorage()){
-      try{
-        localStorage.setItem(SUMMARY_KEY, serialized);
-      }catch(err){
+  function computeIRRSummary(recordsInput) {
+    const data = normalizeRecords(recordsInput != null ? recordsInput : ensureRecords());
+    const clips = data.clips || {};
+    const entries = Object.keys(clips)
+      .map((clipId) => clips[clipId])
+      .filter(Boolean);
+
+    let clipCount = 0;
+    const codeSwitchValues = [];
+    const diarizationValues = [];
+    const cueValues = [];
+    const translationValues = [];
+
+    entries.forEach((clip) => {
+      const annotations = (clip && clip.annotations) || {};
+      const annList = Object.keys(annotations).map((annotatorId) => ({
+        annotatorId,
+        metrics: annotations[annotatorId],
+      }));
+      if (annList.length < 2) return;
+      clipCount += 1;
+      const alpha = computeAlpha(annList);
+      if (alpha.codeSwitchAlpha != null) codeSwitchValues.push(alpha.codeSwitchAlpha);
+      if (alpha.diarizationAlpha != null) diarizationValues.push(alpha.diarizationAlpha);
+      if (alpha.cueAlpha != null) cueValues.push(alpha.cueAlpha);
+      if (alpha.translationAlpha != null) translationValues.push(alpha.translationAlpha);
+    });
+
+    const codeSwitchAlpha =
+      codeSwitchValues.length ? average(codeSwitchValues) : null;
+    const diarizationAlpha =
+      diarizationValues.length ? average(diarizationValues) : null;
+    const cueAlpha = cueValues.length ? average(cueValues) : null;
+    const translationAlpha =
+      translationValues.length ? average(translationValues) : null;
+
+    const components = [codeSwitchAlpha, diarizationAlpha, cueAlpha, translationAlpha].filter(
+      (v) => Number.isFinite(v)
+    );
+    const overallAlpha = components.length ? average(components) : null;
+
+    return {
+      generatedAt: new Date().toISOString(),
+      clipsEvaluated: clipCount,
+      codeSwitchAlpha: codeSwitchAlpha != null ? clamp01(codeSwitchAlpha) : null,
+      diarizationAlpha: diarizationAlpha != null ? clamp01(diarizationAlpha) : null,
+      cueAlpha: cueAlpha != null ? clamp01(cueAlpha) : null,
+      translationAlpha: translationAlpha != null ? clamp01(translationAlpha) : null,
+      overallAlpha: overallAlpha != null ? clamp01(overallAlpha) : null,
+    };
+  }
+
+  function saveIRRSummary(options) {
+    const opts = options || {};
+    const summary =
+      opts.summary || computeIRRSummary(opts.records != null ? opts.records : undefined);
+
+    // Persist to localStorage
+    if (hasLocalStorage()) {
+      try {
+        localStorage.setItem(SUMMARY_KEY, JSON.stringify(summary));
+      } catch (err) {
         console.warn("IRR: failed to persist summary", err);
       }
     }
-    memoryStore.summary = summary;
-    global.__IRR_SUMMARY__ = summary;
+
+    // Persist to memory & global
+    memoryStore.summary = clone(summary);
+    global.__IRR_SUMMARY__ = clone(summary);
+
+    // Optional: write to disk if running in Node and path provided
+    if (opts.path) {
+      try {
+        const fs = require("fs");
+        const path = require("path");
+        const targetPath = path.resolve(opts.path);
+        fs.writeFileSync(targetPath, JSON.stringify(summary, null, 2));
+      } catch (err) {
+        console.warn("IRR: unable to write summary to disk", err);
+      }
+    }
     return summary;
   }
 
+  // --- Public API ------------------------------------------------------------
   const api = {
     recordAnnotation,
     computeAlpha,
     computeIRRSummary,
     saveIRRSummary,
-    _loadRecords: loadRecords,
-    _saveRecords: saveRecords
+    // Legacy/diagnostic helpers
+    _loadRecords: () => clone(ensureRecords()),
+    _saveRecords: (records) => persistRecords(records),
+    _internal: {
+      normalizeRecords,
+      ensureRecords,
+      sanitizeMetrics,
+    },
   };
 
-  global.IRR = api;
-  if(typeof module !== "undefined" && module.exports){
+  if (typeof module !== "undefined" && module.exports) {
     module.exports = api;
+  } else {
+    global.IRR = api;
   }
 })(typeof window !== "undefined" ? window : globalThis);

@@ -1,577 +1,401 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>EchoAtlas Stage 2 — QA Dashboard</title>
-  <link rel="manifest" href="/public/manifest.webmanifest">
-  <link rel="stylesheet" href="/public/styles.css">
-  <style>
-    .screen{max-width:720px;margin:0 auto}
-    .hide{display:none}
-    .stage-menu{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 auto 1rem auto;max-width:720px}
-    .stage-menu__link{display:inline-flex;align-items:center;justify-content:center;padding:.45rem .9rem;border-radius:999px;border:1px solid var(--border);background:var(--card);color:inherit;text-decoration:none;font-size:.9rem;transition:background .15s ease,border-color .15s ease,color .15s ease}
-    .stage-menu__link:hover{border-color:var(--accent);color:var(--accent)}
-    .stage-menu__link.active{background:var(--accent);border-color:var(--accent);color:#fff}
-    .qa-dashboard__intro{margin-bottom:1rem;font-size:1rem}
-    .qa-dashboard__empty{padding:1.25rem;border:1px dashed var(--border);border-radius:12px;text-align:center;color:var(--muted);background:var(--card)}
-    .qa-dashboard__actions{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin:1rem 0}
-    .qa-review-flagged{font-size:.9rem;color:var(--muted)}
-    .qa-review-summary{margin:1.25rem 0}
-    .qa-review-summary__grid{display:grid;gap:.75rem;grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
-    .qa-review-summary__item{padding:.75rem 1rem;border:1px solid var(--border);border-radius:12px;background:var(--card)}
-    .qa-review-summary__label{display:block;font-size:.85rem;color:var(--muted);margin-bottom:.3rem}
-    .qa-review-summary__value{font-size:1.4rem;font-weight:600}
-    .qa-report-table{width:100%;border-collapse:collapse;margin:1rem 0;background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden}
-    .qa-report-table caption{padding:.75rem 1rem;font-weight:600;text-align:left;background:rgba(0,0,0,0.02)}
-    .qa-report-table th,.qa-report-table td{padding:.65rem 1rem;text-align:left;border-bottom:1px solid var(--border);font-size:.95rem}
-    .qa-report-table tbody tr:last-child th,.qa-report-table tbody tr:last-child td{border-bottom:none}
-    .qa-report-table thead{background:rgba(0,0,0,0.03);font-size:.85rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
-    .qa-review-modal{position:fixed;inset:0;padding:1.5rem;background:rgba(15,23,42,0.55);display:flex;align-items:center;justify-content:center;z-index:1000}
-    .qa-review-modal.hide{display:none}
-    .qa-review-modal__dialog{width:100%;max-width:1080px;max-height:90vh;background:var(--bg,#fff);color:inherit;border-radius:18px;box-shadow:0 22px 45px rgba(0,0,0,0.25);display:flex;flex-direction:column;overflow:hidden}
-    .qa-review-modal__header{padding:1rem 1.25rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:.5rem}
-    .qa-review-modal__header h3{margin:0;font-size:1.2rem}
-    .qa-review-close{border:none;background:none;font-size:1.4rem;cursor:pointer;line-height:1;padding:.2rem .4rem;border-radius:999px}
-    .qa-review-modal__body{flex:1;display:flex;overflow:hidden}
-    .qa-review-sidebar{width:260px;border-right:1px solid var(--border);display:flex;flex-direction:column;background:var(--card)}
-    .qa-review-sidebar__header{padding:1rem 1.25rem;border-bottom:1px solid var(--border);font-weight:600}
-    .qa-review-list{list-style:none;margin:0;padding:0;flex:1;overflow:auto}
-    .qa-review-list__item{border-bottom:1px solid var(--border)}
-    .qa-review-list__button{width:100%;border:none;background:none;text-align:left;padding:.75rem 1.25rem;display:flex;flex-direction:column;gap:.3rem;cursor:pointer;font-size:.95rem}
-    .qa-review-list__button:hover,.qa-review-list__button:focus{background:rgba(43,124,255,0.08);outline:none}
-    .qa-review-list__button.active{background:rgba(43,124,255,0.15)}
-    .qa-review-metrics{font-size:.85rem;color:var(--muted);display:flex;gap:.5rem;flex-wrap:wrap}
-    .qa-review-main{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--bg,#fff)}
-    .qa-review-main__content{flex:1;overflow:auto;padding:1.25rem;display:flex;flex-direction:column;gap:1rem}
-    .qa-review-meta{font-size:.9rem;color:var(--muted)}
-    .qa-review-toggle{display:flex;align-items:center;gap:.5rem}
-    .qa-review-status-bar{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center}
-    .qa-review-status-buttons{display:flex;flex-wrap:wrap;gap:.5rem}
-    .qa-review-status-buttons button{min-width:120px}
-    .qa-review-status-buttons button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
-    .qa-review-field{display:flex;flex-direction:column;gap:.35rem}
-    .qa-review-field textarea{width:100%;min-height:120px;border-radius:12px;border:1px solid var(--border);padding:.75rem;font-family:monospace;font-size:.9rem;line-height:1.4;resize:vertical}
-    .qa-review-field textarea[readonly]{background:rgba(0,0,0,0.03)}
-    .qa-review-actions{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.75rem}
-    .qa-review-footer{padding:1rem 1.25rem;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:.5rem}
-    .qa-review-empty{padding:1rem 1.25rem;color:var(--muted)}
-    @media(max-width:900px){
-      .qa-review-modal__body{flex-direction:column}
-      .qa-review-sidebar{width:100%;max-height:240px;border-right:none;border-bottom:1px solid var(--border)}
+(function (global) {
+  "use strict";
+
+  // --- Storage keys & in-memory fallback ------------------------------------
+  const RECORDS_KEY = "ea_stage2_irr_records";
+  const SUMMARY_KEY = "ea_stage2_irr_summary";
+  const memoryStore = { records: null, summary: null }; // records stored normalized
+
+  // --- Environment guards ----------------------------------------------------
+  function hasLocalStorage() {
+    try {
+      return typeof localStorage !== "undefined" && localStorage !== null;
+    } catch {
+      return false;
     }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <nav class="stage-menu" aria-label="Stage 2 menu">
-      <a href="/stage2/index.html" class="stage-menu__link">Annotation Workspace</a>
-      <a href="/stage2/qa-dashboard.html" class="stage-menu__link active">QA Dashboard</a>
-    </nav>
-    <section class="screen" aria-labelledby="qaDashboardTitle">
-      <h2 id="qaDashboardTitle">QA Dashboard</h2>
-      <p class="notice qa-dashboard__intro">Review your gold-clip QA results and detailed per-metric scores. Metrics update automatically after each submission.</p>
-      <div class="qa-dashboard__actions">
-        <button id="qaReviewButton" class="secondary" type="button">Review Flagged Clips</button>
-        <span id="qaReviewFlaggedCount" class="qa-review-flagged hide" role="status" aria-live="polite"></span>
-      </div>
-      <div id="qaReviewSummary" class="qa-review-summary hide" aria-live="polite"></div>
-      <div class="qa-dashboard__empty" id="qaReportEmpty" role="status">No QA metrics to display yet. Complete a gold clip to populate this dashboard.</div>
-      <table class="qa-report-table hide" id="qaSummaryTable">
-        <caption>Latest QA Summary</caption>
-        <thead>
-          <tr>
-            <th scope="col">Metric</th>
-            <th scope="col">Value</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-      <section class="qa-review-summary hide" id="irrSummarySection" aria-live="polite">
-        <h3>IRR Summary</h3>
-        <div class="qa-dashboard__empty" id="irrSummaryEmpty" role="status">No IRR data recorded yet. Double-coded clips will appear here once available.</div>
-        <table class="qa-report-table hide" id="irrSummaryTable">
-          <caption>Inter-Rater Reliability</caption>
-          <thead>
-            <tr>
-              <th scope="col">Dimension</th>
-              <th scope="col">Alpha</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </section>
-      <table class="qa-report-table hide" id="qaAnnotatorsTable">
-        <caption>Per-Annotator Averages</caption>
-        <thead>
-          <tr>
-            <th scope="col">Annotator</th>
-            <th scope="col">Clips</th>
-            <th scope="col">Pass Rate</th>
-            <th scope="col">Avg F1</th>
-            <th scope="col">Diar MAE (s)</th>
-            <th scope="col">Cue Δ (s)</th>
-            <th scope="col">Translation %</th>
-            <th scope="col">Char Coverage %</th>
-            <th scope="col">Speaker Cards</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-      <table class="qa-report-table hide" id="qaClipsTable">
-        <caption>Gold Clip Checks</caption>
-        <thead>
-          <tr>
-            <th scope="col">Clip</th>
-            <th scope="col">Language</th>
-            <th scope="col">QA Status</th>
-            <th scope="col">Code-Switch F1</th>
-            <th scope="col">Diar MAE (s)</th>
-            <th scope="col">Cue Δ (s)</th>
-            <th scope="col">Translation %</th>
-            <th scope="col">Char Coverage %</th>
-            <th scope="col">Time Spent</th>
-          </tr>
-        </thead>
-        <tbody id="qaReportClips"></tbody>
-      </table>
-    </section>
-  </div>
-  <div id="qaReviewModal" class="qa-review-modal hide" role="dialog" aria-modal="true" aria-labelledby="qaReviewModalTitle">
-    <div class="qa-review-modal__dialog">
-      <header class="qa-review-modal__header">
-        <h3 id="qaReviewModalTitle">Flagged Clip Review</h3>
-        <button type="button" class="qa-review-close" data-action="close" aria-label="Close review overlay">×</button>
-      </header>
-      <div class="qa-review-modal__body">
-        <aside class="qa-review-sidebar">
-          <div class="qa-review-sidebar__header">Flagged Clips</div>
-          <div class="qa-review-empty hide" id="qaReviewEmpty">No flagged clips to review.</div>
-          <ul class="qa-review-list" id="qaReviewClipList"></ul>
-        </aside>
-        <div class="qa-review-main">
-          <div class="qa-review-main__content" id="qaReviewContent">
-            <p class="qa-review-meta" id="qaReviewMeta">Select a clip to load its annotations.</p>
-            <label class="qa-review-toggle">
-              <input type="checkbox" id="qaReviewEnableEdit">
-              <span>Enable Edit</span>
-            </label>
-            <div class="qa-review-status-bar">
-              <div class="qa-review-status-buttons" role="group" aria-label="Review decision">
-                <button type="button" class="secondary" data-review-status="accepted">Accept</button>
-                <button type="button" class="secondary" data-review-status="corrected">Correct</button>
-                <button type="button" class="secondary" data-review-status="rejected">Reject</button>
-              </div>
-              <span id="qaReviewStatusLabel" class="qa-review-meta"></span>
-            </div>
-            <div class="qa-review-actions">
-              <div></div>
-              <div>
-                <button type="button" class="primary" id="qaReviewSave" disabled>Save</button>
-                <button type="button" class="secondary" id="qaReviewCancel" disabled>Cancel</button>
-              </div>
-            </div>
-            <div class="qa-review-field">
-              <label for="qaReviewTranscript">Transcript (transcript.vtt)</label>
-              <textarea id="qaReviewTranscript" readonly></textarea>
-            </div>
-            <div class="qa-review-field">
-              <label for="qaReviewTranslation">Translation (translation.vtt)</label>
-              <textarea id="qaReviewTranslation" readonly></textarea>
-            </div>
-            <div class="qa-review-field">
-              <label for="qaReviewCodeSwitch">Code Switch (code_switch.vtt)</label>
-              <textarea id="qaReviewCodeSwitch" readonly></textarea>
-            </div>
-            <div class="qa-review-field">
-              <label for="qaReviewCodeSwitchSpans">Code Switch Spans (code_switch_spans.json)</label>
-              <textarea id="qaReviewCodeSwitchSpans" readonly></textarea>
-            </div>
-            <div class="qa-review-field">
-              <label for="qaReviewDiarization">Diarization (diarization.rttm)</label>
-              <textarea id="qaReviewDiarization" readonly></textarea>
-            </div>
-          </div>
-          <footer class="qa-review-footer">
-            <button type="button" class="secondary" data-action="close">Close</button>
-          </footer>
-        </div>
-      </div>
-    </div>
-  </div>
-  <script src="/public/env.js"></script>
-  <script src="/public/config.js"></script>
-  <script src="/stage2/irr.js"></script>
-  <script src="/stage2/qa_metrics.js"></script>
-  <script>
-    (function(){
-      const c = document.createElement('div');
-      c.className = 'notice';
-      const base = location.origin;
-      const annotKey = 'ea_stage2_annotator_id';
-      let id = 'anonymous';
-      try { id = localStorage.getItem(annotKey) || 'anonymous'; } catch{}
-      if(new URLSearchParams(location.search).get('links')==='0') return;
-      c.innerHTML = `Quick Links:
-        <a href="${base}/meta-v2/index.html">Meta V2</a> ·
-        <a href="${base}/">Stage 2</a> ·
-        <a href="${base}/stage2/qa-dashboard.html">QA Dashboard</a> ·
-        <a href="${base}/api/tasks?stage=2&annotator_id=${encodeURIComponent(id)}&limit=5" target="_blank">Tasks API</a> ·
-        <a href="${base}/api/clip?annotator=${encodeURIComponent(id)}" target="_blank">Clip API</a> ·
-        <a href="${base}/api/debug?annotator=${encodeURIComponent(id)}" target="_blank">Debug</a>`;
-      document.body.appendChild(c);
-    })();
-  </script>
-  <script>
-    (function(global){
-      const storageKey = 'qa_report';
-      const emptyState = document.getElementById('qaReportEmpty');
-      const summaryTable = document.getElementById('qaSummaryTable');
-      const summaryBody = summaryTable ? summaryTable.querySelector('tbody') : null;
-      const annotatorsTable = document.getElementById('qaAnnotatorsTable');
-      const annotatorsBody = annotatorsTable ? annotatorsTable.querySelector('tbody') : null;
-      const clipsTable = document.getElementById('qaClipsTable');
-      const clipsBody = document.getElementById('qaReportClips');
-      const reviewSummaryNode = document.getElementById('qaReviewSummary');
-      const flaggedCountNode = document.getElementById('qaReviewFlaggedCount');
-      const reviewButton = document.getElementById('qaReviewButton');
-      const irrSection = document.getElementById('irrSummarySection');
-      const irrTable = document.getElementById('irrSummaryTable');
-      const irrBody = irrTable ? irrTable.querySelector('tbody') : null;
-      const irrEmpty = document.getElementById('irrSummaryEmpty');
+  }
 
-      function safeParse(raw){
-        if(!raw) return null;
-        try{
-          return JSON.parse(raw);
-        }catch(err){
-          console.warn('Failed to parse QA report from storage', err);
-          return null;
-        }
+  // --- Utils -----------------------------------------------------------------
+  function clamp01(value) {
+    if (!Number.isFinite(value)) return 0;
+    if (value < 0) return 0;
+    if (value > 1) return 1;
+    return value;
+  }
+
+  function clone(obj) {
+    return obj ? JSON.parse(JSON.stringify(obj)) : obj;
+  }
+
+  function average(values) {
+    const finite = (values || []).filter((v) => Number.isFinite(v));
+    if (!finite.length) return null;
+    const sum = finite.reduce((acc, v) => acc + v, 0);
+    return sum / finite.length;
+  }
+
+  function buildPairs(list) {
+    const pairs = [];
+    for (let i = 0; i < list.length; i += 1) {
+      for (let j = i + 1; j < list.length; j += 1) {
+        pairs.push([list[i], list[j]]);
       }
+    }
+    return pairs;
+  }
 
-      function loadReport(){
-        try{
-          const raw = localStorage.getItem(storageKey);
-          return safeParse(raw);
-        }catch(err){
-          console.warn('Failed to load QA report from storage', err);
-          return null;
-        }
-      }
+  function toFinite(value) {
+    if (value == null) return null;
+    const num = typeof value === "string" ? parseFloat(value) : Number(value);
+    return Number.isFinite(num) ? num : null;
+  }
 
-      const formatPercent = (value, digits = 1)=>{
-        if(typeof value !== 'number' || !Number.isFinite(value)) return 'N/A';
-        return `${(value * 100).toFixed(digits)}%`;
-      };
-      const formatSeconds = (value, digits = 2)=>{
-        if(typeof value !== 'number' || !Number.isFinite(value)) return 'N/A';
-        return `${value.toFixed(digits)} s`;
-      };
-      const formatAlpha = (value)=>{
-        if(typeof value !== 'number' || !Number.isFinite(value)) return 'N/A';
-        return value.toFixed(3);
-      };
+  // Normalize arbitrary metric shapes to a canonical metric object
+  // Canonical keys: codeSwitchF1 [0..1], diarizationMae (sec), cueDeltaSec (sec), translationCompleteness [0..1]
+  function sanitizeMetrics(metrics) {
+    const src = metrics && typeof metrics === "object" ? metrics : {};
+    const codeSwitchF1 =
+      toFinite(src.codeSwitchF1 ?? src.codeswitch_f1 ?? src.code_switch_f1);
+    const diarizationMae =
+      toFinite(src.diarizationMae ?? src.diarization_mae ?? src.diarMae);
+    const cueDeltaSec = toFinite(
+      src.cueDeltaSec ?? src.cueDelta ?? src.cue_delta ?? src.cue_diff_sec ?? src.cueDeltaSec
+    );
+    const translationCompleteness = toFinite(
+      src.translationCompleteness ??
+        src.translation_completeness ??
+        src.translationCompletenessRatio
+    );
+    return {
+      ...(Number.isFinite(codeSwitchF1) ? { codeSwitchF1 } : {}),
+      ...(Number.isFinite(diarizationMae) ? { diarizationMae } : {}),
+      ...(Number.isFinite(cueDeltaSec) ? { cueDeltaSec } : {}),
+      ...(Number.isFinite(translationCompleteness)
+        ? { translationCompleteness }
+        : {}),
+    };
+  }
 
-      function renderSummaryTable(report){
-        if(!summaryTable || !summaryBody){ return; }
-        if(!report){
-          summaryTable.classList.add('hide');
-          return;
-        }
-        const summary = report.summary || {};
-        const rows = [
-          ['Generated At', report.generatedAt ? new Date(report.generatedAt).toLocaleString() : 'Unknown'],
-          ['Annotator', report.annotator || 'anonymous'],
-          ['Total Gold Clips', summary.totalGoldClips != null ? summary.totalGoldClips : '0'],
-          ['Reviewed Clips', summary.reviewedClips != null ? summary.reviewedClips : '0'],
-          ['Pass Rate', formatPercent(summary.passRate || 0)],
-          ['Average Code-Switch F1', formatPercent(summary.averageCodeSwitchF1 || 0)],
-          ['Average Diarization MAE', formatSeconds(summary.averageDiarizationMAE || 0)],
-          ['Average Cue Length', formatSeconds(summary.averageCueLengthSec || 0)],
-          ['Average Cue Δ', formatSeconds(summary.averageCueDiffSec || 0)],
-          ['Translation Completeness', formatPercent(summary.translationCompletenessAvg || 0)],
-          ['Translation Char Coverage', formatPercent(summary.translationCharRatioAvg || 0)],
-          ['Speaker Card Completion', formatPercent(summary.speakerProfileCompletionRate || 0)],
-          ['Average Time Spent', formatSeconds(summary.averageTimeSpentSec || 0)]
-        ];
-        summaryBody.innerHTML = '';
-        rows.forEach(([label, value])=>{
-          const tr = document.createElement('tr');
-          const th = document.createElement('th');
-          th.scope = 'row';
-          th.textContent = label;
-          const td = document.createElement('td');
-          td.textContent = value;
-          tr.appendChild(th);
-          tr.appendChild(td);
-          summaryBody.appendChild(tr);
-        });
-        summaryTable.classList.remove('hide');
-      }
+  // --- Records model (normalized) -------------------------------------------
+  // We store records as:
+  // { clips: { [clipId]: { clipId, annotations: { [annotatorId]: { ...metrics, recordedAt } } } } }
+  let cache = null;
 
-      function renderAnnotatorTable(report){
-        if(!annotatorsTable || !annotatorsBody){ return; }
-        annotatorsBody.innerHTML = '';
-        const perAnnotator = report && Array.isArray(report.perAnnotator) ? report.perAnnotator : [];
-        if(!perAnnotator.length){
-          annotatorsTable.classList.add('hide');
-          return;
-        }
-        perAnnotator.forEach((row)=>{
-          const tr = document.createElement('tr');
-          const cells = [
-            row.annotator_id || 'anonymous',
-            row.clips != null ? row.clips : '0',
-            formatPercent(row.passRate || 0),
-            formatPercent(row.averageCodeSwitchF1 || 0),
-            formatSeconds(row.averageDiarizationMAE || 0),
-            formatSeconds(row.averageCueDiffSec || 0),
-            formatPercent(row.translationCompletenessAvg || 0),
-            formatPercent(row.translationCharRatioAvg || 0),
-            formatPercent(row.speakerProfileCompletionRate || 0)
-          ];
-          cells.forEach((value, idx)=>{
-            if(idx === 0){
-              const th = document.createElement('th');
-              th.scope = 'row';
-              th.textContent = value;
-              tr.appendChild(th);
-            } else {
-              const td = document.createElement('td');
-              td.textContent = value;
-              tr.appendChild(td);
-            }
-          });
-          annotatorsBody.appendChild(tr);
-        });
-        annotatorsTable.classList.remove('hide');
-      }
+  function normalizeRecords(records) {
+    if (!records) {
+      return { clips: {} };
+    }
+    // Legacy array form: [{clipId, annotatorId, metrics}, ...] or entries with .annotations map/array
+    if (Array.isArray(records)) {
+      const clips = {};
+      records.forEach((entry) => {
+        if (!entry || !entry.clipId) return;
+        const clipId = entry.clipId;
+        if (!clips[clipId]) clips[clipId] = { clipId, annotations: {} };
 
-      function isClipFlagged(clip){
-        if(!clip || clip.locked){ return false; }
-        const metrics = clip.metrics || {};
-        const f1 = typeof metrics.codeswitch_f1 === 'number' ? metrics.codeswitch_f1 : null;
-        const diar = typeof metrics.diarization_mae === 'number' ? metrics.diarization_mae : null;
-        const status = (clip.qaStatus || '').toLowerCase();
-        if(Number.isFinite(f1) && f1 < 0.8) return true;
-        if(Number.isFinite(diar) && diar > 0.5) return true;
-        if(status === 'fail' || status === 'error') return true;
-        return false;
-      }
-
-      function renderClipsTable(report){
-        if(!clipsTable || !clipsBody){ return; }
-        clipsBody.innerHTML = '';
-        const clips = report && Array.isArray(report.clips) ? report.clips : [];
-        if(!clips.length){
-          clipsTable.classList.add('hide');
-          return;
-        }
-        clips.forEach((clip, index)=>{
-          const tr = document.createElement('tr');
-          const clipCell = document.createElement('th');
-          clipCell.scope = 'row';
-          clipCell.textContent = clip.title || clip.clipId || `Clip ${index + 1}`;
-          const langCell = document.createElement('td');
-          langCell.textContent = clip.language || 'unknown';
-          const statusCell = document.createElement('td');
-          const statusBits = [];
-          if(clip.qaStatus){ statusBits.push(clip.qaStatus.toString().toUpperCase()); }
-          if(clip.reviewStatus){ statusBits.push(`Review: ${clip.reviewStatus.toString().toUpperCase()}`); }
-          if(clip.locked){ statusBits.push('LOCKED'); }
-          statusCell.textContent = statusBits.join(' · ') || 'PENDING';
-          const codeSwitchCell = document.createElement('td');
-          const diarCell = document.createElement('td');
-          const cueCell = document.createElement('td');
-          const translationCell = document.createElement('td');
-          const translationCharCell = document.createElement('td');
-          const timeCell = document.createElement('td');
-          const metrics = clip.metrics || {};
-          codeSwitchCell.textContent = Number.isFinite(metrics.codeswitch_f1) ? formatPercent(metrics.codeswitch_f1, 1) : 'N/A';
-          diarCell.textContent = Number.isFinite(metrics.diarization_mae) ? formatSeconds(metrics.diarization_mae, 2) : 'N/A';
-          cueCell.textContent = Number.isFinite(metrics.cue_diff_sec) ? formatSeconds(metrics.cue_diff_sec, 2) : 'N/A';
-          translationCell.textContent = Number.isFinite(metrics.translation_completeness) ? formatPercent(metrics.translation_completeness, 1) : 'N/A';
-          translationCharCell.textContent = Number.isFinite(metrics.translation_char_ratio) ? formatPercent(metrics.translation_char_ratio, 1) : 'N/A';
-          timeCell.textContent = Number.isFinite(clip.timeSpentSec) ? formatSeconds(clip.timeSpentSec, 0) : 'N/A';
-          tr.appendChild(clipCell);
-          tr.appendChild(langCell);
-          tr.appendChild(statusCell);
-          tr.appendChild(codeSwitchCell);
-          tr.appendChild(diarCell);
-          tr.appendChild(cueCell);
-          tr.appendChild(translationCell);
-          tr.appendChild(translationCharCell);
-          tr.appendChild(timeCell);
-          clipsBody.appendChild(tr);
-        });
-        clipsTable.classList.remove('hide');
-      }
-
-      function renderReviewSummary(summary){
-        if(!reviewSummaryNode){ return; }
-        if(!summary || (summary.total || 0) === 0){
-          reviewSummaryNode.classList.add('hide');
-          reviewSummaryNode.innerHTML = '';
-          return;
-        }
-        reviewSummaryNode.classList.remove('hide');
-        const items = [
-          { key: 'accepted', label: 'Accepted' },
-          { key: 'corrected', label: 'Corrected' },
-          { key: 'rejected', label: 'Rejected' },
-          { key: 'pending', label: 'Pending' },
-          { key: 'locked', label: 'Locked' }
-        ];
-        const grid = document.createElement('div');
-        grid.className = 'qa-review-summary__grid';
-        items.forEach((item)=>{
-          const value = summary[item.key] != null ? summary[item.key] : 0;
-          const card = document.createElement('div');
-          card.className = 'qa-review-summary__item';
-          const label = document.createElement('span');
-          label.className = 'qa-review-summary__label';
-          label.textContent = item.label;
-          const count = document.createElement('span');
-          count.className = 'qa-review-summary__value';
-          count.textContent = value.toString();
-          card.appendChild(label);
-          card.appendChild(count);
-          grid.appendChild(card);
-        });
-        reviewSummaryNode.innerHTML = '';
-        reviewSummaryNode.appendChild(grid);
-      }
-
-      function renderFlaggedCount(report){
-        if(!flaggedCountNode){ return; }
-        const clips = report && Array.isArray(report.clips) ? report.clips : [];
-        const flagged = clips.filter(isClipFlagged);
-        if(flagged.length){
-          flaggedCountNode.textContent = `${flagged.length} flagged clip${flagged.length === 1 ? '' : 's'} pending review`;
-          flaggedCountNode.classList.remove('hide');
+        if (entry.annotatorId) {
+          clips[clipId].annotations[entry.annotatorId] =
+            sanitizeMetrics(entry.metrics) || {};
         } else {
-          flaggedCountNode.textContent = '';
-          flaggedCountNode.classList.add('hide');
+          // If it's an entry with a nested annotations list/map
+          const items = Array.isArray(entry.annotations)
+            ? entry.annotations
+            : Object.entries(entry.annotations || {}).map(
+                ([annotatorId, metrics]) => ({
+                  annotatorId,
+                  metrics,
+                })
+              );
+          items.forEach((item) => {
+            if (!item || !item.annotatorId) return;
+            clips[clipId].annotations[item.annotatorId] =
+              sanitizeMetrics(item.metrics) || {};
+          });
         }
-      }
-
-      function render(report){
-        if(!report){
-          if(emptyState){ emptyState.classList.remove('hide'); }
-          if(summaryTable){ summaryTable.classList.add('hide'); }
-          if(annotatorsTable){ annotatorsTable.classList.add('hide'); }
-          if(clipsTable){ clipsTable.classList.add('hide'); }
-          if(reviewSummaryNode){ reviewSummaryNode.classList.add('hide'); }
-          renderFlaggedCount(null);
-          return;
-        }
-        if(emptyState){ emptyState.classList.add('hide'); }
-        renderSummaryTable(report);
-        renderAnnotatorTable(report);
-        renderClipsTable(report);
-        renderReviewSummary(report.reviewSummary || null);
-        renderFlaggedCount(report);
-      }
-
-      function loadIrrFromStorage(){
-        try{
-          const raw = localStorage.getItem('irr_summary.json');
-          return safeParse(raw);
-        }catch(err){
-          console.warn('IRR: failed to read summary from storage', err);
-          return null;
-        }
-      }
-
-      async function fetchIrrSummary(){
-        const stored = loadIrrFromStorage();
-        if(stored){ return stored; }
-        try{
-          const res = await fetch('/irr_summary.json', { cache: 'no-store' });
-          if(res && res.ok){
-            return await res.json();
-          }
-        }catch(err){
-          console.warn('IRR: failed to fetch summary file', err);
-        }
-        return null;
-      }
-
-      function renderIrrSummary(summary){
-        if(!irrSection){ return; }
-        irrSection.classList.remove('hide');
-        if(!summary || (!summary.clipCount && !Number.isFinite(summary.overallAlpha))){
-          if(irrBody){ irrBody.innerHTML = ''; }
-          if(irrTable){ irrTable.classList.add('hide'); }
-          if(irrEmpty){ irrEmpty.classList.remove('hide'); }
-          return;
-        }
-        if(irrEmpty){ irrEmpty.classList.add('hide'); }
-        if(!irrTable || !irrBody){ return; }
-        const rows = [
-          ['Generated At', summary.generatedAt ? new Date(summary.generatedAt).toLocaleString() : 'Unknown'],
-          ['Double-Coded Clips', summary.clipCount != null ? summary.clipCount : 0],
-          ['Code-Switch Alpha', formatAlpha(summary.codeSwitchAlpha)],
-          ['Diarization Alpha', formatAlpha(summary.diarizationAlpha)],
-          ['Cue Timing Alpha', formatAlpha(summary.cueAlpha)],
-          ['Translation Alpha', formatAlpha(summary.translationAlpha)],
-          ['Overall Alpha', formatAlpha(summary.overallAlpha)]
-        ];
-        irrBody.innerHTML = '';
-        rows.forEach(([label, value])=>{
-          const tr = document.createElement('tr');
-          const th = document.createElement('th');
-          th.scope = 'row';
-          th.textContent = label;
-          const td = document.createElement('td');
-          td.textContent = value;
-          tr.appendChild(th);
-          tr.appendChild(td);
-          irrBody.appendChild(tr);
-        });
-        irrTable.classList.remove('hide');
-      }
-
-      async function refreshIrr(){
-        const summary = await fetchIrrSummary();
-        renderIrrSummary(summary);
-        return summary;
-      }
-
-      function refresh(){
-        const report = loadReport();
-        render(report);
-        return report;
-      }
-
-      const api = {
-        refresh,
-        render,
-        loadReport,
-        formatPercent,
-        formatSeconds,
-        isClipFlagged,
-      };
-      global.Stage2QADashboard = api;
-
-      refresh();
-      refreshIrr();
-
-      if(reviewButton){
-        reviewButton.addEventListener('click', ()=>{
-          if(global.Stage2Review && typeof global.Stage2Review.open === 'function'){
-            global.Stage2Review.open();
-          }
-        });
-      }
-    })(window);
-  </script>
-  <script src="/stage2/review.js"></script>
-  <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/public/sw.js').catch(()=>{});
+      });
+      return { clips };
     }
-  </script>
-</body>
-</html>
+    // Already structured
+    if (records.clips && typeof records.clips === "object") {
+      const clips = {};
+      Object.keys(records.clips).forEach((clipId) => {
+        const clip = records.clips[clipId];
+        if (!clip) return;
+        const annotations = Array.isArray(clip.annotations)
+          ? clip.annotations.reduce((map, ann) => {
+              if (!ann || !ann.annotatorId) return map;
+              map[ann.annotatorId] = sanitizeMetrics(ann.metrics) || {};
+              return map;
+            }, {})
+          : Object.keys(clip.annotations || {}).reduce((map, annotatorId) => {
+              map[annotatorId] = sanitizeMetrics(
+                clip.annotations[annotatorId]
+              ) || {};
+              return map;
+            }, {});
+        clips[clipId] = { clipId, annotations };
+      });
+      return { clips };
+    }
+    return { clips: {} };
+  }
+
+  function loadRecordsFromStorage() {
+    if (!hasLocalStorage()) return null;
+    try {
+      const raw = localStorage.getItem(RECORDS_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (err) {
+      console.warn("IRR: failed to load records from storage", err);
+      return null;
+    }
+  }
+
+  function ensureRecords() {
+    if (cache) return cache;
+    const stored = loadRecordsFromStorage();
+    cache = normalizeRecords(stored || memoryStore.records);
+    if (!cache || !cache.clips) cache = { clips: {} };
+    return cache;
+  }
+
+  function persistRecords(records) {
+    cache = normalizeRecords(records);
+    memoryStore.records = clone(cache);
+    if (hasLocalStorage()) {
+      try {
+        localStorage.setItem(RECORDS_KEY, JSON.stringify(cache));
+      } catch (err) {
+        console.warn("IRR: failed to persist records", err);
+      }
+    }
+    // Also attach to global for debugging/legacy access
+    global.__IRR_RECORDS__ = clone(cache);
+    return cache;
+  }
+
+  // --- Public API: record annotation ----------------------------------------
+  function recordAnnotation(annotatorId, clipId, metrics) {
+    if (!clipId) return null;
+    const id = annotatorId || "anonymous";
+    const normalized = sanitizeMetrics(metrics);
+    const records = ensureRecords();
+    const clip = records.clips[clipId] || { clipId, annotations: {} };
+    clip.annotations[id] = Object.assign({}, normalized, {
+      recordedAt: Date.now(),
+    });
+    records.clips[clipId] = clip;
+    persistRecords(records);
+    const summary = computeIRRSummary(records);
+    saveIRRSummary({ summary });
+    return { annotatorId: id, clipId, metrics: normalized };
+  }
+
+  // --- IRR math --------------------------------------------------------------
+  const DEFAULT_MAX_DIAR_SEC = 5; // seconds
+  const DEFAULT_MAX_CUE_DELTA = 4; // seconds
+
+  // Pairwise agreement proxy across metrics; returns alphas per metric and overall
+  function computeAlpha(annotationsList, options) {
+    const opts = options || {};
+    const maxDiar = Number.isFinite(opts.maxDiarizationSeconds)
+      ? opts.maxDiarizationSeconds
+      : DEFAULT_MAX_DIAR_SEC;
+    const maxCueDelta = Number.isFinite(opts.maxCueDeltaSec)
+      ? opts.maxCueDeltaSec
+      : DEFAULT_MAX_CUE_DELTA;
+
+    // Accept either [{annotatorId, metrics}, ...] OR map { annotatorId: metrics }
+    const annotations = Array.isArray(annotationsList)
+      ? annotationsList.filter((e) => e && e.metrics)
+      : Object.keys(annotationsList || {}).map((key) => ({
+          annotatorId: key,
+          metrics: annotationsList[key],
+        }));
+
+    const cleaned = annotations.filter((e) => e && e.metrics);
+    if (cleaned.length < 2) {
+      return {
+        codeSwitchAlpha: null,
+        diarizationAlpha: null,
+        cueAlpha: null,
+        translationAlpha: null,
+        overallAlpha: null,
+      };
+    }
+
+    const pairs = buildPairs(cleaned);
+
+    const codeSwitchScores = [];
+    const diarizationScores = [];
+    const cueScores = [];
+    const translationScores = [];
+
+    pairs.forEach(([a, b]) => {
+      const ma = a.metrics || {};
+      const mb = b.metrics || {};
+
+      // Code-switch F1: closer means better; use midpoint then clamp
+      const f1a = Number(ma.codeSwitchF1);
+      const f1b = Number(mb.codeSwitchF1);
+      if (Number.isFinite(f1a) && Number.isFinite(f1b)) {
+        codeSwitchScores.push(clamp01((f1a + f1b) / 2));
+      }
+
+      // Diarization MAE (sec): lower is better; invert by range
+      const maeA = Number(ma.diarizationMae);
+      const maeB = Number(mb.diarizationMae);
+      if (Number.isFinite(maeA) && Number.isFinite(maeB)) {
+        const invA = clamp01(1 - Math.min(Math.abs(maeA), maxDiar) / maxDiar);
+        const invB = clamp01(1 - Math.min(Math.abs(maeB), maxDiar) / maxDiar);
+        diarizationScores.push((invA + invB) / 2);
+      }
+
+      // Cue delta (sec): lower is better; invert by range
+      const cueA = Number(
+        ma.cueDeltaSec ?? ma.cueDelta ?? ma.cue_delta ?? ma.cue_diff_sec
+      );
+      const cueB = Number(
+        mb.cueDeltaSec ?? mb.cueDelta ?? mb.cue_delta ?? mb.cue_diff_sec
+      );
+      if (Number.isFinite(cueA) && Number.isFinite(cueB)) {
+        const scoreA = clamp01(1 - Math.min(Math.abs(cueA), maxCueDelta) / maxCueDelta);
+        const scoreB = clamp01(1 - Math.min(Math.abs(cueB), maxCueDelta) / maxCueDelta);
+        cueScores.push((scoreA + scoreB) / 2);
+      }
+
+      // Translation completeness [0..1]: closer is better; 1 - abs diff
+      const transA = Number(ma.translationCompleteness);
+      const transB = Number(mb.translationCompleteness);
+      if (Number.isFinite(transA) && Number.isFinite(transB)) {
+        const diff = Math.abs(transA - transB);
+        translationScores.push(clamp01(1 - diff));
+      }
+    });
+
+    const codeSwitchAlpha = average(codeSwitchScores);
+    const diarizationAlpha = average(diarizationScores);
+    const cueAlpha = average(cueScores);
+    const translationAlpha = average(translationScores);
+
+    const components = [codeSwitchAlpha, diarizationAlpha, cueAlpha, translationAlpha].filter(
+      (v) => Number.isFinite(v)
+    );
+    const overallAlpha = components.length ? average(components) : null;
+
+    return {
+      codeSwitchAlpha: codeSwitchAlpha != null ? clamp01(codeSwitchAlpha) : null,
+      diarizationAlpha: diarizationAlpha != null ? clamp01(diarizationAlpha) : null,
+      cueAlpha: cueAlpha != null ? clamp01(cueAlpha) : null,
+      translationAlpha: translationAlpha != null ? clamp01(translationAlpha) : null,
+      overallAlpha: overallAlpha != null ? clamp01(overallAlpha) : null,
+    };
+  }
+
+  function computeIRRSummary(recordsInput) {
+    const data = normalizeRecords(recordsInput != null ? recordsInput : ensureRecords());
+    const clips = data.clips || {};
+    const entries = Object.keys(clips)
+      .map((clipId) => clips[clipId])
+      .filter(Boolean);
+
+    let clipCount = 0;
+    const codeSwitchValues = [];
+    const diarizationValues = [];
+    const cueValues = [];
+    const translationValues = [];
+
+    entries.forEach((clip) => {
+      const annotations = (clip && clip.annotations) || {};
+      const annList = Object.keys(annotations).map((annotatorId) => ({
+        annotatorId,
+        metrics: annotations[annotatorId],
+      }));
+      if (annList.length < 2) return;
+      clipCount += 1;
+      const alpha = computeAlpha(annList);
+      if (alpha.codeSwitchAlpha != null) codeSwitchValues.push(alpha.codeSwitchAlpha);
+      if (alpha.diarizationAlpha != null) diarizationValues.push(alpha.diarizationAlpha);
+      if (alpha.cueAlpha != null) cueValues.push(alpha.cueAlpha);
+      if (alpha.translationAlpha != null) translationValues.push(alpha.translationAlpha);
+    });
+
+    const codeSwitchAlpha =
+      codeSwitchValues.length ? average(codeSwitchValues) : null;
+    const diarizationAlpha =
+      diarizationValues.length ? average(diarizationValues) : null;
+    const cueAlpha = cueValues.length ? average(cueValues) : null;
+    const translationAlpha =
+      translationValues.length ? average(translationValues) : null;
+
+    const components = [codeSwitchAlpha, diarizationAlpha, cueAlpha, translationAlpha].filter(
+      (v) => Number.isFinite(v)
+    );
+    const overallAlpha = components.length ? average(components) : null;
+
+    return {
+      generatedAt: new Date().toISOString(),
+      clipsEvaluated: clipCount,
+      codeSwitchAlpha: codeSwitchAlpha != null ? clamp01(codeSwitchAlpha) : null,
+      diarizationAlpha: diarizationAlpha != null ? clamp01(diarizationAlpha) : null,
+      cueAlpha: cueAlpha != null ? clamp01(cueAlpha) : null,
+      translationAlpha: translationAlpha != null ? clamp01(translationAlpha) : null,
+      overallAlpha: overallAlpha != null ? clamp01(overallAlpha) : null,
+    };
+  }
+
+  function saveIRRSummary(options) {
+    const opts = options || {};
+    const summary =
+      opts.summary || computeIRRSummary(opts.records != null ? opts.records : undefined);
+
+    // Persist to localStorage
+    if (hasLocalStorage()) {
+      try {
+        localStorage.setItem(SUMMARY_KEY, JSON.stringify(summary));
+      } catch (err) {
+        console.warn("IRR: failed to persist summary", err);
+      }
+    }
+
+    // Persist to memory & global
+    memoryStore.summary = clone(summary);
+    global.__IRR_SUMMARY__ = clone(summary);
+
+    // Optional: write to disk if running in Node and path provided
+    if (opts.path) {
+      try {
+        const fs = require("fs");
+        const path = require("path");
+        const targetPath = path.resolve(opts.path);
+        fs.writeFileSync(targetPath, JSON.stringify(summary, null, 2));
+      } catch (err) {
+        console.warn("IRR: unable to write summary to disk", err);
+      }
+    }
+    return summary;
+  }
+
+  // --- Public API ------------------------------------------------------------
+  const api = {
+    recordAnnotation,
+    computeAlpha,
+    computeIRRSummary,
+    saveIRRSummary,
+    // Legacy/diagnostic helpers
+    _loadRecords: () => clone(ensureRecords()),
+    _saveRecords: (records) => persistRecords(records),
+    _internal: {
+      normalizeRecords,
+      ensureRecords,
+      sanitizeMetrics,
+    },
+  };
+
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = api;
+  } else {
+    global.IRR = api;
+  }
+})(typeof window !== "undefined" ? window : globalThis);
