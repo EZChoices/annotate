@@ -87,6 +87,20 @@
         </thead>
         <tbody></tbody>
       </table>
+      <section class="qa-review-summary hide" id="irrSummarySection" aria-live="polite">
+        <h3>IRR Summary</h3>
+        <div class="qa-dashboard__empty" id="irrSummaryEmpty" role="status">No IRR data recorded yet. Double-coded clips will appear here once available.</div>
+        <table class="qa-report-table hide" id="irrSummaryTable">
+          <caption>Inter-Rater Reliability</caption>
+          <thead>
+            <tr>
+              <th scope="col">Dimension</th>
+              <th scope="col">Alpha</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
       <table class="qa-report-table hide" id="qaAnnotatorsTable">
         <caption>Per-Annotator Averages</caption>
         <thead>
@@ -187,6 +201,7 @@
   </div>
   <script src="/public/env.js"></script>
   <script src="/public/config.js"></script>
+  <script src="/stage2/irr.js"></script>
   <script src="/stage2/qa_metrics.js"></script>
   <script>
     (function(){
@@ -220,6 +235,10 @@
       const reviewSummaryNode = document.getElementById('qaReviewSummary');
       const flaggedCountNode = document.getElementById('qaReviewFlaggedCount');
       const reviewButton = document.getElementById('qaReviewButton');
+      const irrSection = document.getElementById('irrSummarySection');
+      const irrTable = document.getElementById('irrSummaryTable');
+      const irrBody = irrTable ? irrTable.querySelector('tbody') : null;
+      const irrEmpty = document.getElementById('irrSummaryEmpty');
 
       function safeParse(raw){
         if(!raw) return null;
@@ -248,6 +267,10 @@
       const formatSeconds = (value, digits = 2)=>{
         if(typeof value !== 'number' || !Number.isFinite(value)) return 'N/A';
         return `${value.toFixed(digits)} s`;
+      };
+      const formatAlpha = (value)=>{
+        if(typeof value !== 'number' || !Number.isFinite(value)) return 'N/A';
+        return value.toFixed(3);
       };
 
       function renderSummaryTable(report){
@@ -451,6 +474,71 @@
         renderFlaggedCount(report);
       }
 
+      function loadIrrFromStorage(){
+        try{
+          const raw = localStorage.getItem('irr_summary.json');
+          return safeParse(raw);
+        }catch(err){
+          console.warn('IRR: failed to read summary from storage', err);
+          return null;
+        }
+      }
+
+      async function fetchIrrSummary(){
+        const stored = loadIrrFromStorage();
+        if(stored){ return stored; }
+        try{
+          const res = await fetch('/irr_summary.json', { cache: 'no-store' });
+          if(res && res.ok){
+            return await res.json();
+          }
+        }catch(err){
+          console.warn('IRR: failed to fetch summary file', err);
+        }
+        return null;
+      }
+
+      function renderIrrSummary(summary){
+        if(!irrSection){ return; }
+        irrSection.classList.remove('hide');
+        if(!summary || (!summary.clipCount && !Number.isFinite(summary.overallAlpha))){
+          if(irrBody){ irrBody.innerHTML = ''; }
+          if(irrTable){ irrTable.classList.add('hide'); }
+          if(irrEmpty){ irrEmpty.classList.remove('hide'); }
+          return;
+        }
+        if(irrEmpty){ irrEmpty.classList.add('hide'); }
+        if(!irrTable || !irrBody){ return; }
+        const rows = [
+          ['Generated At', summary.generatedAt ? new Date(summary.generatedAt).toLocaleString() : 'Unknown'],
+          ['Double-Coded Clips', summary.clipCount != null ? summary.clipCount : 0],
+          ['Code-Switch Alpha', formatAlpha(summary.codeSwitchAlpha)],
+          ['Diarization Alpha', formatAlpha(summary.diarizationAlpha)],
+          ['Cue Timing Alpha', formatAlpha(summary.cueAlpha)],
+          ['Translation Alpha', formatAlpha(summary.translationAlpha)],
+          ['Overall Alpha', formatAlpha(summary.overallAlpha)]
+        ];
+        irrBody.innerHTML = '';
+        rows.forEach(([label, value])=>{
+          const tr = document.createElement('tr');
+          const th = document.createElement('th');
+          th.scope = 'row';
+          th.textContent = label;
+          const td = document.createElement('td');
+          td.textContent = value;
+          tr.appendChild(th);
+          tr.appendChild(td);
+          irrBody.appendChild(tr);
+        });
+        irrTable.classList.remove('hide');
+      }
+
+      async function refreshIrr(){
+        const summary = await fetchIrrSummary();
+        renderIrrSummary(summary);
+        return summary;
+      }
+
       function refresh(){
         const report = loadReport();
         render(report);
@@ -468,6 +556,7 @@
       global.Stage2QADashboard = api;
 
       refresh();
+      refreshIrr();
 
       if(reviewButton){
         reviewButton.addEventListener('click', ()=>{

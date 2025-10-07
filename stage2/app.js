@@ -173,6 +173,32 @@ function loadManifestFromStorage(){
   }
 }
 
+function stableHash(value){
+  const str = value == null ? '' : String(value);
+  let hash = 0;
+  for(let i=0;i<str.length;i++){
+    hash = ((hash << 5) - hash + str.charCodeAt(i)) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+function isDoubleCodingRequired(manifestItem){
+  if(!manifestItem) return false;
+  if(manifestItem.double_coded === true) return true;
+  const qa = manifestItem.qa || manifestItem.qa_result || manifestItem.qaStatus || {};
+  if(manifestItem.qa_pass === false) return true;
+  if(manifestItem.qa_pass_flag === false) return true;
+  const qaStatus = (manifestItem.qa_status || manifestItem.qaStatus || '').toString().toLowerCase();
+  if(qaStatus === 'fail' || qaStatus === 'failed') return true;
+  if(qa && typeof qa.pass === 'boolean' && qa.pass === false) return true;
+  const clipId = manifestItem.asset_id || manifestItem.id || manifestItem.clip_id || manifestItem.clipId || '';
+  if(!clipId){
+    return Math.random() < 0.1;
+  }
+  const hash = stableHash(clipId);
+  return hash % 10 === 0;
+}
+
 function getAnnotatorId(){
   try{
     const k = 'ea_stage2_annotator_id';
@@ -1506,6 +1532,7 @@ async function enqueueAndSync(lintReport){
     return false;
   }
   const it = currentItem(); if(!it) return false;
+  const doubleCoded = isDoubleCodingRequired(it);
   const csSnapshot = snapshotCodeSwitchSpans();
   const csExports = buildCodeSwitchExports(csSnapshot);
   EAQ.state.codeSwitchVTT = csExports.vtt;
@@ -1560,8 +1587,11 @@ async function enqueueAndSync(lintReport){
       speaker_profiles_completion_rate: speakerStats.total ? speakerStats.complete / speakerStats.total : 1
     },
     lint: lintSummary,
-    client_meta: { device: navigator.userAgent }
+    client_meta: { device: navigator.userAgent },
+    double_coded: doubleCoded
   };
+  payload.summary.double_coded = doubleCoded;
+  payload.qa.double_coded = doubleCoded;
 
   let qaResult = null;
   if(it.gold_target && window.QAMetrics && typeof window.QAMetrics.computeQAResult === 'function'){
@@ -1601,7 +1631,7 @@ async function enqueueAndSync(lintReport){
     }
   }
 
-  const clipId = it.asset_id || it.id || it.clip_id || it.clipId;
+  const clipId = payload.qa.clip_id || it.asset_id || it.id || it.clip_id || it.clipId;
   if(window.QAMetrics && typeof window.QAMetrics.recordResult === 'function'){
     try{
       window.QAMetrics.recordResult(clipId, {
@@ -1617,6 +1647,26 @@ async function enqueueAndSync(lintReport){
       });
     }catch(err){
       console.warn('Failed to record QA result', err);
+    }
+  }
+
+  const metricsSource = qaResult || (payload.qa && payload.qa.metrics) || {};
+  const irrCueDelta = (window.QAMetrics && typeof window.QAMetrics.computeCueLengthDelta === 'function')
+    ? window.QAMetrics.computeCueLengthDelta(metricsSource)
+    : (payload.qa.cue_diff_sec != null ? payload.qa.cue_diff_sec : null);
+  const irrTranslationCompleteness = (window.QAMetrics && typeof window.QAMetrics.computeTranslationCompletenessMetric === 'function')
+    ? window.QAMetrics.computeTranslationCompletenessMetric(metricsSource)
+    : (payload.qa.translation_completeness != null ? payload.qa.translation_completeness : null);
+  if(doubleCoded && clipId && window.IRR && typeof window.IRR.recordAnnotation === 'function'){
+    try{
+      window.IRR.recordAnnotation(EAQ.state.annotator || getAnnotatorId(), clipId, {
+        codeSwitchF1: payload.qa.codeswitch_f1 != null ? payload.qa.codeswitch_f1 : (qaResult && qaResult.codeswitch ? qaResult.codeswitch.f1 : null),
+        diarizationMae: payload.qa.diarization_mae != null ? payload.qa.diarization_mae : (qaResult && qaResult.diarization ? qaResult.diarization.mae : null),
+        cueDelta: irrCueDelta,
+        translationCompleteness: irrTranslationCompleteness
+      });
+    }catch(err){
+      console.warn('IRR: unable to record annotation metrics', err);
     }
   }
 

@@ -475,6 +475,58 @@
     };
   }
 
+  function computeCueLengthDelta(metrics) {
+    if (!metrics || typeof metrics !== "object") return null;
+    const source = metrics.cues && typeof metrics.cues === "object" ? metrics.cues : metrics;
+    if (source && Number.isFinite(source.targetDiffSec)) {
+      return source.targetDiffSec;
+    }
+    if (Number.isFinite(metrics.cue_diff_sec)) {
+      return metrics.cue_diff_sec;
+    }
+    const transcriptDurations = Array.isArray(source.transcriptDurations)
+      ? source.transcriptDurations
+      : null;
+    const translationDurations = Array.isArray(source.translationDurations)
+      ? source.translationDurations
+      : null;
+    if (transcriptDurations && translationDurations) {
+      const count = Math.min(transcriptDurations.length, translationDurations.length);
+      if (count) {
+        let total = 0;
+        for (let i = 0; i < count; i++) {
+          const a = Number(transcriptDurations[i]);
+          const b = Number(translationDurations[i]);
+          if (Number.isFinite(a) && Number.isFinite(b)) {
+            total += b - a;
+          }
+        }
+        return count ? total / count : null;
+      }
+    }
+    return null;
+  }
+
+  function computeTranslationCompletenessMetric(metrics) {
+    if (!metrics || typeof metrics !== "object") return null;
+    if (
+      metrics.translation &&
+      Number.isFinite(metrics.translation.completeness)
+    ) {
+      return metrics.translation.completeness;
+    }
+    if (Number.isFinite(metrics.translation_completeness)) {
+      return metrics.translation_completeness;
+    }
+    if (
+      metrics.cues &&
+      Number.isFinite(metrics.cues.translationCompleteness)
+    ) {
+      return metrics.cues.translationCompleteness;
+    }
+    return null;
+  }
+
   function normalizeThresholds(options) {
     const defaults = {
       codeswitchF1: 0.75,
@@ -1104,6 +1156,8 @@
     scoreDiarizationMAE,
     scoreCueStats,
     scoreTranslationStats,
+    computeCueLengthDelta,
+    computeTranslationCompletenessMetric,
     computeQAResult,
     recordResult,
     generateReport,
