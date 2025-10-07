@@ -1243,6 +1243,7 @@ function bindUI(){
   const diarNext = qs('diarNext'); if(diarNext) diarNext.addEventListener('click', ()=>{ runValidationAndDisplay('screen_review'); show('screen_review'); });
 
   qs('submitBtn').addEventListener('click', async ()=>{
+    const submittedClip = currentItem();
     const transcriptBox = qs('transcriptVTT');
     const translationBox = qs('translationVTT');
     const csBox = qs('codeSwitchVTT');
@@ -1268,7 +1269,11 @@ function bindUI(){
       try{
         const qaReport = window.QAMetrics.generateReport({
           manifest: EAQ.state.manifest,
-          annotations: { lint },
+          annotations: {
+            lint,
+            clip: submittedClip || null,
+            submittedAt: new Date().toISOString()
+          },
           annotator: EAQ.state.annotator
         });
         localStorage.setItem('qa_report', JSON.stringify(qaReport));

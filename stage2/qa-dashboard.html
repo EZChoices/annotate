@@ -118,6 +118,17 @@
           ['Reviewed Clips', report.summary && report.summary.reviewedClips != null ? report.summary.reviewedClips : '0'],
           ['Accuracy Score', formatScore(report.summary && report.summary.accuracyScore)],
           ['Consistency Score', formatScore(report.summary && report.summary.consistencyScore)],
+        ];
+        const breakdown = report.summary && report.summary.breakdown;
+        if(breakdown){
+          rows.push(
+            ['Blocking Issues', breakdown.errorCount != null ? String(breakdown.errorCount) : '0'],
+            ['Warnings', breakdown.warningCount != null ? String(breakdown.warningCount) : '0'],
+            ['Translation Gaps', breakdown.translationGaps != null ? String(breakdown.translationGaps) : '0'],
+            ['Code-switch Flags', breakdown.codeSwitchIssues != null ? String(breakdown.codeSwitchIssues) : '0']
+          );
+        }
+        rows.push(
           ['Notes', report.summary && report.summary.notes ? report.summary.notes : 'No notes available']
         ];
         summaryBody.innerHTML = '';
