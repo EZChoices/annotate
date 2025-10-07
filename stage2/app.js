@@ -1089,6 +1089,13 @@ async function enqueueAndSync(lintReport){
   if(emotionVtt){ files.emotion_vtt = emotionVtt; }
   if(eventsVtt){ files.events_vtt = eventsVtt; }
 
+  const timeSpentSec = Math.max(0, Math.round((Date.now() - (EAQ.state.startedAt||Date.now()))/1000));
+  const lintSummary = Object.assign({}, lint, {
+    errors: Array.isArray(lint.errors) ? lint.errors.slice() : [],
+    warnings: Array.isArray(lint.warnings) ? lint.warnings.slice() : [],
+    severity_max: (Array.isArray(lint.errors) && lint.errors.length) ? 'error' : ((Array.isArray(lint.warnings) && lint.warnings.length) ? 'warning' : 'ok')
+  });
+
   const payload = {
     asset_id: it.asset_id,
     files,
@@ -1104,15 +1111,73 @@ async function enqueueAndSync(lintReport){
       annotator_id: EAQ.state.annotator,
       second_annotator_id: null,
       adjudicator_id: null,
-      gold_check: 'pass',
-      time_spent_sec: Math.max(0, Math.round((Date.now() - (EAQ.state.startedAt||Date.now()))/1000)),
-      lint
+      gold_target: !!it.gold_target,
+      gold_check: !!it.gold_target ? 'pending' : 'not_applicable',
+      time_spent_sec: timeSpentSec,
+      clip_id: it.asset_id || it.id || it.clip_id || it.clipId || null,
+      lint: lintSummary
     },
-    lint,
+    lint: lintSummary,
     client_meta: { device: navigator.userAgent }
   };
 
-  try{ await EAIDB.saveLintReport(it.asset_id, lint); }
+  let qaResult = null;
+  if(it.gold_target && window.QAMetrics && typeof window.QAMetrics.computeQAResult === 'function'){
+    try{
+      const predicted = {
+        codeSwitchSpans: csSnapshot,
+        diarization: EAQ.state.diarSegments || [],
+        transcript: EAQ.state.transcriptVTT,
+        translation: EAQ.state.translationVTT
+      };
+      const goldSource = it.gold || it.gold_annotations || it.qa_gold || it.reference || it.prefill || {};
+      const thresholds = it.qa_thresholds || it.qaThresholds || null;
+      qaResult = window.QAMetrics.computeQAResult(predicted, goldSource, { thresholds });
+      if(qaResult){
+        payload.qa.gold_check = qaResult.pass ? 'pass' : 'fail';
+        payload.qa.codeswitch_f1 = qaResult.codeswitch && Number.isFinite(qaResult.codeswitch.f1) ? qaResult.codeswitch.f1 : null;
+        payload.qa.codeswitch_precision = qaResult.codeswitch && Number.isFinite(qaResult.codeswitch.precision) ? qaResult.codeswitch.precision : null;
+        payload.qa.codeswitch_recall = qaResult.codeswitch && Number.isFinite(qaResult.codeswitch.recall) ? qaResult.codeswitch.recall : null;
+        payload.qa.diarization_mae = qaResult.diarization && Number.isFinite(qaResult.diarization.mae) ? qaResult.diarization.mae : null;
+        payload.qa.cue_avg_length_sec = qaResult.cues && Number.isFinite(qaResult.cues.avgCueLengthSec) ? qaResult.cues.avgCueLengthSec : null;
+        payload.qa.cue_diff_sec = qaResult.cues && Number.isFinite(qaResult.cues.targetDiffSec) ? qaResult.cues.targetDiffSec : null;
+        payload.qa.translation_completeness = qaResult.translation && Number.isFinite(qaResult.translation.completeness) ? qaResult.translation.completeness : null;
+        payload.qa.translation_correctness = qaResult.translation && Number.isFinite(qaResult.translation.correctness) ? qaResult.translation.correctness : null;
+        payload.qa.translation_char_ratio = qaResult.cues && Number.isFinite(qaResult.cues.translationCompleteness) ? qaResult.cues.translationCompleteness : null;
+        payload.qa.scores = {
+          accuracy: qaResult.accuracyScore,
+          consistency: qaResult.consistencyScore,
+          cue: qaResult.cueScore,
+          translation: qaResult.translationScore,
+          overall: qaResult.overallScore
+        };
+        payload.qa.metrics = qaResult;
+      }
+    }catch(err){
+      console.warn('QA computation failed', err);
+      payload.qa.gold_check = 'error';
+    }
+  }
+
+  const clipId = it.asset_id || it.id || it.clip_id || it.clipId;
+  if(window.QAMetrics && typeof window.QAMetrics.recordResult === 'function'){
+    try{
+      window.QAMetrics.recordResult(clipId, {
+        qa: payload.qa,
+        metrics: qaResult,
+        clip: {
+          clipId,
+          title: it.title || it.clip_title || it.display_title || null,
+          language: it.language || null,
+          gold_target: !!it.gold_target
+        }
+      });
+    }catch(err){
+      console.warn('Failed to record QA result', err);
+    }
+  }
+
+  try{ await EAIDB.saveLintReport(it.asset_id, lintSummary); }
   catch{}
 
   await EAIDB.enqueue(payload);
@@ -1269,11 +1334,6 @@ function bindUI(){
       try{
         const qaReport = window.QAMetrics.generateReport({
           manifest: EAQ.state.manifest,
-          annotations: {
-            lint,
-            clip: submittedClip || null,
-            submittedAt: new Date().toISOString()
-          },
           annotator: EAQ.state.annotator
         });
         localStorage.setItem('qa_report', JSON.stringify(qaReport));
