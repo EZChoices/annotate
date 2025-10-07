@@ -37,6 +37,14 @@ def _build_qa_report(data):
 
     clip_entries = qa_payload if isinstance(qa_payload, list) else [qa_payload]
     clips = []
+    review_counts = {
+        "total": 0,
+        "accepted": 0,
+        "corrected": 0,
+        "rejected": 0,
+        "pending": 0,
+        "locked": 0,
+    }
     annotator_groups = defaultdict(list)
 
     for entry in clip_entries:
@@ -47,6 +55,13 @@ def _build_qa_report(data):
         if not isinstance(metrics, dict):
             metrics = {}
         cues_metrics = metrics.get("cues") if isinstance(metrics.get("cues"), dict) else {}
+        review_payload = entry.get("review") if isinstance(entry.get("review"), dict) else {}
+        review_status = entry.get("review_status") or review_payload.get("status") or review_payload.get("review_status")
+        locked_flag = entry.get("locked")
+        if locked_flag is None:
+            locked_flag = review_payload.get("locked")
+        reviewer = entry.get("reviewer") or review_payload.get("reviewer")
+        reviewed_at = entry.get("reviewed_at") or review_payload.get("updatedAt") or review_payload.get("reviewedAt")
         qa_entry = {
             "clipId": clip_id,
             "annotator_id": entry.get("annotator_id"),
@@ -58,11 +73,25 @@ def _build_qa_report(data):
             "cue_diff_sec": entry.get("cue_diff_sec") or cues_metrics.get("targetDiffSec"),
             "translation_completeness": entry.get("translation_completeness"),
             "translation_char_ratio": entry.get("translation_char_ratio") or cues_metrics.get("translationCompleteness"),
-            "translation_correctness": entry.get("translation_correctness")
+            "translation_correctness": entry.get("translation_correctness"),
+            "review_status": review_status,
+            "locked": bool(locked_flag),
+            "reviewer": reviewer,
+            "reviewed_at": reviewed_at,
         }
         clips.append(qa_entry)
         annotator = qa_entry.get("annotator_id") or "anonymous"
         annotator_groups[annotator].append(qa_entry)
+        review_counts["total"] += 1
+        if qa_entry["locked"]:
+            review_counts["locked"] += 1
+        normalized_status = (review_status or "").lower()
+        if normalized_status == "accepted":
+            review_counts["accepted"] += 1
+        elif normalized_status == "corrected":
+            review_counts["corrected"] += 1
+        elif normalized_status == "rejected":
+            review_counts["rejected"] += 1
 
     if not clips:
         return None
@@ -80,6 +109,11 @@ def _build_qa_report(data):
     }
     summary["passRate"] = (
         summary["passCount"] / summary["reviewedClips"] if summary["reviewedClips"] else 0
+    )
+    review_counts["pending"] = max(
+        0,
+        review_counts["total"]
+        - (review_counts["accepted"] + review_counts["corrected"] + review_counts["rejected"]),
     )
 
     per_annotator = []
@@ -100,7 +134,8 @@ def _build_qa_report(data):
         "generatedAt": datetime.utcnow().isoformat() + "Z",
         "summary": summary,
         "perAnnotator": per_annotator,
-        "clips": clips
+        "clips": clips,
+        "reviewSummary": review_counts,
     }
 
 

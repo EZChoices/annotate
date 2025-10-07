@@ -783,6 +783,44 @@
     return summary;
   }
 
+  function computeReviewSummary(clips) {
+    const base = {
+      total: 0,
+      accepted: 0,
+      corrected: 0,
+      rejected: 0,
+      pending: 0,
+      locked: 0,
+    };
+    if (!Array.isArray(clips) || !clips.length) {
+      return base;
+    }
+    const summary = Object.assign({}, base);
+    clips.forEach((clip) => {
+      if (!clip) return;
+      summary.total += 1;
+      const status = (clip.reviewStatus || clip.review_status || "").toLowerCase();
+      switch (status) {
+        case "accepted":
+          summary.accepted += 1;
+          break;
+        case "corrected":
+          summary.corrected += 1;
+          break;
+        case "rejected":
+          summary.rejected += 1;
+          break;
+        default:
+          summary.pending += 1;
+          break;
+      }
+      if (clip.locked) {
+        summary.locked += 1;
+      }
+    });
+    return summary;
+  }
+
   function aggregateByAnnotator(entries) {
     const perAnnotator = new Map();
     entries.forEach((entry) => {
@@ -917,6 +955,30 @@
       const language =
         manifestInfo.language || manifestInfo.locale || qaPayload.language || "unknown";
       const metrics = entry.metrics || entry.result || {};
+      const qaPayload = entry.qa || {};
+      const reviewData = entry.review || qaPayload.review || {};
+      const reviewStatus =
+        (reviewData && (reviewData.status || reviewData.review_status)) ||
+        qaPayload.review_status ||
+        null;
+      const reviewer =
+        (reviewData && (reviewData.reviewer || reviewData.reviewer_id)) ||
+        qaPayload.reviewer ||
+        null;
+      const reviewedAt =
+        (reviewData && (reviewData.updatedAt || reviewData.reviewedAt)) ||
+        qaPayload.reviewed_at ||
+        null;
+      const lockedFlag =
+        reviewData && typeof reviewData.locked === "boolean"
+          ? reviewData.locked
+          : qaPayload.locked;
+      const derivedLocked = !!(
+        lockedFlag ||
+        (typeof reviewStatus === "string" &&
+          (reviewStatus.toLowerCase() === "accepted" ||
+            reviewStatus.toLowerCase() === "corrected"))
+      );
       return {
         clipId,
         title,
@@ -962,6 +1024,10 @@
           translation: metrics.translationScore,
           overall: metrics.overallScore,
         },
+        reviewStatus: reviewStatus || null,
+        reviewer: reviewer || null,
+        reviewedAt: reviewedAt || null,
+        locked: derivedLocked,
       };
     });
 
@@ -985,6 +1051,8 @@
         }
       : null;
 
+    const reviewSummary = computeReviewSummary(clips);
+
     const report = {
       generatedAt: new Date().toISOString(),
       annotator:
@@ -994,6 +1062,7 @@
       summary,
       perAnnotator,
       clips,
+      reviewSummary,
       review, // present only when liveMetrics exists
     };
 

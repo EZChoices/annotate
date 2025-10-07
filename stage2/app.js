@@ -1165,6 +1165,7 @@ async function enqueueAndSync(lintReport){
       window.QAMetrics.recordResult(clipId, {
         qa: payload.qa,
         metrics: qaResult,
+        files,
         clip: {
           clipId,
           title: it.title || it.clip_title || it.display_title || null,
