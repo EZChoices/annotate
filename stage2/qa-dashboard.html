@@ -394,7 +394,12 @@
       container.id = 'coverageSummary';
       container.className = 'coverage-summary';
       if (document.body) {
-        document.body.insertBefore(container, document.body.firstChild || null);
+        const tiles = document.getElementById(QA_TILE_CONTAINER_ID);
+        if (tiles && tiles.parentNode === document.body) {
+          document.body.insertBefore(container, tiles.nextSibling);
+        } else {
+          document.body.insertBefore(container, document.body.firstChild || null);
+        }
       }
     }
     return container;
@@ -478,6 +483,194 @@
     container.appendChild(table);
   }
 
+  const QA_TILE_CONTAINER_ID = 'qaDashboardTiles';
+  const QA_TILE_PROVENANCE_ID = 'qaTileProvenanceComplete';
+
+  function injectDashboardTilesStyles() {
+    if (typeof document === 'undefined') return;
+    if (document.getElementById('qaDashboardTilesStyles')) return;
+    const style = document.createElement('style');
+    style.id = 'qaDashboardTilesStyles';
+    style.textContent = `
+      .qa-dashboard-tiles { max-width: 960px; margin: 1.5rem auto 1rem; padding: 0 1rem 1.5rem; }
+      .qa-dashboard-tiles__heading { margin: 0 0 1rem 0; font-size: 1.35rem; }
+      .qa-dashboard-tiles__grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+      .qa-dashboard-tile { background: var(--card, #fff); border-radius: 12px; border: 1px solid var(--border, #dcdcdc); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.05); padding: 1rem 1.2rem; display: flex; flex-direction: column; gap: 0.35rem; }
+      .qa-dashboard-tile__label { margin: 0; font-size: .9rem; color: var(--muted, #555); }
+      .qa-dashboard-tile__value { margin: 0; font-size: 2.25rem; font-weight: 600; color: var(--accent, #2b7cff); }
+      .qa-dashboard-tile__caption { margin: 0; font-size: .8rem; color: var(--muted, #777); }
+      @media (max-width: 540px) {
+        .qa-dashboard-tiles { padding: 0 .75rem 1rem; }
+        .qa-dashboard-tile__value { font-size: 1.9rem; }
+      }
+    `;
+    (document.head || document.body || document.documentElement).appendChild(style);
+  }
+
+  function ensureDashboardTilesContainer() {
+    if (typeof document === 'undefined') return null;
+    let container = document.getElementById(QA_TILE_CONTAINER_ID);
+    if (!container) {
+      container = document.createElement('section');
+      container.id = QA_TILE_CONTAINER_ID;
+      container.className = 'qa-dashboard-tiles';
+
+      const heading = document.createElement('h2');
+      heading.className = 'qa-dashboard-tiles__heading';
+      heading.textContent = 'QA Snapshot';
+      container.appendChild(heading);
+
+      const grid = document.createElement('div');
+      grid.className = 'qa-dashboard-tiles__grid';
+      container.appendChild(grid);
+
+      const coverage = document.getElementById('coverageSummary');
+      if (coverage && coverage.parentNode) {
+        coverage.parentNode.insertBefore(container, coverage);
+      } else if (document.body) {
+        document.body.insertBefore(container, document.body.firstChild || null);
+      }
+    }
+    return container;
+  }
+
+  function extractProvenanceProportion(summary) {
+    if (!summary || typeof summary !== 'object') return null;
+    const nested = summary.provenance_complete;
+    if (nested && typeof nested === 'object') {
+      const nestedProp = toFinite(nested.proportion);
+      if (nestedProp != null) {
+        return clamp01(nestedProp);
+      }
+      const nestedPct = toFinite(nested.percentage);
+      if (nestedPct != null) {
+        return clamp01(nestedPct / 100);
+      }
+    }
+    const directProp = toFinite(summary.provenance_complete_proportion);
+    if (directProp != null) {
+      return clamp01(directProp);
+    }
+    const directPct = toFinite(summary.provenance_complete_percentage);
+    if (directPct != null) {
+      return clamp01(directPct / 100);
+    }
+    return null;
+  }
+
+  function getProvenanceCompleteCount(summary) {
+    if (!summary || typeof summary !== 'object') return null;
+    const nested = summary.provenance_complete;
+    if (nested && typeof nested === 'object') {
+      const value = toFinite(nested.count);
+      if (value != null) return Math.round(value);
+    }
+    const direct = toFinite(summary.provenance_complete_count);
+    if (direct != null) return Math.round(direct);
+    return null;
+  }
+
+  function getTotalClipCount(summary) {
+    if (!summary || typeof summary !== 'object') return null;
+    const total = toFinite(
+      summary.total_clips ??
+        summary.clip_count ??
+        summary.totalClips ??
+        (summary.dataset && summary.dataset.total_clips)
+    );
+    if (total != null) return Math.round(total);
+    return null;
+  }
+
+  function renderProvenanceTile(summary) {
+    if (typeof document === 'undefined') return;
+    injectDashboardTilesStyles();
+    const container = ensureDashboardTilesContainer();
+    if (!container) return;
+
+    let grid = container.querySelector('.qa-dashboard-tiles__grid');
+    if (!grid) {
+      grid = document.createElement('div');
+      grid.className = 'qa-dashboard-tiles__grid';
+      container.appendChild(grid);
+    }
+
+    let tile = document.getElementById(QA_TILE_PROVENANCE_ID);
+    if (!tile) {
+      tile = document.createElement('article');
+      tile.id = QA_TILE_PROVENANCE_ID;
+      tile.className = 'qa-dashboard-tile';
+
+      const label = document.createElement('p');
+      label.className = 'qa-dashboard-tile__label';
+      tile.appendChild(label);
+
+      const value = document.createElement('p');
+      value.className = 'qa-dashboard-tile__value';
+      tile.appendChild(value);
+
+      const caption = document.createElement('p');
+      caption.className = 'qa-dashboard-tile__caption';
+      tile.appendChild(caption);
+
+      grid.appendChild(tile);
+    }
+
+    const labelEl = tile.querySelector('.qa-dashboard-tile__label');
+    const valueEl = tile.querySelector('.qa-dashboard-tile__value');
+    const captionEl = tile.querySelector('.qa-dashboard-tile__caption');
+
+    if (labelEl) {
+      labelEl.textContent = '% clips with complete provenance';
+    }
+
+    if (summary === null) {
+      if (valueEl) valueEl.textContent = '—';
+      if (captionEl) captionEl.textContent = 'Loading training summary…';
+      return;
+    }
+
+    if (!summary || typeof summary !== 'object') {
+      if (valueEl) valueEl.textContent = '—';
+      if (captionEl) captionEl.textContent = 'Training summary unavailable';
+      return;
+    }
+
+    const proportion = extractProvenanceProportion(summary);
+    if (Number.isFinite(proportion)) {
+      const percentValue = proportion * 100;
+      const decimals = percentValue >= 99.95 ? 0 : percentValue >= 10 ? 1 : 2;
+      if (valueEl) valueEl.textContent = `${percentValue.toFixed(decimals)}%`;
+
+      const completeCount = getProvenanceCompleteCount(summary);
+      const totalCount = getTotalClipCount(summary);
+      if (
+        Number.isFinite(completeCount) &&
+        Number.isFinite(totalCount) &&
+        totalCount >= 0
+      ) {
+        if (captionEl) captionEl.textContent = `${completeCount} of ${totalCount} clips`;
+      } else if (captionEl) {
+        captionEl.textContent = '';
+      }
+    } else {
+      if (valueEl) valueEl.textContent = '—';
+      if (captionEl) captionEl.textContent = 'Provenance stats unavailable';
+    }
+  }
+
+  function fetchTrainingSummary() {
+    if (typeof fetch !== 'function') {
+      return Promise.resolve(null);
+    }
+    return fetch('training_data_summary.json', { cache: 'no-store' })
+      .then((response) => {
+        if (!response.ok) return null;
+        return response.json().catch(() => null);
+      })
+      .catch(() => null);
+  }
+
   function fetchCoverageSummary() {
     if (typeof fetch !== 'function') {
       return Promise.resolve(null);
@@ -492,6 +685,17 @@
 
   if (typeof window !== 'undefined') {
     window.addEventListener('DOMContentLoaded', () => {
+      renderProvenanceTile(null);
+      fetchTrainingSummary()
+        .then((summary) => {
+          if (summary) {
+            renderProvenanceTile(summary);
+          } else {
+            renderProvenanceTile(undefined);
+          }
+        })
+        .catch(() => renderProvenanceTile(undefined));
+
       fetchCoverageSummary().then((summary) => {
         if (summary) {
           renderCoverageTable(summary);
