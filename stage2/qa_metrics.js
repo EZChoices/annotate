@@ -675,6 +675,7 @@
       translationCompletenessAvg: 0,
       translationCorrectnessAvg: 0,
       overallScore: 0,
+      speakerProfileCompletionRate: 0,
     };
     if (!entries.length) {
       return summary;
@@ -744,6 +745,23 @@
           : null
       )
       .filter((v) => v != null);
+    const speakerCompletionValues = entries
+      .map((entry) => {
+        const qa = entry.qa || {};
+        if (Number.isFinite(qa.speaker_profiles_completion_rate)) {
+          return Number(qa.speaker_profiles_completion_rate);
+        }
+        if (Number.isFinite(qa.speaker_profile_completion_rate)) {
+          return Number(qa.speaker_profile_completion_rate);
+        }
+        const total = Number(qa.speaker_profiles_total);
+        const complete = Number(qa.speaker_profiles_complete);
+        if (Number.isFinite(total) && total > 0 && Number.isFinite(complete)) {
+          return complete / total;
+        }
+        return null;
+      })
+      .filter((v) => v != null);
 
     summary.totalGoldClips = entries.filter(
       (entry) => !!(entry.qa && entry.qa.gold_target)
@@ -772,6 +790,9 @@
     summary.overallScore = overallValues.length ? average(overallValues) : 0;
     summary.passRate = summary.reviewedClips
       ? summary.passCount / summary.reviewedClips
+      : 0;
+    summary.speakerProfileCompletionRate = speakerCompletionValues.length
+      ? average(speakerCompletionValues)
       : 0;
 
     const timeSpentValues = qaPayloads
