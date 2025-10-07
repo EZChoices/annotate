@@ -87,6 +87,22 @@
         </thead>
         <tbody></tbody>
       </table>
+      <div class="qa-dashboard__empty hide" id="irrSummaryEmpty" role="status">No IRR data yet.</div>
+      <table class="qa-report-table hide" id="irrSummaryTable">
+        <caption>IRR Summary</caption>
+        <thead>
+          <tr>
+            <th scope="col">Clips</th>
+            <th scope="col">Code-Switch α</th>
+            <th scope="col">Diarization α</th>
+            <th scope="col">Cue α</th>
+            <th scope="col">Translation α</th>
+            <th scope="col">Overall α</th>
+            <th scope="col">Generated</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
       <table class="qa-report-table hide" id="qaAnnotatorsTable">
         <caption>Per-Annotator Averages</caption>
         <thead>
@@ -187,6 +203,7 @@
   </div>
   <script src="/public/env.js"></script>
   <script src="/public/config.js"></script>
+  <script src="/stage2/irr.js"></script>
   <script src="/stage2/qa_metrics.js"></script>
   <script>
     (function(){
@@ -220,6 +237,10 @@
       const reviewSummaryNode = document.getElementById('qaReviewSummary');
       const flaggedCountNode = document.getElementById('qaReviewFlaggedCount');
       const reviewButton = document.getElementById('qaReviewButton');
+      const irrSummaryKey = 'stage2_irr_summary';
+      const irrSummaryTable = document.getElementById('irrSummaryTable');
+      const irrSummaryBody = irrSummaryTable ? irrSummaryTable.querySelector('tbody') : null;
+      const irrEmptyState = document.getElementById('irrSummaryEmpty');
 
       function safeParse(raw){
         if(!raw) return null;
@@ -249,6 +270,74 @@
         if(typeof value !== 'number' || !Number.isFinite(value)) return 'N/A';
         return `${value.toFixed(digits)} s`;
       };
+      const formatAlpha = (value, digits = 2)=>{
+        if(typeof value !== 'number' || !Number.isFinite(value)) return '—';
+        return value.toFixed(digits);
+      };
+
+      function loadIrrSummaryLocal(){
+        try{
+          const raw = localStorage.getItem(irrSummaryKey);
+          return safeParse(raw);
+        }catch(err){
+          console.warn('Failed to load IRR summary from storage', err);
+          return null;
+        }
+      }
+
+      async function fetchIrrSummaryFile(){
+        try{
+          const res = await fetch('/stage2/irr_summary.json', { cache: 'no-store' });
+          if(!res || !res.ok) return null;
+          return await res.json();
+        }catch(err){
+          return null;
+        }
+      }
+
+      function renderIrrSummary(summary){
+        if(!irrSummaryTable || !irrSummaryBody){ return; }
+        irrSummaryBody.innerHTML = '';
+        if(!summary){
+          irrSummaryTable.classList.add('hide');
+          if(irrEmptyState){ irrEmptyState.classList.remove('hide'); }
+          return;
+        }
+        const row = document.createElement('tr');
+        const cells = [
+          summary.clipsEvaluated != null ? summary.clipsEvaluated : '0',
+          formatAlpha(summary.codeSwitchAlpha),
+          formatAlpha(summary.diarizationAlpha),
+          formatAlpha(summary.cueAlpha),
+          formatAlpha(summary.translationAlpha),
+          formatAlpha(summary.overallAlpha),
+          summary.generatedAt ? new Date(summary.generatedAt).toLocaleString() : '—'
+        ];
+        cells.forEach((value)=>{
+          const td = document.createElement('td');
+          td.textContent = value;
+          row.appendChild(td);
+        });
+        irrSummaryBody.appendChild(row);
+        irrSummaryTable.classList.remove('hide');
+        if(irrEmptyState){ irrEmptyState.classList.add('hide'); }
+      }
+
+      function refreshIrrSummary(){
+        const localSummary = loadIrrSummaryLocal();
+        if(localSummary){
+          renderIrrSummary(localSummary);
+          return;
+        }
+        renderIrrSummary(null);
+        if(typeof fetch === 'function'){
+          fetchIrrSummaryFile().then((summary)=>{
+            if(summary){
+              renderIrrSummary(summary);
+            }
+          });
+        }
+      }
 
       function renderSummaryTable(report){
         if(!summaryTable || !summaryBody){ return; }
@@ -434,6 +523,7 @@
       }
 
       function render(report){
+        refreshIrrSummary();
         if(!report){
           if(emptyState){ emptyState.classList.remove('hide'); }
           if(summaryTable){ summaryTable.classList.add('hide'); }
