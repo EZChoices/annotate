@@ -79,6 +79,141 @@ const SENSITIVE_EVENT_CATEGORIES = [
   'explicit',
 ];
 
+const COVERAGE_UNDERREPRESENTED_COUNT_THRESHOLD = 5;
+
+function titleizeCoverageLabel(value) {
+  if (!value || value === 'unknown') {
+    return 'Unknown';
+  }
+  const text = String(value).trim().replace(/[\s_]+/g, ' ').toLowerCase();
+  return text.replace(/\b([a-z])/g, (match, letter) => letter.toUpperCase());
+}
+
+function formatCoveragePercentage(value) {
+  const percent = Number.isFinite(value) ? value * 100 : 0;
+  const decimals = percent >= 99.95 ? 0 : percent >= 10 ? 1 : 2;
+  return percent.toFixed(decimals);
+}
+
+function aggregateCoverageRows(summary) {
+  if (!summary || typeof summary !== 'object') {
+    return [];
+  }
+  const totalProfiles = Number(summary.total_profiles) || 0;
+  const rowsByKey = new Map();
+  const pushRow = (dialectFamily, subregion, count) => {
+    const key = `${dialectFamily}||${subregion}`;
+    const existing = rowsByKey.get(key) || {
+      dialectFamily,
+      subregion,
+      count: 0,
+    };
+    existing.count += count;
+    rowsByKey.set(key, existing);
+  };
+
+  const heatmap = summary.coverage_heatmap;
+  if (heatmap && typeof heatmap === 'object') {
+    Object.entries(heatmap).forEach(([dialectFamily, subregions]) => {
+      if (!subregions || typeof subregions !== 'object') {
+        return;
+      }
+      Object.entries(subregions).forEach(([subregion, genders]) => {
+        if (!genders || typeof genders !== 'object') {
+          return;
+        }
+        let total = 0;
+        Object.values(genders).forEach((ageBands) => {
+          if (!ageBands || typeof ageBands !== 'object') {
+            return;
+          }
+          Object.values(ageBands).forEach((value) => {
+            const numeric = Number(value);
+            if (Number.isFinite(numeric)) {
+              total += numeric;
+            }
+          });
+        });
+        pushRow(dialectFamily, subregion, total);
+      });
+    });
+  } else if (Array.isArray(summary.coverage)) {
+    summary.coverage.forEach((entry) => {
+      if (!entry) return;
+      const family = entry.dialect_family || 'unknown';
+      const subregion = entry.dialect_subregion || 'unknown';
+      const count = Number(entry.count) || 0;
+      pushRow(family, subregion, count);
+    });
+  }
+
+  const rows = Array.from(rowsByKey.values()).map((row) => ({
+    dialectFamily: row.dialectFamily,
+    subregion: row.subregion,
+    count: row.count,
+    proportion: totalProfiles > 0 ? row.count / totalProfiles : 0,
+  }));
+
+  rows.sort(
+    (a, b) =>
+      a.dialectFamily.localeCompare(b.dialectFamily) || a.subregion.localeCompare(b.subregion)
+  );
+
+  return rows;
+}
+
+function buildCoverageRepresentationSection(summary) {
+  const rows = aggregateCoverageRows(summary);
+  if (!rows.length) {
+    return '';
+  }
+
+  const totalProfiles = Number(summary && summary.total_profiles) || 0;
+  const header =
+    '\n\n## Coverage & Representation\n' +
+    'The table below summarizes speaker profile coverage by dialect family and subregion. ' +
+    'Counts aggregate across gender and age bands to highlight higher-level representation.\n\n';
+
+  const tableHeader =
+    '| Dialect Family | Subregion | Count | Proportion (%) |\n| --- | --- | ---: | ---: |\n';
+  const tableBody = rows
+    .map((row) => {
+      const familyLabel = titleizeCoverageLabel(row.dialectFamily);
+      const subregionLabel = titleizeCoverageLabel(row.subregion);
+      const proportionLabel = formatCoveragePercentage(row.proportion);
+      return `| ${familyLabel} | ${subregionLabel} | ${row.count} | ${proportionLabel} |`;
+    })
+    .join('\n');
+
+  const threshold = COVERAGE_UNDERREPRESENTED_COUNT_THRESHOLD;
+  const underrepresented = rows.filter((row) => row.count < threshold);
+
+  let notes = '';
+  if (underrepresented.length) {
+    const descriptions = underrepresented.map((row) => {
+      const familyLabel = titleizeCoverageLabel(row.dialectFamily);
+      const subregionLabel = titleizeCoverageLabel(row.subregion);
+      return `${familyLabel} / ${subregionLabel} (${row.count})`;
+    });
+    notes =
+      '\nCells with fewer than ' +
+      `${threshold} speaker profiles are considered underrepresented. ` +
+      'Focus collection on: ' +
+      descriptions.join(', ') +
+      '.';
+  } else {
+    notes =
+      '\nAll dialect family × subregion combinations currently meet the minimum threshold ' +
+      `of ${threshold} speaker profiles.`;
+  }
+
+  const totalsLine = totalProfiles
+    ? `\nTotal profiles analyzed: ${totalProfiles}.`
+    : '\nTotal profiles analyzed: not available.';
+
+  return header + tableHeader + tableBody + '\n' + notes + totalsLine + '\n';
+}
+
 const PROVENANCE_FIELDS = [
   'collection_mode',
   'license_type',
@@ -1102,6 +1237,16 @@ async function main() {
       `Transcripts and translations have safety- and privacy-sensitive spans replaced with [REDACTED], ` +
       `and video assets are flagged for blurring to support safe external evaluation. ` +
       `The subset is intended for public evaluation scenarios while protecting personal or sensitive content.`;
+  }
+
+  try {
+    if (fs.existsSync(coverageSummaryPath)) {
+      const coverageSummaryText = fs.readFileSync(coverageSummaryPath, 'utf-8');
+      const coverageSummary = JSON.parse(coverageSummaryText);
+      datasetCard += buildCoverageRepresentationSection(coverageSummary);
+    }
+  } catch (err) {
+    console.warn('Warning: failed to append coverage section to dataset card', err);
   }
 
   fs.writeFileSync(datasetCardPath, datasetCard);

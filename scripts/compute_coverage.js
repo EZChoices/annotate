@@ -91,6 +91,10 @@ function computeCoverageSummary(options) {
 
   const records = readJsonl(datasetPath);
   const combinationCounts = new Map();
+  const totalsByDialectFamily = {};
+  const totalsBySubregion = {};
+  const totalsByGender = {};
+  const totalsByAgeBand = {};
   let totalProfiles = 0;
 
   records.forEach((record) => {
@@ -114,13 +118,39 @@ function computeCoverageSummary(options) {
 
       const key = `${dialectFamily}||${dialectSubregion}||${gender}||${ageBand}`;
       combinationCounts.set(key, (combinationCounts.get(key) || 0) + 1);
+      totalsByDialectFamily[dialectFamily] = (totalsByDialectFamily[dialectFamily] || 0) + 1;
+      totalsBySubregion[dialectSubregion] = (totalsBySubregion[dialectSubregion] || 0) + 1;
+      totalsByGender[gender] = (totalsByGender[gender] || 0) + 1;
+      totalsByAgeBand[ageBand] = (totalsByAgeBand[ageBand] || 0) + 1;
       totalProfiles += 1;
     });
   });
 
+  const coverageHeatmap = {};
+  const coverageProportions = {};
+
+  const ensureNested = (target, key) => {
+    if (!Object.prototype.hasOwnProperty.call(target, key)) {
+      target[key] = {};
+    }
+    return target[key];
+  };
+
   const coverage = Array.from(combinationCounts.entries())
     .map(([key, count]) => {
       const [dialectFamily, dialectSubregion, gender, ageBand] = key.split('||');
+      const percent = totalProfiles > 0 ? (count / totalProfiles) * 100 : 0;
+
+      const dfCounts = ensureNested(coverageHeatmap, dialectFamily);
+      const srCounts = ensureNested(dfCounts, dialectSubregion);
+      const genderCounts = ensureNested(srCounts, gender);
+      genderCounts[ageBand] = count;
+
+      const dfProportions = ensureNested(coverageProportions, dialectFamily);
+      const srProportions = ensureNested(dfProportions, dialectSubregion);
+      const genderProportions = ensureNested(srProportions, gender);
+      genderProportions[ageBand] = Number(percent.toFixed(4));
+
       return {
         dialect_family: dialectFamily,
         dialect_subregion: dialectSubregion,
@@ -131,10 +161,40 @@ function computeCoverageSummary(options) {
     })
     .sort((a, b) => b.count - a.count || a.dialect_family.localeCompare(b.dialect_family));
 
+  const sortObject = (obj) =>
+    Object.keys(obj)
+      .sort((a, b) => a.localeCompare(b))
+      .reduce((acc, key) => {
+        acc[key] = obj[key];
+        return acc;
+      }, {});
+
+  const totalsCounts = {
+    dialect_family: sortObject(totalsByDialectFamily),
+    dialect_subregion: sortObject(totalsBySubregion),
+    gender: sortObject(totalsByGender),
+    age_band: sortObject(totalsByAgeBand),
+  };
+
+  const totalsProportions = Object.entries(totalsCounts).reduce((acc, [dimension, counts]) => {
+    acc[dimension] = Object.entries(counts).reduce((dimensionAcc, [category, count]) => {
+      const percent = totalProfiles > 0 ? (count / totalProfiles) * 100 : 0;
+      dimensionAcc[category] = Number(percent.toFixed(4));
+      return dimensionAcc;
+    }, {});
+    return acc;
+  }, {});
+
   const summary = {
     generated_at: new Date().toISOString(),
     total_profiles: totalProfiles,
     coverage,
+    coverage_heatmap: coverageHeatmap,
+    coverage_proportions: coverageProportions,
+    coverage_totals: {
+      counts: totalsCounts,
+      proportions: totalsProportions,
+    },
   };
 
   return summary;
