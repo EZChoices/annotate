@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const fs = require('fs');
+const fsp = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
 const { parseArgs } = require('util');
@@ -181,7 +182,157 @@ function getSplitLabels(length) {
   return labels;
 }
 
-function main() {
+function parseCsv(content) {
+  const rows = [];
+  let current = '';
+  let inQuotes = false;
+  let row = [];
+
+  const pushCell = () => {
+    row.push(current);
+    current = '';
+  };
+
+  for (let i = 0; i < content.length; i++) {
+    const char = content[i];
+    if (char === '"') {
+      if (inQuotes && content[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      pushCell();
+    } else if ((char === '\n' || char === '\r') && !inQuotes) {
+      if (char === '\r' && content[i + 1] === '\n') {
+        i++;
+      }
+      pushCell();
+      if (row.length > 1 || row[0] !== '') {
+        rows.push(row);
+      }
+      row = [];
+    } else {
+      current += char;
+    }
+  }
+
+  if (current !== '' || inQuotes || row.length) {
+    pushCell();
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+async function loadRightsMetadata(filePath) {
+  if (!filePath) {
+    return {};
+  }
+
+  const resolvedPath = path.resolve(filePath);
+  let content;
+  try {
+    content = await fsp.readFile(resolvedPath, 'utf-8');
+  } catch (err) {
+    throw new Error(`Failed to read rights metadata file at ${resolvedPath}: ${err.message}`);
+  }
+
+  const ext = path.extname(resolvedPath).toLowerCase();
+  const normalizeRights = (value) => {
+    const dedupe = (arr) => {
+      const unique = [];
+      const seen = new Set();
+      for (const item of arr) {
+        if (!seen.has(item)) {
+          seen.add(item);
+          unique.push(item);
+        }
+      }
+      return unique;
+    };
+    if (Array.isArray(value)) {
+      const cleaned = value
+        .map((item) => String(item).trim())
+        .filter((item) => item.length > 0);
+      return dedupe(cleaned);
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) return [];
+      if ((trimmed.startsWith('[') && trimmed.endsWith(']')) || trimmed.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          return normalizeRights(parsed);
+        } catch (err) {
+          // fall through to delimiter parsing
+        }
+      }
+      const split = trimmed
+        .split(/[;|,]/)
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
+      return dedupe(split);
+    }
+    if (value === null || value === undefined) {
+      return [];
+    }
+    const fallback = [String(value).trim()].filter((item) => item.length > 0);
+    return dedupe(fallback);
+  };
+
+  const mapping = {};
+
+  if (ext === '.json') {
+    let parsed;
+    try {
+      parsed = JSON.parse(content);
+    } catch (err) {
+      throw new Error(`Invalid JSON rights metadata: ${err.message}`);
+    }
+
+    if (Array.isArray(parsed)) {
+      for (const entry of parsed) {
+        if (!entry) continue;
+        const assetId = entry.asset_id || entry.assetId || entry.id;
+        if (!assetId) continue;
+        mapping[assetId] = normalizeRights(entry.rights || entry.licenses || []);
+      }
+    } else if (typeof parsed === 'object') {
+      for (const [assetId, rightsValue] of Object.entries(parsed)) {
+        mapping[assetId] = normalizeRights(rightsValue);
+      }
+    }
+    return mapping;
+  }
+
+  if (ext === '.csv') {
+    const rows = parseCsv(content);
+    if (!rows.length) {
+      return {};
+    }
+    const headers = rows[0].map((header) => header.trim());
+    const assetIndex = headers.findIndex((header) => header === 'asset_id' || header === 'assetId' || header === 'id');
+    const rightsIndex = headers.findIndex((header) => header === 'rights' || header === 'licenses');
+    if (assetIndex === -1 || rightsIndex === -1) {
+      throw new Error('Rights CSV must include asset_id and rights columns.');
+    }
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || row.length <= Math.max(assetIndex, rightsIndex)) continue;
+      const assetId = row[assetIndex] ? row[assetIndex].trim() : '';
+      if (!assetId) continue;
+      const rightsValue = row[rightsIndex];
+      mapping[assetId] = normalizeRights(rightsValue);
+    }
+    return mapping;
+  }
+
+  throw new Error('Unsupported rights metadata format. Use CSV or JSON.');
+}
+
+async function main() {
   const { values } = parseArgs({
     options: {
       version: { type: 'string' },
@@ -190,6 +341,7 @@ function main() {
       'include-gold': { type: 'boolean', default: true },
       minF1: { type: 'string', default: '0.80' },
       splitRatio: { type: 'string', default: '0.8,0.1,0.1' },
+      rights: { type: 'string' },
     },
   });
 
@@ -228,6 +380,16 @@ function main() {
   const clipsDestRoot = path.join(datasetRoot, 'clips');
   ensureDir(clipsDestRoot);
 
+  let rightsByAsset = {};
+  if (values.rights) {
+    try {
+      rightsByAsset = await loadRightsMetadata(values.rights);
+    } catch (err) {
+      console.warn(err.message);
+      rightsByAsset = {};
+    }
+  }
+
   const datasetRecords = [];
   const qaGlobal = {
     f1Values: [],
@@ -237,6 +399,7 @@ function main() {
   };
   let totalDurationSec = 0;
   const splitCounts = {};
+  const rightsCounts = {};
   const logEntries = [];
 
   const clipDirs = listSubdirs(sourceDir).filter(isAssetId);
@@ -326,6 +489,11 @@ function main() {
 
     const voiceTags = extractVoiceTagsFromVtt(transcriptPath);
 
+    const rightsList = Array.isArray(rightsByAsset[assetId]) ? [...rightsByAsset[assetId]] : [];
+    rightsList.forEach((right) => {
+      rightsCounts[right] = (rightsCounts[right] || 0) + 1;
+    });
+
     datasetRecords.push({
       asset_id: assetId,
       split,
@@ -340,6 +508,7 @@ function main() {
       },
       voice_tags: voiceTags,
       files,
+      rights: rightsList,
     });
 
     qaGlobal.f1Values.push(f1);
@@ -391,7 +560,8 @@ function main() {
     `- Translation % in bounds std dev: ${qaSummary.std_translation_pct_in_bounds.toFixed(4)}\n` +
     `- Cue delta std dev: ${qaSummary.std_cue_delta_sec.toFixed(4)}\n\n` +
     `## Rights Notice\n` +
-    `This dataset is derived from Stage 2 pipeline outputs. Ensure all downstream usage respects the original content rights and internal compliance policies.`;
+    `This dataset is derived from Stage 2 pipeline outputs. Ensure all downstream usage respects the original content rights and internal compliance policies.\n\n` +
+    `Each dataset record includes associated rights metadata to enable downstream usage policy enforcement.`;
 
   fs.writeFileSync(datasetCardPath, datasetCard);
 
@@ -417,6 +587,7 @@ function main() {
     rights_provenance_summary:
       'Clips sourced from Stage 2 pipeline outputs with validated rights for internal research use.',
     compliance_notes: 'Ensure usage complies with internal data handling and privacy policies.',
+    rights_distribution: rightsCounts,
   };
 
   fs.writeFileSync(trainingSummaryPath, JSON.stringify(trainingSummary, null, 2));
@@ -426,4 +597,7 @@ function main() {
   console.log(`Export complete. ${datasetRecords.length} clips written to ${datasetRoot}`);
 }
 
-main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
