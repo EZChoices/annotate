@@ -377,6 +377,142 @@
     return summary;
   }
 
+  function formatCoverageLabel(value) {
+    if (!value || value === 'unknown') return 'Unknown';
+    const text = String(value)
+      .trim()
+      .replace(/[_\s]+/g, ' ')
+      .toLowerCase();
+    return text.replace(/\b([a-z])/g, (match, letter) => letter.toUpperCase());
+  }
+
+  function ensureCoverageContainer() {
+    if (typeof document === 'undefined') return null;
+    let container = document.getElementById('coverageSummary');
+    if (!container) {
+      container = document.createElement('section');
+      container.id = 'coverageSummary';
+      container.className = 'coverage-summary';
+      if (document.body) {
+        document.body.insertBefore(container, document.body.firstChild || null);
+      }
+    }
+    return container;
+  }
+
+  function injectCoverageStyles() {
+    if (typeof document === 'undefined') return;
+    if (document.getElementById('coverageSummaryStyles')) return;
+    const style = document.createElement('style');
+    style.id = 'coverageSummaryStyles';
+    style.textContent = `
+      .coverage-summary { max-width: 920px; margin: 1.5rem auto; padding: 1rem; background: var(--card, #fff); border-radius: 12px; border: 1px solid var(--border, #dcdcdc); box-shadow: 0 4px 24px rgba(0, 0, 0, 0.04); }
+      .coverage-summary h2 { margin: 0 0 .75rem 0; font-size: 1.25rem; }
+      .coverage-summary__meta { margin: 0 0 1rem 0; color: var(--muted, #555); }
+      .coverage-summary__table { width: 100%; border-collapse: collapse; font-size: .95rem; }
+      .coverage-summary__table th, .coverage-summary__table td { padding: .5rem .65rem; border: 1px solid var(--border, #e2e2e2); text-align: left; }
+      .coverage-summary__table th { background: rgba(0,0,0,0.04); font-weight: 600; }
+      .coverage-summary__empty { margin: 0; color: var(--muted, #666); }
+    `;
+    (document.head || document.body || document.documentElement).appendChild(style);
+  }
+
+  function renderCoverageTable(summary) {
+    const container = ensureCoverageContainer();
+    if (!container) return;
+    injectCoverageStyles();
+    container.innerHTML = '';
+
+    const heading = document.createElement('h2');
+    heading.textContent = 'Coverage summary';
+    container.appendChild(heading);
+
+    const meta = document.createElement('p');
+    meta.className = 'coverage-summary__meta';
+    const total = Number(summary && summary.total_profiles);
+    meta.textContent = Number.isFinite(total)
+      ? `Total speaker profiles: ${total}`
+      : 'Coverage summary by speaker profile attributes.';
+    container.appendChild(meta);
+
+    const coverage = Array.isArray(summary && summary.coverage) ? summary.coverage : [];
+    if (!coverage.length) {
+      const empty = document.createElement('p');
+      empty.className = 'coverage-summary__empty';
+      empty.textContent = 'No coverage information available.';
+      container.appendChild(empty);
+      return;
+    }
+
+    const table = document.createElement('table');
+    table.className = 'coverage-summary__table';
+
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    ['Dialect family', 'Dialect subregion', 'Gender', 'Age band', 'Count'].forEach((label) => {
+      const cell = document.createElement('th');
+      cell.textContent = label;
+      headerRow.appendChild(cell);
+    });
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    coverage.forEach((entry) => {
+      const row = document.createElement('tr');
+      const cells = [
+        formatCoverageLabel(entry.dialect_family),
+        formatCoverageLabel(entry.dialect_subregion),
+        formatCoverageLabel(entry.gender),
+        formatCoverageLabel(entry.age_band),
+        Number(entry.count) || 0,
+      ];
+      cells.forEach((value) => {
+        const cell = document.createElement('td');
+        cell.textContent = value;
+        row.appendChild(cell);
+      });
+      tbody.appendChild(row);
+    });
+    table.appendChild(tbody);
+    container.appendChild(table);
+  }
+
+  function fetchCoverageSummary() {
+    if (typeof fetch !== 'function') {
+      return Promise.resolve(null);
+    }
+    return fetch('coverage_summary.json', { cache: 'no-store' })
+      .then((response) => {
+        if (!response.ok) return null;
+        return response.json().catch(() => null);
+      })
+      .catch(() => null);
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('DOMContentLoaded', () => {
+      fetchCoverageSummary().then((summary) => {
+        if (summary) {
+          renderCoverageTable(summary);
+        } else {
+          const container = ensureCoverageContainer();
+          if (container) {
+            injectCoverageStyles();
+            container.innerHTML = '';
+            const heading = document.createElement('h2');
+            heading.textContent = 'Coverage summary';
+            container.appendChild(heading);
+            const empty = document.createElement('p');
+            empty.className = 'coverage-summary__empty';
+            empty.textContent = 'Coverage summary not available.';
+            container.appendChild(empty);
+          }
+        }
+      });
+    });
+  }
+
   // --- Public API ------------------------------------------------------------
   const api = {
     recordAnnotation,
