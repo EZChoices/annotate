@@ -1096,6 +1096,27 @@
     return report;
   }
 
+  function getCueDelta(metrics) {
+    if (!metrics) return null;
+    const cues = metrics.cues || {};
+    if (Number.isFinite(cues.targetDiffSec)) return cues.targetDiffSec;
+    if (Number.isFinite(cues.avgCueDiffSec)) return cues.avgCueDiffSec;
+    if (Number.isFinite(metrics.cue_diff_sec)) return metrics.cue_diff_sec;
+    if (Number.isFinite(metrics.cueAvgDiffSec)) return metrics.cueAvgDiffSec;
+    return null;
+  }
+
+  function getTranslationCompleteness(metrics) {
+    if (!metrics) return null;
+    const translation = metrics.translation || {};
+    if (Number.isFinite(translation.completeness)) return translation.completeness;
+    if (Number.isFinite(metrics.translation_completeness)) return metrics.translation_completeness;
+    const cues = metrics.cues || {};
+    if (Number.isFinite(cues.translationCompleteness)) return cues.translationCompleteness;
+    if (Number.isFinite(metrics.translationCompleteness)) return metrics.translationCompleteness;
+    return null;
+  }
+
   // ------------------------------
   // Public API
   // ------------------------------
@@ -1107,6 +1128,8 @@
     computeQAResult,
     recordResult,
     generateReport,
+    getCueDelta,
+    getTranslationCompleteness,
     _internal: {
       parseVttCues,
       parseRttm,
