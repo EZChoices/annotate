@@ -8,30 +8,38 @@ const IRR = require("../stage2/irr.js");
 const recordsPath = path.resolve(__dirname, "..", "stage2", "irr_records.json");
 const summaryPath = path.resolve(__dirname, "..", "stage2", "irr_summary.json");
 
-function loadRecords() {
+function readJson(filePath) {
   try {
-    if (!fs.existsSync(recordsPath)) {
-      return null;
+    if (!fs.existsSync(filePath)) {
+      console.warn(`IRR: records file not found at ${filePath}`);
+      return [];
     }
-    const raw = fs.readFileSync(recordsPath, "utf8");
-    if (!raw) return null;
+    const raw = fs.readFileSync(filePath, "utf8");
+    if (!raw) {
+      console.warn(`IRR: records file is empty at ${filePath}`);
+      return [];
+    }
     return JSON.parse(raw);
   } catch (err) {
-    console.warn("compute_irr: unable to read records", err);
-    return null;
+    console.warn(`IRR: unable to read or parse records from ${filePath}`, err.message);
+    return [];
+  }
+}
+
+function writeJson(filePath, data) {
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+    console.log(`IRR summary written to ${filePath}`);
+  } catch (err) {
+    console.error(`IRR: failed to write summary to ${filePath}`, err.message);
+    process.exitCode = 1;
   }
 }
 
 function main() {
-  const records = loadRecords();
+  const records = readJson(recordsPath);
   const summary = IRR.computeIRRSummary(records);
-  try {
-    fs.writeFileSync(summaryPath, JSON.stringify(summary, null, 2));
-    console.log(`Wrote IRR summary to ${summaryPath}`);
-  } catch (err) {
-    console.error("compute_irr: failed to write summary", err);
-    process.exitCode = 1;
-  }
+  writeJson(summaryPath, summary);
 }
 
 if (require.main === module) {

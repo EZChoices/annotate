@@ -173,6 +173,32 @@ function loadManifestFromStorage(){
   }
 }
 
+function stableHash(value){
+  const str = value == null ? '' : String(value);
+  let hash = 0;
+  for(let i=0;i<str.length;i++){
+    hash = ((hash << 5) - hash + str.charCodeAt(i)) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+function isDoubleCodingRequired(manifestItem){
+  if(!manifestItem) return false;
+  if(manifestItem.double_coded === true) return true;
+  const qa = manifestItem.qa || manifestItem.qa_result || manifestItem.qaStatus || {};
+  if(manifestItem.qa_pass === false) return true;
+  if(manifestItem.qa_pass_flag === false) return true;
+  const qaStatus = (manifestItem.qa_status || manifestItem.qaStatus || '').toString().toLowerCase();
+  if(qaStatus === 'fail' || qaStatus === 'failed') return true;
+  if(qa && typeof qa.pass === 'boolean' && qa.pass === false) return true;
+  const clipId = manifestItem.asset_id || manifestItem.id || manifestItem.clip_id || manifestItem.clipId || '';
+  if(!clipId){
+    return Math.random() < 0.1;
+  }
+  const hash = stableHash(clipId);
+  return hash % 10 === 0;
+}
+
 function getAnnotatorId(){
   try{
     const k = 'ea_stage2_annotator_id';
@@ -1535,14 +1561,17 @@ async function enqueueAndSync(lintReport){
     return false;
   }
   const it = currentItem(); if(!it) return false;
-  const clipId = it.asset_id || it.id || it.clip_id || it.clipId;
+
+  const clipId = it.asset_id || it.id || it.clip_id || it.clipId || null;
   const doubleCodingRequired = isDoubleCodingRequired(it);
+
   const csSnapshot = snapshotCodeSwitchSpans();
   const csExports = buildCodeSwitchExports(csSnapshot);
   EAQ.state.codeSwitchVTT = csExports.vtt;
   EAQ.state.codeSwitchSummary = csExports.summary;
   const csJsonText = JSON.stringify(csExports.summary);
   setCodeSwitchSpans(csSnapshot, { pushHistory: false });
+
   const speakerStats = evaluateSpeakerProfileStats();
   const files = {
     diarization_rttm: rttmStringify(EAQ.state.diarSegments||[], it.asset_id || 'rec'),
@@ -1554,6 +1583,7 @@ async function enqueueAndSync(lintReport){
     code_switch_spans_json: csJsonText,
     speaker_profiles_json: (function(){ try{ return JSON.stringify(EAQ.state.speakerProfiles||[]); }catch{ return '[]'; } })()
   };
+
   const emotionVtt = buildEmotionVTT(EAQ.state.emotionSpans || []);
   const eventsVtt = buildSafetyEventsVTT(EAQ.state.safetyEvents || []);
   if(emotionVtt){ files.emotion_vtt = emotionVtt; }
@@ -1585,7 +1615,7 @@ async function enqueueAndSync(lintReport){
       gold_target: !!it.gold_target,
       gold_check: !!it.gold_target ? 'pending' : 'not_applicable',
       time_spent_sec: timeSpentSec,
-      clip_id: clipId || null,
+      clip_id: clipId,
       lint: lintSummary,
       speaker_profiles_total: speakerStats.total,
       speaker_profiles_complete: speakerStats.complete,
@@ -1635,21 +1665,22 @@ async function enqueueAndSync(lintReport){
     }
   }
 
-  if(doubleCodingRequired && qaResult && window.IRR && typeof window.IRR.recordAnnotation === 'function'){
+  // Record IRR metrics if double coding is required
+  if(doubleCodingRequired && (clipId != null) && window.IRR && typeof window.IRR.recordAnnotation === 'function'){
     try{
       const cueDeltaMetric = window.QAMetrics && typeof window.QAMetrics.getCueDelta === 'function'
-        ? window.QAMetrics.getCueDelta(qaResult)
-        : (qaResult.cues && Number.isFinite(qaResult.cues.targetDiffSec) ? qaResult.cues.targetDiffSec : null);
+        ? window.QAMetrics.getCueDelta(qaResult || {})
+        : (qaResult && qaResult.cues && Number.isFinite(qaResult.cues.targetDiffSec) ? qaResult.cues.targetDiffSec : (payload.qa.cue_diff_sec ?? null));
       const translationMetric = window.QAMetrics && typeof window.QAMetrics.getTranslationCompleteness === 'function'
-        ? window.QAMetrics.getTranslationCompleteness(qaResult)
-        : (qaResult.translation && Number.isFinite(qaResult.translation.completeness) ? qaResult.translation.completeness : null);
+        ? window.QAMetrics.getTranslationCompleteness(qaResult || {})
+        : (qaResult && qaResult.translation && Number.isFinite(qaResult.translation.completeness) ? qaResult.translation.completeness : (payload.qa.translation_completeness ?? null));
       const irrMetrics = {
-        codeSwitchF1: Number.isFinite(payload.qa.codeswitch_f1) ? payload.qa.codeswitch_f1 : null,
-        diarizationMae: Number.isFinite(payload.qa.diarization_mae) ? payload.qa.diarization_mae : null,
+        codeSwitchF1: Number.isFinite(payload.qa.codeswitch_f1) ? payload.qa.codeswitch_f1 : (qaResult && qaResult.codeswitch ? qaResult.codeswitch.f1 : null),
+        diarizationMae: Number.isFinite(payload.qa.diarization_mae) ? payload.qa.diarization_mae : (qaResult && qaResult.diarization ? qaResult.diarization.mae : null),
         cueDeltaSec: Number.isFinite(cueDeltaMetric) ? cueDeltaMetric : null,
         translationCompleteness: Number.isFinite(translationMetric) ? translationMetric : null
       };
-      const hasMetric = Object.values(irrMetrics).some((value)=> Number.isFinite(value));
+      const hasMetric = Object.values(irrMetrics).some((v)=> Number.isFinite(v));
       if(hasMetric){
         const annotatorId = EAQ.state.annotator || getAnnotatorId();
         window.IRR.recordAnnotation(annotatorId, clipId || (it.asset_id || it.id || 'unknown'), irrMetrics);
@@ -1659,24 +1690,6 @@ async function enqueueAndSync(lintReport){
       }
     }catch(err){
       console.warn('IRR: failed to record annotation', err);
-    }
-  }
-
-  if(window.QAMetrics && typeof window.QAMetrics.recordResult === 'function'){
-    try{
-      window.QAMetrics.recordResult(clipId, {
-        qa: payload.qa,
-        metrics: qaResult,
-        files,
-        clip: {
-          clipId,
-          title: it.title || it.clip_title || it.display_title || null,
-          language: it.language || null,
-          gold_target: !!it.gold_target
-        }
-      });
-    }catch(err){
-      console.warn('Failed to record QA result', err);
     }
   }
 
