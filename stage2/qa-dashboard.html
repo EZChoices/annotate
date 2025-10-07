@@ -1,932 +1,257 @@
-(function (global) {
-  "use strict";
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EchoAtlas Stage 2 — QA Dashboard</title>
+  <link rel="manifest" href="/public/manifest.webmanifest">
+  <link rel="stylesheet" href="/public/styles.css">
+  <style>
+    .screen{max-width:720px;margin:0 auto}
+    .hide{display:none}
+    .stage-menu{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 auto 1rem auto;max-width:720px}
+    .stage-menu__link{display:inline-flex;align-items:center;justify-content:center;padding:.45rem .9rem;border-radius:999px;border:1px solid var(--border);background:var(--card);color:inherit;text-decoration:none;font-size:.9rem;transition:background .15s ease,border-color .15s ease,color .15s ease}
+    .stage-menu__link:hover{border-color:var(--accent);color:var(--accent)}
+    .stage-menu__link.active{background:var(--accent);border-color:var(--accent);color:#fff}
+    .qa-dashboard__intro{margin-bottom:1rem;font-size:1rem}
+    .qa-dashboard__empty{padding:1.25rem;border:1px dashed var(--border);border-radius:12px;text-align:center;color:var(--muted);background:var(--card)}
+    .qa-report-table{width:100%;border-collapse:collapse;margin:1rem 0;background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+    .qa-report-table caption{padding:.75rem 1rem;font-weight:600;text-align:left;background:rgba(0,0,0,0.02)}
+    .qa-report-table th,.qa-report-table td{padding:.65rem 1rem;text-align:left;border-bottom:1px solid var(--border);font-size:.95rem}
+    .qa-report-table tbody tr:last-child th,.qa-report-table tbody tr:last-child td{border-bottom:none}
+    .qa-report-table thead{background:rgba(0,0,0,0.03);font-size:.85rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <nav class="stage-menu" aria-label="Stage 2 menu">
+      <a href="/stage2/index.html" class="stage-menu__link">Annotation Workspace</a>
+      <a href="/stage2/qa-dashboard.html" class="stage-menu__link active">QA Dashboard</a>
+    </nav>
+    <section class="screen" aria-labelledby="qaDashboardTitle">
+      <h2 id="qaDashboardTitle">QA Dashboard</h2>
+      <p class="notice qa-dashboard__intro">Review your gold-clip QA results and detailed per-metric scores. Metrics update automatically after each submission.</p>
+      <div class="qa-dashboard__empty" id="qaReportEmpty" role="status">No QA metrics to display yet. Complete a gold clip to populate this dashboard.</div>
+      <table class="qa-report-table hide" id="qaSummaryTable">
+        <caption>Latest QA Summary</caption>
+        <thead>
+          <tr>
+            <th scope="col">Metric</th>
+            <th scope="col">Value</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <table class="qa-report-table hide" id="qaAnnotatorsTable">
+        <caption>Per-Annotator Averages</caption>
+        <thead>
+          <tr>
+            <th scope="col">Annotator</th>
+            <th scope="col">Clips</th>
+            <th scope="col">Pass Rate</th>
+            <th scope="col">Avg F1</th>
+            <th scope="col">Diar MAE (s)</th>
+            <th scope="col">Cue Δ (s)</th>
+            <th scope="col">Translation %</th>
+            <th scope="col">Char Coverage %</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <table class="qa-report-table hide" id="qaClipsTable">
+        <caption>Gold Clip Checks</caption>
+        <thead>
+          <tr>
+            <th scope="col">Clip</th>
+            <th scope="col">Language</th>
+            <th scope="col">QA Status</th>
+            <th scope="col">Code-Switch F1</th>
+            <th scope="col">Diar MAE (s)</th>
+            <th scope="col">Cue Δ (s)</th>
+            <th scope="col">Translation %</th>
+            <th scope="col">Char Coverage %</th>
+            <th scope="col">Time Spent</th>
+          </tr>
+        </thead>
+        <tbody id="qaReportClips"></tbody>
+      </table>
+    </section>
+  </div>
+  <script src="/public/env.js"></script>
+  <script src="/public/config.js"></script>
+  <script src="/stage2/qa_metrics.js"></script>
+  <script src="/stage2/qa-dashboard.js"></script>
+  <script>
+    (function(){
+      const c = document.createElement('div');
+      c.className = 'notice';
+      const base = location.origin;
+      const annotKey = 'ea_stage2_annotator_id';
+      let id = 'anonymous';
+      try { id = localStorage.getItem(annotKey) || 'anonymous'; } catch{}
+      if(new URLSearchParams(location.search).get('links')==='0') return;
+      c.innerHTML = `Quick Links:
+        <a href="${base}/meta-v2/index.html">Meta V2</a> ·
+        <a href="${base}/">Stage 2</a> ·
+        <a href="${base}/stage2/qa-dashboard.html">QA Dashboard</a> ·
+        <a href="${base}/api/tasks?stage=2&annotator_id=${encodeURIComponent(id)}&limit=5" target="_blank">Tasks API</a> ·
+        <a href="${base}/api/clip?annotator=${encodeURIComponent(id)}" target="_blank">Clip API</a> ·
+        <a href="${base}/api/debug?annotator=${encodeURIComponent(id)}" target="_blank">Debug</a>`;
+      document.body.appendChild(c);
+    })();
+  </script>
+  <script>
+    (function(){
+      const storageKey = 'qa_report';
+      const emptyState = document.getElementById('qaReportEmpty');
+      const summaryTable = document.getElementById('qaSummaryTable');
+      const summaryBody = summaryTable ? summaryTable.querySelector('tbody') : null;
+      const annotatorsTable = document.getElementById('qaAnnotatorsTable');
+      const annotatorsBody = annotatorsTable ? annotatorsTable.querySelector('tbody') : null;
+      const clipsTable = document.getElementById('qaClipsTable');
+      const clipsBody = document.getElementById('qaReportClips');
 
-  // --- Storage keys & in-memory fallback ------------------------------------
-  const RECORDS_KEY = "ea_stage2_irr_records";
-  const SUMMARY_KEY = "ea_stage2_irr_summary";
-  const memoryStore = { records: null, summary: null }; // records stored normalized
-
-  // --- Environment guards ----------------------------------------------------
-  function hasLocalStorage() {
-    try {
-      return typeof localStorage !== "undefined" && localStorage !== null;
-    } catch {
-      return false;
-    }
-  }
-
-  // --- Utils -----------------------------------------------------------------
-  function clamp01(value) {
-    if (!Number.isFinite(value)) return 0;
-    if (value < 0) return 0;
-    if (value > 1) return 1;
-    return value;
-  }
-
-  function clone(obj) {
-    return obj ? JSON.parse(JSON.stringify(obj)) : obj;
-  }
-
-  function average(values) {
-    const finite = (values || []).filter((v) => Number.isFinite(v));
-    if (!finite.length) return null;
-    const sum = finite.reduce((acc, v) => acc + v, 0);
-    return sum / finite.length;
-  }
-
-  function buildPairs(list) {
-    const pairs = [];
-    for (let i = 0; i < list.length; i += 1) {
-      for (let j = i + 1; j < list.length; j += 1) {
-        pairs.push([list[i], list[j]]);
-      }
-    }
-    return pairs;
-  }
-
-  function toFinite(value) {
-    if (value == null) return null;
-    const num = typeof value === "string" ? parseFloat(value) : Number(value);
-    return Number.isFinite(num) ? num : null;
-  }
-
-  // Normalize arbitrary metric shapes to a canonical metric object
-  // Canonical keys: codeSwitchF1 [0..1], diarizationMae (sec), cueDeltaSec (sec), translationCompleteness [0..1]
-  function sanitizeMetrics(metrics) {
-    const src = metrics && typeof metrics === "object" ? metrics : {};
-    const codeSwitchF1 =
-      toFinite(src.codeSwitchF1 ?? src.codeswitch_f1 ?? src.code_switch_f1);
-    const diarizationMae =
-      toFinite(src.diarizationMae ?? src.diarization_mae ?? src.diarMae);
-    const cueDeltaSec = toFinite(
-      src.cueDeltaSec ?? src.cueDelta ?? src.cue_delta ?? src.cue_diff_sec ?? src.cueDeltaSec
-    );
-    const translationCompleteness = toFinite(
-      src.translationCompleteness ??
-        src.translation_completeness ??
-        src.translationCompletenessRatio
-    );
-    return {
-      ...(Number.isFinite(codeSwitchF1) ? { codeSwitchF1 } : {}),
-      ...(Number.isFinite(diarizationMae) ? { diarizationMae } : {}),
-      ...(Number.isFinite(cueDeltaSec) ? { cueDeltaSec } : {}),
-      ...(Number.isFinite(translationCompleteness)
-        ? { translationCompleteness }
-        : {}),
-    };
-  }
-
-  // --- Records model (normalized) -------------------------------------------
-  // We store records as:
-  // { clips: { [clipId]: { clipId, annotations: { [annotatorId]: { ...metrics, recordedAt } } } } }
-  let cache = null;
-
-  function normalizeRecords(records) {
-    if (!records) {
-      return { clips: {} };
-    }
-    // Legacy array form: [{clipId, annotatorId, metrics}, ...] or entries with .annotations map/array
-    if (Array.isArray(records)) {
-      const clips = {};
-      records.forEach((entry) => {
-        if (!entry || !entry.clipId) return;
-        const clipId = entry.clipId;
-        if (!clips[clipId]) clips[clipId] = { clipId, annotations: {} };
-
-        if (entry.annotatorId) {
-          clips[clipId].annotations[entry.annotatorId] =
-            sanitizeMetrics(entry.metrics) || {};
-        } else {
-          // If it's an entry with a nested annotations list/map
-          const items = Array.isArray(entry.annotations)
-            ? entry.annotations
-            : Object.entries(entry.annotations || {}).map(
-                ([annotatorId, metrics]) => ({
-                  annotatorId,
-                  metrics,
-                })
-              );
-          items.forEach((item) => {
-            if (!item || !item.annotatorId) return;
-            clips[clipId].annotations[item.annotatorId] =
-              sanitizeMetrics(item.metrics) || {};
-          });
-        }
-      });
-      return { clips };
-    }
-    // Already structured
-    if (records.clips && typeof records.clips === "object") {
-      const clips = {};
-      Object.keys(records.clips).forEach((clipId) => {
-        const clip = records.clips[clipId];
-        if (!clip) return;
-        const annotations = Array.isArray(clip.annotations)
-          ? clip.annotations.reduce((map, ann) => {
-              if (!ann || !ann.annotatorId) return map;
-              map[ann.annotatorId] = sanitizeMetrics(ann.metrics) || {};
-              return map;
-            }, {})
-          : Object.keys(clip.annotations || {}).reduce((map, annotatorId) => {
-              map[annotatorId] = sanitizeMetrics(
-                clip.annotations[annotatorId]
-              ) || {};
-              return map;
-            }, {});
-        clips[clipId] = { clipId, annotations };
-      });
-      return { clips };
-    }
-    return { clips: {} };
-  }
-
-  function loadRecordsFromStorage() {
-    if (!hasLocalStorage()) return null;
-    try {
-      const raw = localStorage.getItem(RECORDS_KEY);
-      if (!raw) return null;
-      return JSON.parse(raw);
-    } catch (err) {
-      console.warn("IRR: failed to load records from storage", err);
-      return null;
-    }
-  }
-
-  function ensureRecords() {
-    if (cache) return cache;
-    const stored = loadRecordsFromStorage();
-    cache = normalizeRecords(stored || memoryStore.records);
-    if (!cache || !cache.clips) cache = { clips: {} };
-    return cache;
-  }
-
-  function persistRecords(records) {
-    cache = normalizeRecords(records);
-    memoryStore.records = clone(cache);
-    if (hasLocalStorage()) {
+      let report = null;
       try {
-        localStorage.setItem(RECORDS_KEY, JSON.stringify(cache));
-      } catch (err) {
-        console.warn("IRR: failed to persist records", err);
+        const raw = localStorage.getItem(storageKey);
+        if(raw){
+          report = JSON.parse(raw);
+        }
+      } catch(err) {
+        console.warn('Failed to load QA report from storage', err);
       }
-    }
-    // Also attach to global for debugging/legacy access
-    global.__IRR_RECORDS__ = clone(cache);
-    return cache;
-  }
 
-  // --- Public API: record annotation ----------------------------------------
-  function recordAnnotation(annotatorId, clipId, metrics) {
-    if (!clipId) return null;
-    const id = annotatorId || "anonymous";
-    const normalized = sanitizeMetrics(metrics);
-    const records = ensureRecords();
-    const clip = records.clips[clipId] || { clipId, annotations: {} };
-    clip.annotations[id] = Object.assign({}, normalized, {
-      recordedAt: Date.now(),
-    });
-    records.clips[clipId] = clip;
-    persistRecords(records);
-    const summary = computeIRRSummary(records);
-    saveIRRSummary({ summary });
-    return { annotatorId: id, clipId, metrics: normalized };
-  }
+      if(!report){
+        if(emptyState){ emptyState.classList.remove('hide'); }
+        if(summaryTable){ summaryTable.classList.add('hide'); }
+        if(clipsTable){ clipsTable.classList.add('hide'); }
+        return;
+      }
 
-  // --- IRR math --------------------------------------------------------------
-  const DEFAULT_MAX_DIAR_SEC = 5; // seconds
-  const DEFAULT_MAX_CUE_DELTA = 4; // seconds
-
-  // Pairwise agreement proxy across metrics; returns alphas per metric and overall
-  function computeAlpha(annotationsList, options) {
-    const opts = options || {};
-    const maxDiar = Number.isFinite(opts.maxDiarizationSeconds)
-      ? opts.maxDiarizationSeconds
-      : DEFAULT_MAX_DIAR_SEC;
-    const maxCueDelta = Number.isFinite(opts.maxCueDeltaSec)
-      ? opts.maxCueDeltaSec
-      : DEFAULT_MAX_CUE_DELTA;
-
-    // Accept either [{annotatorId, metrics}, ...] OR map { annotatorId: metrics }
-    const annotations = Array.isArray(annotationsList)
-      ? annotationsList.filter((e) => e && e.metrics)
-      : Object.keys(annotationsList || {}).map((key) => ({
-          annotatorId: key,
-          metrics: annotationsList[key],
-        }));
-
-    const cleaned = annotations.filter((e) => e && e.metrics);
-    if (cleaned.length < 2) {
-      return {
-        codeSwitchAlpha: null,
-        diarizationAlpha: null,
-        cueAlpha: null,
-        translationAlpha: null,
-        overallAlpha: null,
+      if(emptyState){ emptyState.classList.add('hide'); }
+      const formatPercent = (value, digits = 1)=>{
+        if(typeof value !== 'number' || !Number.isFinite(value)) return 'N/A';
+        return `${(value * 100).toFixed(digits)}%`;
       };
-    }
+      const formatSeconds = (value, digits = 2)=>{
+        if(typeof value !== 'number' || !Number.isFinite(value)) return 'N/A';
+        return `${value.toFixed(digits)} s`;
+      };
 
-    const pairs = buildPairs(cleaned);
-
-    const codeSwitchScores = [];
-    const diarizationScores = [];
-    const cueScores = [];
-    const translationScores = [];
-
-    pairs.forEach(([a, b]) => {
-      const ma = a.metrics || {};
-      const mb = b.metrics || {};
-
-      // Code-switch F1: closer means better; use midpoint then clamp
-      const f1a = Number(ma.codeSwitchF1);
-      const f1b = Number(mb.codeSwitchF1);
-      if (Number.isFinite(f1a) && Number.isFinite(f1b)) {
-        codeSwitchScores.push(clamp01((f1a + f1b) / 2));
+      if(summaryTable && summaryBody){
+        const summary = report.summary || {};
+        const rows = [
+          ['Generated At', report.generatedAt ? new Date(report.generatedAt).toLocaleString() : 'Unknown'],
+          ['Annotator', report.annotator || 'anonymous'],
+          ['Total Gold Clips', summary.totalGoldClips != null ? summary.totalGoldClips : '0'],
+          ['Reviewed Clips', summary.reviewedClips != null ? summary.reviewedClips : '0'],
+          ['Pass Rate', formatPercent(summary.passRate || 0)],
+          ['Average Code-Switch F1', formatPercent(summary.averageCodeSwitchF1 || 0)],
+          ['Average Diarization MAE', formatSeconds(summary.averageDiarizationMAE || 0)],
+          ['Average Cue Length', formatSeconds(summary.averageCueLengthSec || 0)],
+          ['Average Cue Δ', formatSeconds(summary.averageCueDiffSec || 0)],
+          ['Translation Completeness', formatPercent(summary.translationCompletenessAvg || 0)],
+          ['Translation Char Coverage', formatPercent(summary.translationCharRatioAvg || 0)],
+          ['Average Time Spent', formatSeconds(summary.averageTimeSpentSec || 0)]
+        ];
+        summaryBody.innerHTML = '';
+        rows.forEach(([label, value])=>{
+          const tr = document.createElement('tr');
+          const th = document.createElement('th');
+          th.scope = 'row';
+          th.textContent = label;
+          const td = document.createElement('td');
+          td.textContent = value;
+          tr.appendChild(th);
+          tr.appendChild(td);
+          summaryBody.appendChild(tr);
+        });
+        summaryTable.classList.remove('hide');
       }
 
-      // Diarization MAE (sec): lower is better; invert by range
-      const maeA = Number(ma.diarizationMae);
-      const maeB = Number(mb.diarizationMae);
-      if (Number.isFinite(maeA) && Number.isFinite(maeB)) {
-        const invA = clamp01(1 - Math.min(Math.abs(maeA), maxDiar) / maxDiar);
-        const invB = clamp01(1 - Math.min(Math.abs(maeB), maxDiar) / maxDiar);
-        diarizationScores.push((invA + invB) / 2);
-      }
-
-      // Cue delta (sec): lower is better; invert by range
-      const cueA = Number(
-        ma.cueDeltaSec ?? ma.cueDelta ?? ma.cue_delta ?? ma.cue_diff_sec
-      );
-      const cueB = Number(
-        mb.cueDeltaSec ?? mb.cueDelta ?? mb.cue_delta ?? mb.cue_diff_sec
-      );
-      if (Number.isFinite(cueA) && Number.isFinite(cueB)) {
-        const scoreA = clamp01(1 - Math.min(Math.abs(cueA), maxCueDelta) / maxCueDelta);
-        const scoreB = clamp01(1 - Math.min(Math.abs(cueB), maxCueDelta) / maxCueDelta);
-        cueScores.push((scoreA + scoreB) / 2);
-      }
-
-      // Translation completeness [0..1]: closer is better; 1 - abs diff
-      const transA = Number(ma.translationCompleteness);
-      const transB = Number(mb.translationCompleteness);
-      if (Number.isFinite(transA) && Number.isFinite(transB)) {
-        const diff = Math.abs(transA - transB);
-        translationScores.push(clamp01(1 - diff));
-      }
-    });
-
-    const codeSwitchAlpha = average(codeSwitchScores);
-    const diarizationAlpha = average(diarizationScores);
-    const cueAlpha = average(cueScores);
-    const translationAlpha = average(translationScores);
-
-    const components = [codeSwitchAlpha, diarizationAlpha, cueAlpha, translationAlpha].filter(
-      (v) => Number.isFinite(v)
-    );
-    const overallAlpha = components.length ? average(components) : null;
-
-    return {
-      codeSwitchAlpha: codeSwitchAlpha != null ? clamp01(codeSwitchAlpha) : null,
-      diarizationAlpha: diarizationAlpha != null ? clamp01(diarizationAlpha) : null,
-      cueAlpha: cueAlpha != null ? clamp01(cueAlpha) : null,
-      translationAlpha: translationAlpha != null ? clamp01(translationAlpha) : null,
-      overallAlpha: overallAlpha != null ? clamp01(overallAlpha) : null,
-    };
-  }
-
-  function computeIRRSummary(recordsInput) {
-    const data = normalizeRecords(recordsInput != null ? recordsInput : ensureRecords());
-    const clips = data.clips || {};
-    const entries = Object.keys(clips)
-      .map((clipId) => clips[clipId])
-      .filter(Boolean);
-
-    let clipCount = 0;
-    const codeSwitchValues = [];
-    const diarizationValues = [];
-    const cueValues = [];
-    const translationValues = [];
-
-    entries.forEach((clip) => {
-      const annotations = (clip && clip.annotations) || {};
-      const annList = Object.keys(annotations).map((annotatorId) => ({
-        annotatorId,
-        metrics: annotations[annotatorId],
-      }));
-      if (annList.length < 2) return;
-      clipCount += 1;
-      const alpha = computeAlpha(annList);
-      if (alpha.codeSwitchAlpha != null) codeSwitchValues.push(alpha.codeSwitchAlpha);
-      if (alpha.diarizationAlpha != null) diarizationValues.push(alpha.diarizationAlpha);
-      if (alpha.cueAlpha != null) cueValues.push(alpha.cueAlpha);
-      if (alpha.translationAlpha != null) translationValues.push(alpha.translationAlpha);
-    });
-
-    const codeSwitchAlpha =
-      codeSwitchValues.length ? average(codeSwitchValues) : null;
-    const diarizationAlpha =
-      diarizationValues.length ? average(diarizationValues) : null;
-    const cueAlpha = cueValues.length ? average(cueValues) : null;
-    const translationAlpha =
-      translationValues.length ? average(translationValues) : null;
-
-    const components = [codeSwitchAlpha, diarizationAlpha, cueAlpha, translationAlpha].filter(
-      (v) => Number.isFinite(v)
-    );
-    const overallAlpha = components.length ? average(components) : null;
-
-    return {
-      generatedAt: new Date().toISOString(),
-      clipsEvaluated: clipCount,
-      codeSwitchAlpha: codeSwitchAlpha != null ? clamp01(codeSwitchAlpha) : null,
-      diarizationAlpha: diarizationAlpha != null ? clamp01(diarizationAlpha) : null,
-      cueAlpha: cueAlpha != null ? clamp01(cueAlpha) : null,
-      translationAlpha: translationAlpha != null ? clamp01(translationAlpha) : null,
-      overallAlpha: overallAlpha != null ? clamp01(overallAlpha) : null,
-    };
-  }
-
-  function saveIRRSummary(options) {
-    const opts = options || {};
-    const summary =
-      opts.summary || computeIRRSummary(opts.records != null ? opts.records : undefined);
-
-    // Persist to localStorage
-    if (hasLocalStorage()) {
-      try {
-        localStorage.setItem(SUMMARY_KEY, JSON.stringify(summary));
-      } catch (err) {
-        console.warn("IRR: failed to persist summary", err);
-      }
-    }
-
-    // Persist to memory & global
-    memoryStore.summary = clone(summary);
-    global.__IRR_SUMMARY__ = clone(summary);
-
-    // Optional: write to disk if running in Node and path provided
-    if (opts.path) {
-      try {
-        const fs = require("fs");
-        const path = require("path");
-        const targetPath = path.resolve(opts.path);
-        fs.writeFileSync(targetPath, JSON.stringify(summary, null, 2));
-      } catch (err) {
-        console.warn("IRR: unable to write summary to disk", err);
-      }
-    }
-    return summary;
-  }
-
-  function formatCoverageLabel(value) {
-    if (!value || value === 'unknown') return 'Unknown';
-    const text = String(value)
-      .trim()
-      .replace(/[_\s]+/g, ' ')
-      .toLowerCase();
-    return text.replace(/\b([a-z])/g, (match, letter) => letter.toUpperCase());
-  }
-
-  const COVERAGE_QUOTA_TARGETS = {
-    default: 25,
-    byDialectFamily: {},
-    bySubregion: {},
-    byCombination: {},
-  };
-
-  function getCoverageTarget(dialectFamily, subregion) {
-    const comboKey = `${dialectFamily}||${subregion}`;
-    const combinationOverride = COVERAGE_QUOTA_TARGETS.byCombination[comboKey];
-    if (Number.isFinite(combinationOverride)) {
-      return combinationOverride;
-    }
-    const familyOverride = COVERAGE_QUOTA_TARGETS.byDialectFamily[dialectFamily];
-    if (Number.isFinite(familyOverride)) {
-      return familyOverride;
-    }
-    const subregionOverride = COVERAGE_QUOTA_TARGETS.bySubregion[subregion];
-    if (Number.isFinite(subregionOverride)) {
-      return subregionOverride;
-    }
-    return COVERAGE_QUOTA_TARGETS.default;
-  }
-
-  function aggregateCoverageCombinations(summary) {
-    const rowsByKey = {};
-    const heatmap = summary && summary.coverage_heatmap;
-    const totalProfiles = Number(summary && summary.total_profiles) || 0;
-
-    const pushRow = (dialectFamily, subregion, increment) => {
-      const key = `${dialectFamily}||${subregion}`;
-      if (!rowsByKey[key]) {
-        rowsByKey[key] = {
-          dialectFamily,
-          subregion,
-          count: 0,
-        };
-      }
-      rowsByKey[key].count += increment;
-    };
-
-    if (heatmap && typeof heatmap === 'object') {
-      Object.entries(heatmap).forEach(([dialectFamily, subregions]) => {
-        if (!subregions || typeof subregions !== 'object') {
-          return;
-        }
-        Object.entries(subregions).forEach(([subregion, genders]) => {
-          if (!genders || typeof genders !== 'object') {
-            return;
-          }
-          let total = 0;
-          Object.values(genders).forEach((ageBands) => {
-            if (!ageBands || typeof ageBands !== 'object') {
-              return;
-            }
-            Object.values(ageBands).forEach((value) => {
-              const numeric = Number(value);
-              if (Number.isFinite(numeric)) {
-                total += numeric;
+      if(annotatorsTable && annotatorsBody){
+        annotatorsBody.innerHTML = '';
+        const perAnnotator = Array.isArray(report.perAnnotator) ? report.perAnnotator : [];
+        if(perAnnotator.length){
+          perAnnotator.forEach((row)=>{
+            const tr = document.createElement('tr');
+            const cells = [
+              row.annotator_id || 'anonymous',
+              row.clips != null ? row.clips : '0',
+              formatPercent(row.passRate || 0),
+              formatPercent(row.averageCodeSwitchF1 || 0),
+              formatSeconds(row.averageDiarizationMAE || 0),
+              formatSeconds(row.averageCueDiffSec || 0),
+              formatPercent(row.translationCompletenessAvg || 0),
+              formatPercent(row.translationCharRatioAvg || 0)
+            ];
+            cells.forEach((value, idx)=>{
+              if(idx === 0){
+                const th = document.createElement('th');
+                th.scope = 'row';
+                th.textContent = value;
+                tr.appendChild(th);
+              } else {
+                const td = document.createElement('td');
+                td.textContent = value;
+                tr.appendChild(td);
               }
             });
+            annotatorsBody.appendChild(tr);
           });
-          pushRow(dialectFamily, subregion, total);
-        });
-      });
-    } else if (Array.isArray(summary && summary.coverage)) {
-      summary.coverage.forEach((entry) => {
-        if (!entry) return;
-        const dialectFamily = entry.dialect_family || 'unknown';
-        const subregion = entry.dialect_subregion || 'unknown';
-        const count = Number(entry.count) || 0;
-        pushRow(dialectFamily, subregion, count);
-      });
-    }
-
-    const rows = Object.values(rowsByKey).map((row) => {
-      const target = getCoverageTarget(row.dialectFamily, row.subregion);
-      const progressRatio = target > 0 ? row.count / target : 0;
-      const proportion = totalProfiles > 0 ? row.count / totalProfiles : 0;
-      const status = progressRatio >= 1 ? 'met' : progressRatio >= 0.6 ? 'partial' : 'low';
-      return {
-        ...row,
-        target,
-        progressRatio,
-        proportion,
-        status,
-      };
-    });
-
-    rows.sort(
-      (a, b) =>
-        a.dialectFamily.localeCompare(b.dialectFamily) ||
-        a.subregion.localeCompare(b.subregion)
-    );
-
-    return rows;
-  }
-
-  function describeCoverageCombination(row) {
-    return `${formatCoverageLabel(row.dialectFamily)} / ${formatCoverageLabel(row.subregion)}`;
-  }
-
-  function ensureCoverageContainer() {
-    if (typeof document === 'undefined') return null;
-    let container = document.getElementById('coverageSummary');
-    if (!container) {
-      container = document.createElement('section');
-      container.id = 'coverageSummary';
-      container.className = 'coverage-summary';
-      if (document.body) {
-        const tiles = document.getElementById(QA_TILE_CONTAINER_ID);
-        if (tiles && tiles.parentNode === document.body) {
-          document.body.insertBefore(container, tiles.nextSibling);
+          annotatorsTable.classList.remove('hide');
         } else {
-          document.body.insertBefore(container, document.body.firstChild || null);
+          annotatorsTable.classList.add('hide');
         }
       }
-    }
-    return container;
-  }
 
-  function injectCoverageStyles() {
-    if (typeof document === 'undefined') return;
-    if (document.getElementById('coverageSummaryStyles')) return;
-    const style = document.createElement('style');
-    style.id = 'coverageSummaryStyles';
-    style.textContent = `
-      .coverage-summary { max-width: 920px; margin: 1.5rem auto; padding: 1rem; background: var(--card, #fff); border-radius: 12px; border: 1px solid var(--border, #dcdcdc); box-shadow: 0 4px 24px rgba(0, 0, 0, 0.04); }
-      .coverage-summary h2 { margin: 0 0 .75rem 0; font-size: 1.25rem; }
-      .coverage-summary__meta { margin: 0 0 1rem 0; color: var(--muted, #555); }
-      .coverage-summary__insight { margin: 0 0 .75rem 0; font-size: .9rem; color: var(--muted, #555); }
-      .coverage-summary__legend { margin: 0 0 1rem 0; display: flex; flex-wrap: wrap; gap: .5rem 1rem; font-size: .8rem; color: var(--muted, #555); }
-      .coverage-summary__legend-item { display: inline-flex; align-items: center; gap: .35rem; }
-      .coverage-summary__legend-swatch { width: 12px; height: 12px; border-radius: 999px; display: inline-block; }
-      .coverage-summary__legend-swatch--met { background: #2e7d32; }
-      .coverage-summary__legend-swatch--partial { background: #f9a825; }
-      .coverage-summary__legend-swatch--low { background: #d32f2f; }
-      .coverage-summary__table { width: 100%; border-collapse: collapse; font-size: .95rem; }
-      .coverage-summary__table th, .coverage-summary__table td { padding: .5rem .65rem; border: 1px solid var(--border, #e2e2e2); text-align: left; vertical-align: top; }
-      .coverage-summary__table th { background: rgba(0,0,0,0.04); font-weight: 600; }
-      .coverage-summary__cell--count { font-weight: 600; }
-      .coverage-summary__row--met .coverage-summary__cell--count { color: #2e7d32; }
-      .coverage-summary__row--partial .coverage-summary__cell--count { color: #f9a825; }
-      .coverage-summary__row--low .coverage-summary__cell--count { color: #d32f2f; }
-      .coverage-summary__progress { position: relative; background: rgba(0,0,0,0.08); border-radius: 999px; height: 12px; overflow: hidden; }
-      .coverage-summary__progress-fill { height: 100%; border-radius: inherit; background: var(--accent, #2b7cff); transition: width .3s ease; }
-      .coverage-summary__row--met .coverage-summary__progress-fill { background: #2e7d32; }
-      .coverage-summary__row--partial .coverage-summary__progress-fill { background: #f9a825; }
-      .coverage-summary__row--low .coverage-summary__progress-fill { background: #d32f2f; }
-      .coverage-summary__progress-label { display: block; margin-top: .25rem; font-size: .75rem; color: var(--muted, #666); }
-      .coverage-summary__empty { margin: 0; color: var(--muted, #666); }
-    `;
-    (document.head || document.body || document.documentElement).appendChild(style);
-  }
-
-  function renderCoverageTable(summary) {
-    const container = ensureCoverageContainer();
-    if (!container) return;
-    injectCoverageStyles();
-    container.innerHTML = '';
-
-    const heading = document.createElement('h2');
-    heading.textContent = 'Coverage summary';
-    container.appendChild(heading);
-
-    const meta = document.createElement('p');
-    meta.className = 'coverage-summary__meta';
-    const total = Number(summary && summary.total_profiles);
-    meta.textContent = Number.isFinite(total)
-      ? `Total speaker profiles: ${total}`
-      : 'Coverage summary by speaker profile attributes.';
-    container.appendChild(meta);
-
-    const rows = aggregateCoverageCombinations(summary);
-    if (!rows.length) {
-      const empty = document.createElement('p');
-      empty.className = 'coverage-summary__empty';
-      empty.textContent = 'No coverage information available.';
-      container.appendChild(empty);
-      return;
-    }
-
-    const insight = document.createElement('p');
-    insight.className = 'coverage-summary__insight';
-    const met = rows.filter((row) => row.status === 'met');
-    const partial = rows.filter((row) => row.status === 'partial');
-    const low = rows.filter((row) => row.status === 'low');
-    const listToText = (list) =>
-      list.length ? list.slice(0, 3).map((row) => describeCoverageCombination(row)).join(', ') : 'None';
-    const parts = [
-      `Well-covered: ${listToText(met)}.`,
-      partial.length ? `Building coverage: ${listToText(partial)}.` : '',
-      `Needs focus: ${listToText(low)}.`,
-    ].filter(Boolean);
-    insight.textContent = parts.join(' ');
-    container.appendChild(insight);
-
-    const legend = document.createElement('div');
-    legend.className = 'coverage-summary__legend';
-    [
-      { key: 'met', label: 'Target met' },
-      { key: 'partial', label: 'Approaching target' },
-      { key: 'low', label: 'Needs attention' },
-    ].forEach((entry) => {
-      const item = document.createElement('span');
-      item.className = 'coverage-summary__legend-item';
-      const swatch = document.createElement('span');
-      swatch.className = `coverage-summary__legend-swatch coverage-summary__legend-swatch--${entry.key}`;
-      const text = document.createElement('span');
-      text.textContent = entry.label;
-      item.appendChild(swatch);
-      item.appendChild(text);
-      legend.appendChild(item);
-    });
-    container.appendChild(legend);
-
-    const table = document.createElement('table');
-    table.className = 'coverage-summary__table';
-
-    const thead = document.createElement('thead');
-    const headerRow = document.createElement('tr');
-    [
-      'Dialect family',
-      'Dialect subregion',
-      'Count',
-      'Target',
-      'Progress toward quota',
-    ].forEach((label) => {
-      const cell = document.createElement('th');
-      cell.textContent = label;
-      headerRow.appendChild(cell);
-    });
-    thead.appendChild(headerRow);
-    table.appendChild(thead);
-
-    const tbody = document.createElement('tbody');
-    rows.forEach((row) => {
-      const tr = document.createElement('tr');
-      tr.className = `coverage-summary__row coverage-summary__row--${row.status}`;
-
-      const familyCell = document.createElement('td');
-      familyCell.textContent = formatCoverageLabel(row.dialectFamily);
-      tr.appendChild(familyCell);
-
-      const subregionCell = document.createElement('td');
-      subregionCell.textContent = formatCoverageLabel(row.subregion);
-      tr.appendChild(subregionCell);
-
-      const countCell = document.createElement('td');
-      countCell.className = 'coverage-summary__cell coverage-summary__cell--count';
-      countCell.textContent = `${row.count}`;
-      tr.appendChild(countCell);
-
-      const targetCell = document.createElement('td');
-      targetCell.textContent = Number.isFinite(row.target) ? `${Math.round(row.target)}` : '—';
-      tr.appendChild(targetCell);
-
-      const progressCell = document.createElement('td');
-      progressCell.className = 'coverage-summary__cell coverage-summary__cell--progress';
-      const progress = document.createElement('div');
-      progress.className = 'coverage-summary__progress';
-      const progressFill = document.createElement('div');
-      progressFill.className = 'coverage-summary__progress-fill';
-      const progressPercent = Math.max(0, Math.min(row.progressRatio, 1));
-      progressFill.style.width = `${(progressPercent * 100).toFixed(1)}%`;
-      progress.appendChild(progressFill);
-      progressCell.appendChild(progress);
-
-      const progressLabel = document.createElement('span');
-      progressLabel.className = 'coverage-summary__progress-label';
-      const targetPercent = row.progressRatio * 100;
-      const datasetPercent = row.proportion * 100;
-      const targetText = Number.isFinite(targetPercent)
-        ? `${targetPercent.toFixed(targetPercent >= 100 ? 0 : 1)}% of target`
-        : 'Target unavailable';
-      const datasetText = Number.isFinite(datasetPercent)
-        ? `${datasetPercent.toFixed(datasetPercent >= 10 ? 1 : 2)}% of dataset`
-        : '';
-      progressLabel.textContent = datasetText ? `${targetText} • ${datasetText}` : targetText;
-      progressCell.appendChild(progressLabel);
-
-      tr.appendChild(progressCell);
-      tbody.appendChild(tr);
-    });
-    table.appendChild(tbody);
-    container.appendChild(table);
-  }
-
-  const QA_TILE_CONTAINER_ID = 'qaDashboardTiles';
-  const QA_TILE_PROVENANCE_ID = 'qaTileProvenanceComplete';
-
-  function injectDashboardTilesStyles() {
-    if (typeof document === 'undefined') return;
-    if (document.getElementById('qaDashboardTilesStyles')) return;
-    const style = document.createElement('style');
-    style.id = 'qaDashboardTilesStyles';
-    style.textContent = `
-      .qa-dashboard-tiles { max-width: 960px; margin: 1.5rem auto 1rem; padding: 0 1rem 1.5rem; }
-      .qa-dashboard-tiles__heading { margin: 0 0 1rem 0; font-size: 1.35rem; }
-      .qa-dashboard-tiles__grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-      .qa-dashboard-tile { background: var(--card, #fff); border-radius: 12px; border: 1px solid var(--border, #dcdcdc); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.05); padding: 1rem 1.2rem; display: flex; flex-direction: column; gap: 0.35rem; }
-      .qa-dashboard-tile__label { margin: 0; font-size: .9rem; color: var(--muted, #555); }
-      .qa-dashboard-tile__value { margin: 0; font-size: 2.25rem; font-weight: 600; color: var(--accent, #2b7cff); }
-      .qa-dashboard-tile__caption { margin: 0; font-size: .8rem; color: var(--muted, #777); }
-      @media (max-width: 540px) {
-        .qa-dashboard-tiles { padding: 0 .75rem 1rem; }
-        .qa-dashboard-tile__value { font-size: 1.9rem; }
-      }
-    `;
-    (document.head || document.body || document.documentElement).appendChild(style);
-  }
-
-  function ensureDashboardTilesContainer() {
-    if (typeof document === 'undefined') return null;
-    let container = document.getElementById(QA_TILE_CONTAINER_ID);
-    if (!container) {
-      container = document.createElement('section');
-      container.id = QA_TILE_CONTAINER_ID;
-      container.className = 'qa-dashboard-tiles';
-
-      const heading = document.createElement('h2');
-      heading.className = 'qa-dashboard-tiles__heading';
-      heading.textContent = 'QA Snapshot';
-      container.appendChild(heading);
-
-      const grid = document.createElement('div');
-      grid.className = 'qa-dashboard-tiles__grid';
-      container.appendChild(grid);
-
-      const coverage = document.getElementById('coverageSummary');
-      if (coverage && coverage.parentNode) {
-        coverage.parentNode.insertBefore(container, coverage);
-      } else if (document.body) {
-        document.body.insertBefore(container, document.body.firstChild || null);
-      }
-    }
-    return container;
-  }
-
-  function extractProvenanceProportion(summary) {
-    if (!summary || typeof summary !== 'object') return null;
-    const nested = summary.provenance_complete;
-    if (nested && typeof nested === 'object') {
-      const nestedProp = toFinite(nested.proportion);
-      if (nestedProp != null) {
-        return clamp01(nestedProp);
-      }
-      const nestedPct = toFinite(nested.percentage);
-      if (nestedPct != null) {
-        return clamp01(nestedPct / 100);
-      }
-    }
-    const directProp = toFinite(summary.provenance_complete_proportion);
-    if (directProp != null) {
-      return clamp01(directProp);
-    }
-    const directPct = toFinite(summary.provenance_complete_percentage);
-    if (directPct != null) {
-      return clamp01(directPct / 100);
-    }
-    return null;
-  }
-
-  function getProvenanceCompleteCount(summary) {
-    if (!summary || typeof summary !== 'object') return null;
-    const nested = summary.provenance_complete;
-    if (nested && typeof nested === 'object') {
-      const value = toFinite(nested.count);
-      if (value != null) return Math.round(value);
-    }
-    const direct = toFinite(summary.provenance_complete_count);
-    if (direct != null) return Math.round(direct);
-    return null;
-  }
-
-  function getTotalClipCount(summary) {
-    if (!summary || typeof summary !== 'object') return null;
-    const total = toFinite(
-      summary.total_clips ??
-        summary.clip_count ??
-        summary.totalClips ??
-        (summary.dataset && summary.dataset.total_clips)
-    );
-    if (total != null) return Math.round(total);
-    return null;
-  }
-
-  function renderProvenanceTile(summary) {
-    if (typeof document === 'undefined') return;
-    injectDashboardTilesStyles();
-    const container = ensureDashboardTilesContainer();
-    if (!container) return;
-
-    let grid = container.querySelector('.qa-dashboard-tiles__grid');
-    if (!grid) {
-      grid = document.createElement('div');
-      grid.className = 'qa-dashboard-tiles__grid';
-      container.appendChild(grid);
-    }
-
-    let tile = document.getElementById(QA_TILE_PROVENANCE_ID);
-    if (!tile) {
-      tile = document.createElement('article');
-      tile.id = QA_TILE_PROVENANCE_ID;
-      tile.className = 'qa-dashboard-tile';
-
-      const label = document.createElement('p');
-      label.className = 'qa-dashboard-tile__label';
-      tile.appendChild(label);
-
-      const value = document.createElement('p');
-      value.className = 'qa-dashboard-tile__value';
-      tile.appendChild(value);
-
-      const caption = document.createElement('p');
-      caption.className = 'qa-dashboard-tile__caption';
-      tile.appendChild(caption);
-
-      grid.appendChild(tile);
-    }
-
-    const labelEl = tile.querySelector('.qa-dashboard-tile__label');
-    const valueEl = tile.querySelector('.qa-dashboard-tile__value');
-    const captionEl = tile.querySelector('.qa-dashboard-tile__caption');
-
-    if (labelEl) {
-      labelEl.textContent = '% clips with complete provenance';
-    }
-
-    if (summary === null) {
-      if (valueEl) valueEl.textContent = '—';
-      if (captionEl) captionEl.textContent = 'Loading training summary…';
-      return;
-    }
-
-    if (!summary || typeof summary !== 'object') {
-      if (valueEl) valueEl.textContent = '—';
-      if (captionEl) captionEl.textContent = 'Training summary unavailable';
-      return;
-    }
-
-    const proportion = extractProvenanceProportion(summary);
-    if (Number.isFinite(proportion)) {
-      const percentValue = proportion * 100;
-      const decimals = percentValue >= 99.95 ? 0 : percentValue >= 10 ? 1 : 2;
-      if (valueEl) valueEl.textContent = `${percentValue.toFixed(decimals)}%`;
-
-      const completeCount = getProvenanceCompleteCount(summary);
-      const totalCount = getTotalClipCount(summary);
-      if (
-        Number.isFinite(completeCount) &&
-        Number.isFinite(totalCount) &&
-        totalCount >= 0
-      ) {
-        if (captionEl) captionEl.textContent = `${completeCount} of ${totalCount} clips`;
-      } else if (captionEl) {
-        captionEl.textContent = '';
-      }
-    } else {
-      if (valueEl) valueEl.textContent = '—';
-      if (captionEl) captionEl.textContent = 'Provenance stats unavailable';
-    }
-  }
-
-  function fetchTrainingSummary() {
-    if (typeof fetch !== 'function') {
-      return Promise.resolve(null);
-    }
-    return fetch('training_data_summary.json', { cache: 'no-store' })
-      .then((response) => {
-        if (!response.ok) return null;
-        return response.json().catch(() => null);
-      })
-      .catch(() => null);
-  }
-
-  function fetchCoverageSummary() {
-    if (typeof fetch !== 'function') {
-      return Promise.resolve(null);
-    }
-    return fetch('coverage_summary.json', { cache: 'no-store' })
-      .then((response) => {
-        if (!response.ok) return null;
-        return response.json().catch(() => null);
-      })
-      .catch(() => null);
-  }
-
-  if (typeof window !== 'undefined') {
-    window.addEventListener('DOMContentLoaded', () => {
-      renderProvenanceTile(null);
-      fetchTrainingSummary()
-        .then((summary) => {
-          if (summary) {
-            renderProvenanceTile(summary);
-          } else {
-            renderProvenanceTile(undefined);
-          }
-        })
-        .catch(() => renderProvenanceTile(undefined));
-
-      fetchCoverageSummary().then((summary) => {
-        if (summary) {
-          renderCoverageTable(summary);
+      if(clipsTable && clipsBody){
+        clipsBody.innerHTML = '';
+        if(Array.isArray(report.clips) && report.clips.length){
+          report.clips.forEach((clip, index)=>{
+            const tr = document.createElement('tr');
+            const clipCell = document.createElement('th');
+            clipCell.scope = 'row';
+            clipCell.textContent = clip.title || clip.clipId || `Clip ${index + 1}`;
+            const langCell = document.createElement('td');
+            langCell.textContent = clip.language || 'unknown';
+            const statusCell = document.createElement('td');
+            statusCell.textContent = (clip.qaStatus || 'pending').toString().toUpperCase();
+            const codeSwitchCell = document.createElement('td');
+            const diarCell = document.createElement('td');
+            const cueCell = document.createElement('td');
+            const translationCell = document.createElement('td');
+            const translationCharCell = document.createElement('td');
+            const timeCell = document.createElement('td');
+            const metrics = clip.metrics || {};
+            codeSwitchCell.textContent = typeof metrics.codeswitch_f1 === 'number' ? formatPercent(metrics.codeswitch_f1, 1) : 'N/A';
+            diarCell.textContent = typeof metrics.diarization_mae === 'number' ? formatSeconds(metrics.diarization_mae, 2) : 'N/A';
+            cueCell.textContent = typeof metrics.cue_diff_sec === 'number' ? formatSeconds(metrics.cue_diff_sec, 2) : 'N/A';
+            translationCell.textContent = typeof metrics.translation_completeness === 'number' ? formatPercent(metrics.translation_completeness, 1) : 'N/A';
+            translationCharCell.textContent = typeof metrics.translation_char_ratio === 'number' ? formatPercent(metrics.translation_char_ratio, 1) : 'N/A';
+            timeCell.textContent = typeof clip.timeSpentSec === 'number' ? formatSeconds(clip.timeSpentSec, 0) : 'N/A';
+            tr.appendChild(clipCell);
+            tr.appendChild(langCell);
+            tr.appendChild(statusCell);
+            tr.appendChild(codeSwitchCell);
+            tr.appendChild(diarCell);
+            tr.appendChild(cueCell);
+            tr.appendChild(translationCell);
+            tr.appendChild(translationCharCell);
+            tr.appendChild(timeCell);
+            clipsBody.appendChild(tr);
+          });
+          clipsTable.classList.remove('hide');
         } else {
-          const container = ensureCoverageContainer();
-          if (container) {
-            injectCoverageStyles();
-            container.innerHTML = '';
-            const heading = document.createElement('h2');
-            heading.textContent = 'Coverage summary';
-            container.appendChild(heading);
-            const empty = document.createElement('p');
-            empty.className = 'coverage-summary__empty';
-            empty.textContent = 'Coverage summary not available.';
-            container.appendChild(empty);
-          }
+          clipsTable.classList.add('hide');
         }
-      });
-    });
-  }
-
-  // --- Public API ------------------------------------------------------------
-  const api = {
-    recordAnnotation,
-    computeAlpha,
-    computeIRRSummary,
-    saveIRRSummary,
-    // Legacy/diagnostic helpers
-    _loadRecords: () => clone(ensureRecords()),
-    _saveRecords: (records) => persistRecords(records),
-    _internal: {
-      normalizeRecords,
-      ensureRecords,
-      sanitizeMetrics,
-    },
-  };
-
-  if (typeof module !== "undefined" && module.exports) {
-    module.exports = api;
-  } else {
-    global.IRR = api;
-  }
-})(typeof window !== "undefined" ? window : globalThis);
+      }
+    })();
+  </script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/public/sw.js').catch(()=>{});
+    }
+  </script>
+</body>
+</html>
