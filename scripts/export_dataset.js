@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { parseArgs } = require('util');
+const { computeCoverageSummary } = require('./compute_coverage');
 
 function listSubdirs(root) {
   if (!fs.existsSync(root)) {
@@ -352,6 +353,7 @@ function main() {
 
   const datasetJsonlPath = path.join(datasetRoot, 'dataset.jsonl');
   const qaSummaryPath = path.join(datasetRoot, 'qa_summary.json');
+  const coverageSummaryPath = path.join(datasetRoot, 'coverage_summary.json');
   const datasetCardPath = path.join(datasetRoot, 'dataset_card.md');
   const trainingSummaryPath = path.join(datasetRoot, 'training_data_summary.json');
   const exportLogPath = path.join(datasetRoot, 'export_log.txt');
@@ -371,6 +373,13 @@ function main() {
     std_cue_delta_sec: datasetRecords.length ? std(qaGlobal.cueDeltaValues) : 0,
   };
   fs.writeFileSync(qaSummaryPath, JSON.stringify(qaSummary, null, 2));
+
+  try {
+    const coverageSummary = computeCoverageSummary({ datasetPath: datasetJsonlPath });
+    fs.writeFileSync(coverageSummaryPath, JSON.stringify(coverageSummary, null, 2));
+  } catch (err) {
+    console.warn('Warning: failed to compute coverage summary', err);
+  }
 
   const durationHours = totalDurationSec / 3600;
   const splitLines = Object.entries(splitCounts)
