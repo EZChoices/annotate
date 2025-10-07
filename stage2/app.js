@@ -9,7 +9,8 @@ const EAQ = {
     cueMax: 6.0,
     csMinSec: 0.4,
     backoffMs: [1000,2000,5000,10000,30000],
-    emotionMinSec: 1.5
+    emotionMinSec: 1.5,
+    safetyMinSec: 1.5
   },
   state: {
     annotator: null,
@@ -136,7 +137,8 @@ const SAFETY_TYPE_SET = new Set(SAFETY_EVENT_TYPES.map(opt=> opt.id));
 
 const EMOTION_MIN_DURATION = EAQ.SPEC.emotionMinSec || 1.5;
 const EMOTION_DRAG_MAX_DELTA = 0.2;
-const SAFETY_DEFAULT_DURATION = 0.5;
+const SAFETY_MIN_DURATION = EAQ.SPEC.safetyMinSec || 1.5;
+const SAFETY_DEFAULT_DURATION = SAFETY_MIN_DURATION;
 const SAFETY_DRAG_MAX_DELTA = 0.5;
 
 const MANIFEST_STORAGE_KEY = 'ea_stage2_manifest';
@@ -1441,6 +1443,12 @@ function validateAnnotation(){
     const duration = Math.max(0, evt.endSec - evt.startSec);
     if(duration <= 0){
       pushIssue(report.errors, `Safety event #${idx+1} has invalid timing.`);
+      return;
+    }
+    if(duration < SAFETY_MIN_DURATION - 0.01){
+      pushIssue(report.errors, `Safety event #${idx+1} is ${duration.toFixed(2)}s (< ${SAFETY_MIN_DURATION.toFixed(2)}s).`);
+    } else if(duration < SAFETY_MIN_DURATION){
+      pushIssue(report.warnings, `Safety event #${idx+1} is ${duration.toFixed(2)}s (min ${SAFETY_MIN_DURATION.toFixed(2)}s).`);
     }
     if(idx>0){
       const prev = safetyEvents[idx-1];
@@ -3321,7 +3329,8 @@ function cloneSafetyEvents(events){
     const startCandidate = Number.isFinite(evt.startSec) ? evt.startSec : (Number.isFinite(evt.start) ? evt.start : 0);
     const normStart = Math.max(0, startCandidate || 0);
     const endCandidate = Number.isFinite(evt.endSec) ? evt.endSec : (Number.isFinite(evt.end) ? evt.end : normStart + SAFETY_DEFAULT_DURATION);
-    const duration = Math.max(0.05, endCandidate - normStart);
+    const rawDuration = Math.max(0, endCandidate - normStart);
+    const duration = Math.max(SAFETY_MIN_DURATION, rawDuration || SAFETY_DEFAULT_DURATION);
     const type = normalizeSafetyType(evt.type || evt.label || evt.text);
     return {
       startSec: normStart,
@@ -3382,7 +3391,7 @@ function insertSafetyEvent(existingEvents, candidate){
   const events = cloneSafetyEvents(existingEvents);
   const startCandidate = Number.isFinite(candidate.startSec) ? candidate.startSec : (Number.isFinite(candidate.start) ? candidate.start : 0);
   const durationCandidate = Number.isFinite(candidate.duration) ? candidate.duration : ((Number.isFinite(candidate.endSec) ? candidate.endSec : (Number.isFinite(candidate.end) ? candidate.end : startCandidate + SAFETY_DEFAULT_DURATION)) - startCandidate);
-  const duration = Math.max(0.05, durationCandidate || SAFETY_DEFAULT_DURATION);
+  const duration = Math.max(SAFETY_MIN_DURATION, durationCandidate || SAFETY_DEFAULT_DURATION);
   let start = Math.max(0, startCandidate || 0);
   const totalDuration = Math.max(estimateMediaDuration() || 0, start + duration);
   const insertIndex = events.findIndex(evt=> evt.startSec > start);
@@ -3502,7 +3511,8 @@ function parseSafetyEventsVTT(text){
     const cues = VTT.parse(text||'');
     cues.forEach(cue=>{
       const start = Math.max(0, cue.start || 0);
-      const end = Math.max(start, cue.end || (start + SAFETY_DEFAULT_DURATION));
+      const rawEnd = Math.max(start, cue.end || (start + SAFETY_DEFAULT_DURATION));
+      const end = Math.max(start + SAFETY_MIN_DURATION, rawEnd);
       let type = (cue.text || '').trim();
       try{
         const parsed = JSON.parse(type);
@@ -3871,7 +3881,7 @@ function beginSafetyDrag(index, ev){
   if(!lane) return;
   const rect = lane.getBoundingClientRect();
   const event = events[index];
-  const duration = Math.max(0.05, event.endSec - event.startSec);
+  const duration = Math.max(SAFETY_MIN_DURATION, event.endSec - event.startSec);
   const pointerTime = rect.width > 0 ? ((ev.clientX - rect.left) / rect.width) * Math.max(estimateMediaDuration() || 0, event.endSec) : event.startSec;
   EAQ.state.safetyDrag = {
     index,
@@ -3899,7 +3909,7 @@ function onSafetyDragMove(ev){
   const evt = events[drag.index];
   if(!evt) return;
   const duration = Math.max(estimateMediaDuration() || 0, events[events.length-1].endSec || 0);
-  const safeDuration = duration > 0 ? duration : Math.max(evt.endSec, SAFETY_DEFAULT_DURATION);
+  const safeDuration = duration > 0 ? duration : Math.max(evt.endSec, SAFETY_MIN_DURATION);
   const x = ev.clientX || (ev.touches && ev.touches[0] ? ev.touches[0].clientX : rect.left);
   const ratio = rect.width > 0 ? Math.max(0, Math.min(1, (x - rect.left) / rect.width)) : 0;
   let newStart = ratio * safeDuration - (drag.offset || 0);
@@ -3998,4 +4008,33 @@ function deleteSelectedSafety(){
   if(idx < 0 || idx >= events.length) return;
   events.splice(idx, 1);
   commitSafetyEvents(events, { pushHistory: true, selectIndex: Math.min(idx, events.length-1) });
+}
+
+function computeEmotionCoverageCounts(spans){
+  const counts = {};
+  EMOTION_OPTIONS.forEach(opt=>{ counts[opt.id] = 0; });
+  (Array.isArray(spans) ? spans : []).forEach(span=>{
+    const label = normalizeEmotionLabel(span && (span.label || span.text));
+    if(!(label in counts)){ counts[label] = 0; }
+    counts[label] += 1;
+  });
+  return counts;
+}
+
+function computeSafetyCoverageCounts(events){
+  const counts = {};
+  SAFETY_EVENT_TYPES.forEach(opt=>{ counts[opt.id] = 0; });
+  (Array.isArray(events) ? events : []).forEach(evt=>{
+    const type = normalizeSafetyType(evt && (evt.type || evt.label || evt.text));
+    if(!(type in counts)){ counts[type] = 0; }
+    counts[type] += 1;
+  });
+  return counts;
+}
+
+if(typeof window !== 'undefined'){
+  window.Stage2Coverage = Object.assign({}, window.Stage2Coverage, {
+    computeEmotionCoverageCounts,
+    computeSafetyCoverageCounts
+  });
 }
