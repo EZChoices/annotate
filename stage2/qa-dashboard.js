@@ -34,6 +34,7 @@
   let irrSummaryState = null;
   let irrTrendState = [];
   let doublePassState = null;
+  let routingConfigState = null;
   const disagreementsState = {
     entries: [],
     cells: [],
@@ -52,6 +53,17 @@
     listEmpty: null,
     hint: null,
   };
+
+  const ROUTING_CONFIG_KEYS = [
+    'p_base',
+    'coverage_boost_threshold',
+    'coverage_boost_factor',
+    'qa_boost_f1_threshold',
+    'qa_boost_cue_in_bounds_threshold',
+    'qa_boost_factor',
+    'p_max',
+    'annotator_daily_cap',
+  ];
 
   function clone(obj) {
     return obj ? JSON.parse(JSON.stringify(obj)) : obj;
@@ -78,6 +90,32 @@
     if (value == null) return null;
     const num = typeof value === "string" ? parseFloat(value) : Number(value);
     return Number.isFinite(num) ? num : null;
+  }
+
+  function normalizeProbability(value) {
+    const numeric = toFinite(value);
+    if (!Number.isFinite(numeric)) return null;
+    if (numeric > 1) return clamp01(numeric / 100);
+    if (numeric < 0) return 0;
+    return clamp01(numeric);
+  }
+
+  function formatProbabilityPercent(value) {
+    const normalized = normalizeProbability(value);
+    if (normalized == null) return null;
+    return formatPercentMetric(normalized);
+  }
+
+  function formatMultiplier(value) {
+    const numeric = toFinite(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return null;
+    const decimals = numeric >= 10 ? 0 : numeric >= 2 ? 1 : 2;
+    const text = numeric
+      .toFixed(decimals)
+      .replace(/\.0+$/, "")
+      .replace(/0+$/, "")
+      .replace(/\.$/, "");
+    return `×${text}`;
   }
 
   // Normalize arbitrary metric shapes to a canonical metric object
@@ -2541,14 +2579,87 @@
     return `Updated ${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   }
 
+  const IRR_TILE_BASE_TOOLTIP =
+    'Krippendorff α thresholds: ≥0.67 good, 0.60–0.67 caution, <0.60 investigate.';
+
+  function normalizeRoutingConfig(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const source =
+      raw && typeof raw === 'object' && raw.routing && typeof raw.routing === 'object'
+        ? raw.routing
+        : raw;
+    if (!source || typeof source !== 'object') return null;
+    const normalized = {};
+    ROUTING_CONFIG_KEYS.forEach((key) => {
+      if (Object.prototype.hasOwnProperty.call(source, key)) {
+        normalized[key] = source[key];
+      }
+    });
+    return Object.keys(normalized).length ? normalized : null;
+  }
+
+  function buildRoutingTooltip(config) {
+    const base = IRR_TILE_BASE_TOOLTIP;
+    if (!config || typeof config !== 'object') return base;
+
+    const sections = [];
+    const baseProbText = formatProbabilityPercent(config.p_base);
+    const maxProbText = formatProbabilityPercent(config.p_max);
+    if (baseProbText || maxProbText) {
+      const parts = [];
+      if (baseProbText) parts.push(`base ${baseProbText}`);
+      if (maxProbText) parts.push(`cap ${maxProbText}`);
+      if (parts.length) sections.push(`Double-pass routing: ${parts.join(', ')}`);
+    }
+
+    const coverageThresholdText = formatProbabilityPercent(config.coverage_boost_threshold);
+    const coverageFactorText = formatMultiplier(config.coverage_boost_factor);
+    if (coverageThresholdText) {
+      if (coverageFactorText) {
+        sections.push(`Coverage below ${coverageThresholdText} ${coverageFactorText}`);
+      } else {
+        sections.push(`Coverage below ${coverageThresholdText} increases probability`);
+      }
+    }
+
+    const qaConditions = [];
+    const f1Threshold = normalizeProbability(config.qa_boost_f1_threshold);
+    if (Number.isFinite(f1Threshold)) {
+      qaConditions.push(`F1 < ${f1Threshold.toFixed(2)}`);
+    }
+    const cuesThresholdText = formatProbabilityPercent(config.qa_boost_cue_in_bounds_threshold);
+    if (cuesThresholdText) qaConditions.push(`cues < ${cuesThresholdText}`);
+    if (qaConditions.length) {
+      const qaFactorText = formatMultiplier(config.qa_boost_factor);
+      sections.push(
+        `QA boost when ${qaConditions.join(' or ')}${qaFactorText ? ` ${qaFactorText}` : ''}`
+      );
+    }
+
+    const capText = formatProbabilityPercent(config.annotator_daily_cap);
+    if (capText) {
+      sections.push(`Annotator daily cap ${capText}`);
+    }
+
+    if (!sections.length) return base;
+    return `${base}\n\n${sections.join('; ')}.`;
+  }
+
+  function applyIrrTileTooltip(tileElements) {
+    if (!tileElements || !tileElements.tile) return;
+    const tooltip = buildRoutingTooltip(routingConfigState);
+    tileElements.tile.title = tooltip || IRR_TILE_BASE_TOOLTIP;
+  }
+
   function renderIRRTile(summary, trend) {
     const tile = ensureMetricTile(QA_TILE_IRR_ID, {
       href: QA_TILE_LINKS[QA_TILE_IRR_ID],
-      title: 'Krippendorff α thresholds: ≥0.67 good, 0.60–0.67 caution, <0.60 investigate.',
+      title: IRR_TILE_BASE_TOOLTIP,
     });
     if (!tile) return;
     if (tile.labelEl) tile.labelEl.textContent = 'Krippendorff α (global)';
     tile.tile.setAttribute('data-qa-irr', 'true');
+    applyIrrTileTooltip(tile);
 
     const sparklineContainer = ensureTileSparklineContainer(tile);
     const metaEl = ensureTileMetaElement(tile);
@@ -3299,6 +3410,10 @@
     ]);
   }
 
+  function fetchRoutingConfig() {
+    return fetchJsonFromCandidates(['/api/config', '/config/routing.json']);
+  }
+
   function fetchDisagreementsFeed() {
     return fetchJsonFromCandidates([
       '/api/irr/disagreements',
@@ -3400,6 +3515,16 @@
           renderDiarizationTile(undefined);
           renderTranslationTile(undefined);
           renderProvenanceTile(undefined);
+        });
+
+      fetchRoutingConfig()
+        .then((data) => {
+          routingConfigState = normalizeRoutingConfig(data);
+          renderIRRTile(irrSummaryState, irrTrendState);
+        })
+        .catch(() => {
+          routingConfigState = null;
+          renderIRRTile(irrSummaryState, irrTrendState);
         });
 
       fetchIRRSummary()

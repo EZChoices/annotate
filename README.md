@@ -184,3 +184,7 @@ Audio proxy env:
 - `AUDIO_PROXY_FROM_EXT` (default `.mp4`)
 - `AUDIO_PROXY_EXT` (default `.opus`)
 - `AUDIO_PROXY_BASE` (optional, if you want to build direct audio URLs instead of using the proxy)
+
+## Acceptance Tests
+
+- Update `config/routing.json`, set `p_base` to `0.20`, then reload the Stage 2 dashboard and request a fresh manifest. The share of clips flagged for double-pass review in that manifest should increase relative to the prior run (allowing for randomness).
