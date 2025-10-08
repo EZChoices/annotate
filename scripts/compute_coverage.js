@@ -51,6 +51,211 @@ function normalizeCategory(value) {
   return str.toLowerCase();
 }
 
+function normalizeTargetField(value) {
+  if (value == null) return '*';
+  const str = String(value).trim();
+  if (!str) return '*';
+  if (str === '*') return '*';
+  return str.toLowerCase();
+}
+
+function loadCoverageTargets(filePath) {
+  const resolved = path.resolve(filePath);
+  const fallback = { defaultTarget: 25, rules: [] };
+  if (!fs.existsSync(resolved)) {
+    return fallback;
+  }
+
+  try {
+    const raw = fs.readFileSync(resolved, 'utf-8');
+    const parsed = JSON.parse(raw);
+    const meta = parsed && typeof parsed === 'object' ? parsed.meta || {} : {};
+    const defaultTargetRaw = Number(meta.default_target_per_cell);
+    const defaultTarget =
+      Number.isFinite(defaultTargetRaw) && defaultTargetRaw > 0 ? defaultTargetRaw : fallback.defaultTarget;
+
+    const targetsArray = Array.isArray(parsed && parsed.targets) ? parsed.targets : [];
+    const rules = targetsArray
+      .map((rule) => {
+        if (!rule || typeof rule !== 'object') {
+          return null;
+        }
+        const targetValue = Number(rule.target);
+        if (!Number.isFinite(targetValue) || targetValue <= 0) {
+          return null;
+        }
+        const normalizedRule = {
+          dialect_family: normalizeTargetField(rule.dialect_family),
+          subregion: normalizeTargetField(rule.subregion),
+          apparent_gender: normalizeTargetField(rule.apparent_gender),
+          apparent_age_band: normalizeTargetField(rule.apparent_age_band),
+          target: targetValue,
+        };
+        normalizedRule.specificity = ['dialect_family', 'subregion', 'apparent_gender', 'apparent_age_band'].reduce(
+          (acc, key) => (normalizedRule[key] !== '*' ? acc + 1 : acc),
+          0
+        );
+        return normalizedRule;
+      })
+      .filter(Boolean);
+
+    return { defaultTarget, rules };
+  } catch (err) {
+    throw new Error(`Failed to read coverage targets from ${resolved}: ${err.message}`);
+  }
+}
+
+function normalizeSnapshotValue(value) {
+  if (value == null) return 'unknown';
+  const str = String(value).trim();
+  if (!str) return 'unknown';
+  return str.toLowerCase();
+}
+
+function extractCoverageCells(summary) {
+  if (!summary || typeof summary !== 'object') return [];
+
+  if (Array.isArray(summary.coverage)) {
+    return summary.coverage.map((entry) => ({
+      dialect_family: normalizeSnapshotValue(entry && entry.dialect_family),
+      subregion: normalizeSnapshotValue(entry && entry.dialect_subregion),
+      apparent_gender: normalizeSnapshotValue(entry && entry.gender),
+      apparent_age_band: normalizeSnapshotValue(entry && entry.age_band),
+      count: Number(entry && entry.count) || 0,
+    }));
+  }
+
+  const heatmap = summary.coverage_heatmap;
+  if (!heatmap || typeof heatmap !== 'object') {
+    return [];
+  }
+
+  const cells = [];
+  Object.entries(heatmap).forEach(([dialectFamily, subregions]) => {
+    if (!subregions || typeof subregions !== 'object') return;
+    Object.entries(subregions).forEach(([subregion, genders]) => {
+      if (!genders || typeof genders !== 'object') return;
+      Object.entries(genders).forEach(([gender, ageBands]) => {
+        if (!ageBands || typeof ageBands !== 'object') return;
+        Object.entries(ageBands).forEach(([ageBand, count]) => {
+          cells.push({
+            dialect_family: normalizeSnapshotValue(dialectFamily),
+            subregion: normalizeSnapshotValue(subregion),
+            apparent_gender: normalizeSnapshotValue(gender),
+            apparent_age_band: normalizeSnapshotValue(ageBand),
+            count: Number(count) || 0,
+          });
+        });
+      });
+    });
+  });
+  return cells;
+}
+
+function resolveCellTarget(cell, targetsConfig) {
+  const config = targetsConfig || {};
+  const defaultTarget = Number(config.defaultTarget) > 0 ? Number(config.defaultTarget) : 25;
+  const rules = Array.isArray(config.rules) ? config.rules : [];
+  const normalizedCell = {
+    dialect_family: normalizeSnapshotValue(cell && cell.dialect_family),
+    subregion: normalizeSnapshotValue(cell && cell.subregion),
+    apparent_gender: normalizeSnapshotValue(cell && cell.apparent_gender),
+    apparent_age_band: normalizeSnapshotValue(cell && cell.apparent_age_band),
+  };
+
+  let bestRule = null;
+  rules.forEach((rule) => {
+    if (!rule || typeof rule !== 'object') return;
+    const targetValue = Number(rule.target);
+    if (!Number.isFinite(targetValue) || targetValue <= 0) {
+      return;
+    }
+    const matches = ['dialect_family', 'subregion', 'apparent_gender', 'apparent_age_band'].every((key) => {
+      if (rule[key] === '*') return true;
+      return normalizedCell[key] === rule[key];
+    });
+    if (!matches) return;
+    if (!bestRule || (rule.specificity || 0) > (bestRule.specificity || 0)) {
+      bestRule = rule;
+    }
+  });
+
+  if (bestRule) {
+    return Number(bestRule.target);
+  }
+  return defaultTarget;
+}
+
+function buildCoverageSnapshot(summary, targetsConfig) {
+  const cellsSource = extractCoverageCells(summary);
+  const targets = targetsConfig || { defaultTarget: 25, rules: [] };
+
+  const cells = cellsSource.map((cell) => {
+    const targetValue = resolveCellTarget(cell, targets);
+    const count = Number(cell.count) >= 0 ? Number(cell.count) : 0;
+    const effectiveTarget = Number.isFinite(targetValue) && targetValue > 0 ? targetValue : targets.defaultTarget || 25;
+    const ratio = effectiveTarget > 0 ? count / effectiveTarget : 0;
+    const pctOfTarget = Math.min(1, Math.max(0, ratio));
+    const deficit = effectiveTarget > 0 ? Math.max(0, effectiveTarget - count) : 0;
+
+    return {
+      dialect_family: normalizeSnapshotValue(cell.dialect_family),
+      subregion: normalizeSnapshotValue(cell.subregion),
+      apparent_gender: normalizeSnapshotValue(cell.apparent_gender),
+      apparent_age_band: normalizeSnapshotValue(cell.apparent_age_band),
+      count,
+      target: Number(effectiveTarget.toFixed(4)),
+      pct_of_target: Number(pctOfTarget.toFixed(4)),
+      deficit: Number(deficit.toFixed(4)),
+    };
+  });
+
+  const completeness =
+    cells.length > 0
+      ? Number(
+          (
+            cells.reduce((acc, cell) => acc + (Number(cell.pct_of_target) || 0), 0) /
+            cells.length
+          ).toFixed(4)
+        )
+      : 0;
+
+  const lowestCells = cells
+    .filter((cell) => Number(cell.deficit) > 0)
+    .sort((a, b) => b.deficit - a.deficit || (a.pct_of_target || 0) - (b.pct_of_target || 0))
+    .slice(0, 10)
+    .map((cell) => ({ ...cell }));
+
+  return {
+    generated_at: new Date().toISOString(),
+    default_target_per_cell: Number(targets.defaultTarget) || 25,
+    cells,
+    coverage_completeness: completeness,
+    lowest_cells: lowestCells,
+  };
+}
+
+function resolveCoverageTargetsPath(explicitPath, datasetPath) {
+  if (explicitPath) {
+    return path.resolve(explicitPath);
+  }
+
+  const datasetDir = datasetPath ? path.dirname(path.resolve(datasetPath)) : process.cwd();
+  const candidates = [
+    path.join(datasetDir, 'coverage_targets.json'),
+    path.resolve(__dirname, '..', 'coverage_targets.json'),
+    path.resolve(process.cwd(), 'coverage_targets.json'),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return candidates[0];
+}
+
 function loadProfilesFromFile(record, datasetDir) {
   const files = record && record.files ? record.files : {};
   const profilePathRaw =
@@ -205,6 +410,8 @@ function main() {
     options: {
       dataset: { type: 'string', short: 'd' },
       out: { type: 'string', short: 'o' },
+      targets: { type: 'string', short: 't' },
+      snapshot: { type: 'string', short: 's' },
     },
   });
 
@@ -222,6 +429,21 @@ function main() {
   });
   fs.writeFileSync(outputLocation, JSON.stringify(summary, null, 2));
   console.log(`Coverage summary written to ${outputLocation}`);
+
+  const targetsPath = resolveCoverageTargetsPath(values.targets || values.t, datasetPath);
+  const snapshotLocation = path.resolve(
+    values.snapshot || values.s || path.join(path.dirname(outputLocation), 'coverage_snapshot.json')
+  );
+
+  try {
+    const summaryForSnapshot = JSON.parse(fs.readFileSync(outputLocation, 'utf-8'));
+    const targetsConfig = loadCoverageTargets(targetsPath);
+    const snapshot = buildCoverageSnapshot(summaryForSnapshot, targetsConfig);
+    fs.writeFileSync(snapshotLocation, JSON.stringify(snapshot, null, 2));
+    console.log(`Coverage snapshot written to ${snapshotLocation}`);
+  } catch (err) {
+    console.warn(`Warning: failed to compute coverage snapshot: ${err.message}`);
+  }
 }
 
 if (require.main === module) {
@@ -233,4 +455,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { computeCoverageSummary };
+module.exports = { computeCoverageSummary, buildCoverageSnapshot };
