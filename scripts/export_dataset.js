@@ -7,6 +7,186 @@ const crypto = require('crypto');
 const { parseArgs } = require('util');
 const { computeCoverageSummary } = require('./compute_coverage');
 
+function readJsonFileSafe(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return null;
+  }
+  try {
+    const text = fs.readFileSync(filePath, 'utf-8');
+    return JSON.parse(text);
+  } catch (err) {
+    console.warn(`Warning: failed to parse JSON from ${filePath}`, err);
+    return null;
+  }
+}
+
+function toFiniteNumber(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  if (typeof value === 'object') {
+    if ('value' in value) {
+      return toFiniteNumber(value.value);
+    }
+    if ('mean' in value) {
+      return toFiniteNumber(value.mean);
+    }
+    if ('estimate' in value) {
+      return toFiniteNumber(value.estimate);
+    }
+  }
+  return null;
+}
+
+function sanitizeIrrDataForPublic(data) {
+  if (!data || typeof data !== 'object') {
+    return null;
+  }
+
+  const sanitizeCell = (cell) => {
+    if (!cell || typeof cell !== 'object') {
+      return null;
+    }
+    const alpha =
+      toFiniteNumber(cell.alpha) ??
+      toFiniteNumber(cell.alpha_value) ??
+      toFiniteNumber(cell.alphaGlobal) ??
+      toFiniteNumber(cell.alpha_global);
+    const nItems =
+      toFiniteNumber(cell.n_items) ??
+      toFiniteNumber(cell.nItems) ??
+      toFiniteNumber(cell.n);
+    const result = {
+      ...(cell.cell ? { cell: cell.cell } : {}),
+      ...(Number.isFinite(alpha) ? { alpha } : {}),
+      ...(Number.isFinite(nItems) ? { n_items: nItems } : {}),
+    };
+    if (cell.label) {
+      result.label = cell.label;
+    }
+    return result;
+  };
+
+  const normalizedCells = (() => {
+    if (Array.isArray(data.by_cell)) {
+      return data.by_cell
+        .map(sanitizeCell)
+        .filter((item) => item && Object.keys(item).length > 0);
+    }
+    if (data.by_cell && typeof data.by_cell === 'object') {
+      return Object.entries(data.by_cell)
+        .map(([cellName, value]) => sanitizeCell({ cell: cellName, ...value }))
+        .filter((item) => item && Object.keys(item).length > 0);
+    }
+    return [];
+  })();
+
+  const alphaGlobal =
+    toFiniteNumber(data.alpha_global) ?? toFiniteNumber(data.alphaGlobal);
+  const nItemsGlobal =
+    toFiniteNumber(data.n_items_global) ?? toFiniteNumber(data.nItemsGlobal);
+
+  const sanitized = {
+    ...(data.label ? { label: data.label } : {}),
+    ...(data.scale ? { scale: data.scale } : {}),
+    ...(Number.isFinite(alphaGlobal) ? { alpha_global: alphaGlobal } : {}),
+    ...(Number.isFinite(nItemsGlobal) ? { n_items_global: nItemsGlobal } : {}),
+    ...(normalizedCells.length ? { by_cell: normalizedCells } : {}),
+  };
+
+  if (data.label_display) {
+    sanitized.label_display = data.label_display;
+  }
+
+  return sanitized;
+}
+
+function buildIrrSection(irrData) {
+  if (!irrData || typeof irrData !== 'object') {
+    return '';
+  }
+
+  const label = irrData.label_display || irrData.label || 'Unknown';
+  const scaleValue =
+    typeof irrData.scale === 'string'
+      ? irrData.scale
+      : irrData.scale && typeof irrData.scale === 'object'
+      ? irrData.scale.label || irrData.scale.name
+      : null;
+  const scale = scaleValue ? ` (${scaleValue})` : '';
+  const alphaGlobal =
+    toFiniteNumber(irrData.alpha_global) ?? toFiniteNumber(irrData.alphaGlobal);
+  const hasAlphaGlobal = Number.isFinite(alphaGlobal);
+  const nItemsGlobal =
+    toFiniteNumber(irrData.n_items_global) ??
+    toFiniteNumber(irrData.nItemsGlobal);
+  const hasNItemsGlobal = Number.isFinite(nItemsGlobal);
+
+  const lines = ['\n\n## Inter-Annotator Reliability'];
+  lines.push(`Label: ${label}${scale}`);
+  if (hasAlphaGlobal) {
+    const countLabel = hasNItemsGlobal ? ` (n = ${nItemsGlobal})` : '';
+    lines.push(`Alpha (global): ${alphaGlobal.toFixed(2)}${countLabel}`);
+  } else {
+    lines.push('Alpha (global): Not available');
+  }
+
+  const toCells = () => {
+    if (Array.isArray(irrData.by_cell)) {
+      return irrData.by_cell;
+    }
+    if (irrData.by_cell && typeof irrData.by_cell === 'object') {
+      return Object.entries(irrData.by_cell).map(([cellName, cell]) => ({
+        cell: cellName,
+        ...cell,
+      }));
+    }
+    return [];
+  };
+
+  const lowCells = toCells().filter((cell) => {
+    const alpha =
+      toFiniteNumber(cell.alpha) ??
+      toFiniteNumber(cell.alpha_global) ??
+      toFiniteNumber(cell.alphaGlobal);
+    return Number.isFinite(alpha) && alpha < 0.67;
+  });
+
+  if (!lowCells.length) {
+    lines.push('Cells below 0.67: None');
+  } else {
+    lines.push('Cells below 0.67:');
+    lowCells.forEach((cell) => {
+      const cellName = cell.cell || cell.name || 'Unknown';
+      const alpha =
+        toFiniteNumber(cell.alpha) ??
+        toFiniteNumber(cell.alpha_global) ??
+        toFiniteNumber(cell.alphaGlobal);
+      const nItems =
+        toFiniteNumber(cell.n_items) ??
+        toFiniteNumber(cell.nItems) ??
+        toFiniteNumber(cell.n_items_global) ??
+        toFiniteNumber(cell.nItemsGlobal);
+      const alphaLabel = Number.isFinite(alpha) ? alpha.toFixed(2) : 'N/A';
+      const countLabel = Number.isFinite(nItems) ? ` (n = ${nItems})` : '';
+      lines.push(`- ${cellName}: ${alphaLabel}${countLabel}`);
+    });
+  }
+
+  return lines.join('\n');
+}
+
 function listSubdirs(root) {
   if (!fs.existsSync(root)) {
     return [];
@@ -1217,6 +1397,12 @@ async function main() {
   const datasetCardPath = path.join(datasetRoot, 'dataset_card.md');
   const trainingSummaryPath = path.join(datasetRoot, 'training_data_summary.json');
   const exportLogPath = path.join(datasetRoot, 'export_log.txt');
+  const irrSourceDir = path.resolve(__dirname, '..', 'data', 'irr');
+  const irrSourcePath = path.join(irrSourceDir, 'irr.json');
+  const irrTrendSourcePath = path.join(irrSourceDir, 'irr_trend.json');
+  const irrDestPath = path.join(datasetRoot, 'irr.json');
+  const irrTrendDestPath = path.join(datasetRoot, 'irr_trend.json');
+  let irrDataForCard = null;
   const coverageSnapshotSourcePath = path.resolve(
     __dirname,
     '..',
@@ -1237,6 +1423,46 @@ async function main() {
       fs.copyFileSync(coverageSnapshotSourcePath, coverageSnapshotDestPath);
     } catch (err) {
       console.warn('Warning: failed to copy coverage snapshot into dataset export', err);
+    }
+  }
+
+  if (fs.existsSync(irrSourcePath)) {
+    const irrData = readJsonFileSafe(irrSourcePath);
+    if (irrData) {
+      if (isPublic) {
+        const sanitized = sanitizeIrrDataForPublic(irrData);
+        if (sanitized) {
+          irrDataForCard = sanitized;
+          try {
+            fs.writeFileSync(irrDestPath, JSON.stringify(sanitized, null, 2));
+          } catch (err) {
+            console.warn('Warning: failed to write sanitized IRR data to export', err);
+          }
+        } else {
+          irrDataForCard = null;
+        }
+      } else {
+        irrDataForCard = irrData;
+        try {
+          fs.copyFileSync(irrSourcePath, irrDestPath);
+        } catch (err) {
+          console.warn('Warning: failed to copy IRR data into dataset export', err);
+        }
+      }
+    } else if (!isPublic) {
+      try {
+        fs.copyFileSync(irrSourcePath, irrDestPath);
+      } catch (err) {
+        console.warn('Warning: failed to copy IRR data into dataset export', err);
+      }
+    }
+  }
+
+  if (!isPublic && fs.existsSync(irrTrendSourcePath)) {
+    try {
+      fs.copyFileSync(irrTrendSourcePath, irrTrendDestPath);
+    } catch (err) {
+      console.warn('Warning: failed to copy IRR trend data into dataset export', err);
     }
   }
 
@@ -1298,6 +1524,8 @@ async function main() {
     `## Rights Notice\n` +
     `This dataset is derived from Stage 2 pipeline outputs. Ensure all downstream usage respects the original content rights and internal compliance policies.\n\n` +
     `Each dataset record includes associated rights metadata to enable downstream usage policy enforcement.`;
+
+  datasetCard += buildIrrSection(irrDataForCard);
 
   if (isPublic) {
     datasetCard +=
