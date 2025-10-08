@@ -256,6 +256,25 @@ function stableHash(value){
 function isDoubleCodingRequired(manifestItem){
   if(!manifestItem) return false;
   if(manifestItem.double_coded === true) return true;
+  if(manifestItem.double_coded === false) return false;
+
+  if(manifestItem.pass_number != null){
+    const parsed = Number.parseInt(manifestItem.pass_number, 10);
+    if(Number.isFinite(parsed)){
+      const passNum = parsed >= 1 ? parsed : 1;
+      manifestItem.pass_number = passNum;
+      const doubleTarget = manifestItem.double_pass_target === true;
+      const doubleCoded = doubleTarget || passNum >= 2;
+      manifestItem.double_coded = doubleCoded;
+      if(doubleCoded) return true;
+    }
+  }
+
+  if(manifestItem.double_pass_target === true){
+    manifestItem.double_coded = true;
+    return true;
+  }
+
   const qa = manifestItem.qa || manifestItem.qa_result || manifestItem.qaStatus || {};
   if(manifestItem.qa_pass === false) return true;
   if(manifestItem.qa_pass_flag === false) return true;
@@ -267,7 +286,9 @@ function isDoubleCodingRequired(manifestItem){
     return Math.random() < 0.1;
   }
   const hash = stableHash(clipId);
-  return hash % 10 === 0;
+  const shouldDoubleCode = hash % 10 === 0;
+  manifestItem.double_coded = shouldDoubleCode;
+  return shouldDoubleCode;
 }
 
 function getAnnotatorId(){
@@ -1330,6 +1351,24 @@ function isDoubleCodingRequired(manifestItem){
   if(!manifestItem) return false;
   if(manifestItem.double_coded === true) return true;
   if(manifestItem.double_coded === false) return false;
+
+  if(manifestItem.pass_number != null){
+    const parsed = Number.parseInt(manifestItem.pass_number, 10);
+    if(Number.isFinite(parsed)){
+      const passNum = parsed >= 1 ? parsed : 1;
+      manifestItem.pass_number = passNum;
+      const doubleTarget = manifestItem.double_pass_target === true;
+      const doubleCoded = doubleTarget || passNum >= 2;
+      manifestItem.double_coded = doubleCoded;
+      if(doubleCoded) return true;
+    }
+  }
+
+  if(manifestItem.double_pass_target === true){
+    manifestItem.double_coded = true;
+    return true;
+  }
+
   const qaMeta = manifestItem.qa || manifestItem.qa_status || manifestItem.qaStatus || {};
   const qaPassFlag = manifestItem.qa_pass;
   if(qaMeta && qaMeta.pass === false){ manifestItem.double_coded = true; return true; }
@@ -1637,6 +1676,16 @@ async function enqueueAndSync(lintReport){
   const clipId = it.asset_id || it.id || it.clip_id || it.clipId || null;
   const doubleCodingRequired = isDoubleCodingRequired(it);
 
+  const passNumberParsed = it && it.pass_number != null ? Number.parseInt(it.pass_number, 10) : 1;
+  const passNumber = Number.isFinite(passNumberParsed) ? passNumberParsed : 1;
+  const previousAnnotators = Array.isArray(it.previous_annotators)
+    ? it.previous_annotators.filter((val)=> typeof val === 'string' && val.trim())
+    : [];
+  const assignedCell = typeof it.assigned_cell === 'string' && it.assigned_cell
+    ? it.assigned_cell
+    : 'unknown:unknown:unknown:unknown';
+  const doublePassTarget = it.double_pass_target === true || passNumber >= 2;
+
   const csSnapshot = snapshotCodeSwitchSpans();
   const csExports = buildCodeSwitchExports(csSnapshot);
   EAQ.state.codeSwitchVTT = csExports.vtt;
@@ -1692,11 +1741,18 @@ async function enqueueAndSync(lintReport){
       speaker_profiles_total: speakerStats.total,
       speaker_profiles_complete: speakerStats.complete,
       speaker_profiles_completion_rate: speakerStats.total ? speakerStats.complete / speakerStats.total : 1,
-      double_coded: doubleCodingRequired
+      double_coded: doubleCodingRequired,
+      double_pass_target: doublePassTarget,
+      pass_number: passNumber,
+      previous_annotators: previousAnnotators
     },
     lint: lintSummary,
     client_meta: { device: navigator.userAgent },
-    double_coded: doubleCodingRequired
+    double_coded: doubleCodingRequired,
+    double_pass_target: doublePassTarget,
+    pass_number: passNumber,
+    previous_annotators: previousAnnotators,
+    assigned_cell: assignedCell
   };
 
   let qaResult = null;
