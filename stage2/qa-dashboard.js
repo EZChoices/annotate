@@ -23,6 +23,11 @@
     return value;
   }
 
+  const ALLOCATOR_ALPHA = 2.0;
+  const ALLOCATOR_HISTORY_KEY = "ea_stage2_allocator_history_v1";
+  const ALLOCATOR_HISTORY_MAX = 100;
+  let latestCoverageSnapshot = null;
+
   function clone(obj) {
     return obj ? JSON.parse(JSON.stringify(obj)) : obj;
   }
@@ -417,6 +422,294 @@
     return Math.max(1, Math.ceil(value));
   }
 
+  function normalizeAllocatorCategory(value) {
+    if (value == null) return "unknown";
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(value);
+    }
+    const text = String(value).trim().toLowerCase();
+    return text || "unknown";
+  }
+
+  function buildAllocatorCellKey(cell) {
+    if (!cell || typeof cell !== "object") return "unknown:unknown:unknown:unknown";
+    const family = normalizeAllocatorCategory(
+      cell.dialect_family ?? cell.dialectFamily ?? cell.dialect_family_code ?? cell.dialect
+    );
+    const subregion = normalizeAllocatorCategory(
+      cell.subregion ?? cell.dialect_subregion ?? cell.dialectSubregion ?? cell.dialect_region ?? cell.region
+    );
+    const gender = normalizeAllocatorCategory(
+      cell.apparent_gender ?? cell.apparentGender ?? cell.gender ?? cell.gender_norm ?? cell.speaker_gender
+    );
+    const age = normalizeAllocatorCategory(
+      cell.apparent_age_band ?? cell.apparentAgeBand ?? cell.age_band ?? cell.ageBand ?? cell.age ?? cell.age_group
+    );
+    return `${family}:${subregion}:${gender}:${age}`;
+  }
+
+  function computeAllocatorWeights(snapshot, options) {
+    const alphaOption = options && Number.isFinite(options.alpha) ? Number(options.alpha) : ALLOCATOR_ALPHA;
+    const alpha = alphaOption > 0 ? alphaOption : ALLOCATOR_ALPHA;
+    const cells = Array.isArray(snapshot && snapshot.cells) ? snapshot.cells : [];
+    const weightMap = new Map();
+    let total = 0;
+
+    cells.forEach((cell) => {
+      if (!cell || typeof cell !== "object") return;
+      let key = null;
+      if (typeof cell.cell_key === "string" && cell.cell_key.trim()) {
+        const candidate = cell.cell_key.trim().toLowerCase();
+        if (candidate.includes(":")) {
+          key = candidate;
+        }
+      }
+      if (!key) {
+        key = buildAllocatorCellKey(cell);
+      }
+
+      const target = Number(cell.target);
+      if (!Number.isFinite(target) || target <= 0) return;
+      const count = Number(cell.count);
+      const normalizedCount = Number.isFinite(count) && count >= 0 ? count : 0;
+      const pct = Math.max(0, Math.min(1, target > 0 ? normalizedCount / target : 0));
+      let score = Math.pow(Math.max(0, 1 - pct), alpha);
+      if (!Number.isFinite(score) || score <= 0) return;
+      if (pct < 0.5) score *= 1.25;
+      const deficit = Number(cell.deficit);
+      if (Number.isFinite(deficit) && deficit >= 20) score *= 1.15;
+
+      const existing = weightMap.get(key) || 0;
+      weightMap.set(key, existing + score);
+      total += score;
+    });
+
+    if (total <= 0) {
+      weightMap.forEach((_, key) => weightMap.set(key, 0));
+      return weightMap;
+    }
+
+    weightMap.forEach((value, key) => {
+      weightMap.set(key, value / total);
+    });
+
+    return weightMap;
+  }
+
+  function parseAllocatorCellKey(cellKey) {
+    if (typeof cellKey !== "string" || !cellKey) {
+      return {
+        dialect_family: "unknown",
+        subregion: "unknown",
+        apparent_gender: "unknown",
+        apparent_age_band: "unknown",
+      };
+    }
+    const parts = cellKey.split(":");
+    return {
+      dialect_family: normalizeAllocatorCategory(parts[0]),
+      subregion: normalizeAllocatorCategory(parts[1]),
+      apparent_gender: normalizeAllocatorCategory(parts[2]),
+      apparent_age_band: normalizeAllocatorCategory(parts[3]),
+    };
+  }
+
+  function describeAllocatorCellKey(cellKey) {
+    const parsed = parseAllocatorCellKey(cellKey);
+    return describeCoverageCell(parsed);
+  }
+
+  function loadAllocatorHistory() {
+    if (!hasLocalStorage()) return [];
+    try {
+      const raw = localStorage.getItem(ALLOCATOR_HISTORY_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter(
+        (entry) => entry && typeof entry === "object" && typeof entry.cell === "string"
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  function ensureAllocatorWidget(container) {
+    if (!container) return null;
+    let widget = container.querySelector('.allocator-widget');
+    if (!widget) {
+      widget = document.createElement('section');
+      widget.className = 'allocator-widget';
+      widget.innerHTML = `
+        <div class="allocator-widget__header">
+          <h3>Allocator</h3>
+          <div class="allocator-widget__alpha">Alpha <span class="allocator-widget__alpha-value"></span></div>
+          <button type="button" class="allocator-widget__recompute">Recompute weights</button>
+        </div>
+        <p class="allocator-widget__status"></p>
+        <div class="allocator-widget__top">
+          <h4>Top weighted cells</h4>
+          <ol class="allocator-widget__top-list"></ol>
+        </div>
+        <div class="allocator-widget__history">
+          <h4>Recent assignments (last 100)</h4>
+          <div class="allocator-widget__histogram"></div>
+        </div>
+      `;
+      container.appendChild(widget);
+      const button = widget.querySelector('.allocator-widget__recompute');
+      if (button && !button.dataset.bound) {
+        button.dataset.bound = 'true';
+        button.addEventListener('click', () => {
+          renderAllocatorWidget(latestCoverageSnapshot, { loading: true });
+          fetchCoverageSnapshot()
+            .then((snapshot) => {
+              if (snapshot && typeof snapshot === 'object') {
+                renderCoverageSnapshot(snapshot);
+                renderCoverageCompletenessTile(snapshot);
+              } else {
+                renderCoverageSnapshot(undefined);
+                renderCoverageCompletenessTile(undefined);
+              }
+            })
+            .catch(() => {
+              renderAllocatorWidget(latestCoverageSnapshot, { error: true });
+            });
+        });
+      }
+    }
+    return widget;
+  }
+
+  function renderAllocatorWidget(snapshot, options = {}) {
+    const container = ensureCoverageContainer();
+    if (!container) return;
+    const widget = ensureAllocatorWidget(container);
+    if (!widget) return;
+
+    const alphaEl = widget.querySelector('.allocator-widget__alpha-value');
+    if (alphaEl) {
+      alphaEl.textContent = ALLOCATOR_ALPHA.toFixed(2);
+    }
+
+    const statusEl = widget.querySelector('.allocator-widget__status');
+    const topList = widget.querySelector('.allocator-widget__top-list');
+    const histogram = widget.querySelector('.allocator-widget__histogram');
+    const recomputeBtn = widget.querySelector('.allocator-widget__recompute');
+
+    const isLoading = snapshot === null || Boolean(options && options.loading);
+    const isError = Boolean(options && options.error);
+    const baseSnapshot =
+      snapshot && typeof snapshot === 'object'
+        ? snapshot
+        : latestCoverageSnapshot && typeof latestCoverageSnapshot === 'object'
+        ? latestCoverageSnapshot
+        : null;
+
+    if (recomputeBtn) {
+      if (isLoading) {
+        recomputeBtn.disabled = true;
+        recomputeBtn.textContent = 'Recomputing…';
+      } else {
+        recomputeBtn.disabled = false;
+        recomputeBtn.textContent = 'Recompute weights';
+      }
+    }
+
+    const weights = baseSnapshot ? computeAllocatorWeights(baseSnapshot) : new Map();
+    const weightEntries = Array.from(weights.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    const history = loadAllocatorHistory();
+
+    if (topList) {
+      topList.innerHTML = '';
+      if (weightEntries.length) {
+        weightEntries.forEach(([key, weight]) => {
+          const item = document.createElement('li');
+          const label = document.createElement('span');
+          label.textContent = describeAllocatorCellKey(key);
+          const valueEl = document.createElement('span');
+          valueEl.className = 'allocator-widget__top-weight';
+          const percent = Math.max(0, weight) * 100;
+          const decimals = percent >= 10 ? 1 : 2;
+          valueEl.textContent = `${percent.toFixed(decimals)}%`;
+          item.appendChild(label);
+          item.appendChild(valueEl);
+          topList.appendChild(item);
+        });
+      } else {
+        const emptyItem = document.createElement('li');
+        emptyItem.className = 'allocator-widget__empty';
+        emptyItem.textContent = baseSnapshot
+          ? 'No weighted cells available.'
+          : 'Weights unavailable.';
+        topList.appendChild(emptyItem);
+      }
+    }
+
+    if (histogram) {
+      histogram.innerHTML = '';
+      if (!history.length) {
+        const empty = document.createElement('p');
+        empty.className = 'allocator-widget__empty';
+        empty.textContent = 'No recent assignments recorded.';
+        histogram.appendChild(empty);
+      } else {
+        const counts = new Map();
+        history.forEach((entry) => {
+          const key = typeof entry.cell === 'string' ? entry.cell.toLowerCase() : 'unknown:unknown:unknown:unknown';
+          counts.set(key, (counts.get(key) || 0) + 1);
+        });
+        const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10);
+        const maxCount = sorted.length ? sorted[0][1] : 0;
+        sorted.forEach(([key, count]) => {
+          const row = document.createElement('div');
+          row.className = 'allocator-widget__histogram-row';
+          const label = document.createElement('span');
+          label.textContent = describeAllocatorCellKey(key);
+          const bar = document.createElement('div');
+          bar.className = 'allocator-widget__histogram-bar';
+          const fill = document.createElement('div');
+          fill.className = 'allocator-widget__histogram-fill';
+          const width = maxCount > 0 ? (count / maxCount) * 100 : 0;
+          fill.style.width = `${Math.max(0, Math.min(100, width))}%`;
+          bar.appendChild(fill);
+          const countEl = document.createElement('span');
+          countEl.className = 'allocator-widget__histogram-count';
+          countEl.textContent = String(count);
+          row.appendChild(label);
+          row.appendChild(bar);
+          row.appendChild(countEl);
+          histogram.appendChild(row);
+        });
+      }
+    }
+
+    if (statusEl) {
+      let message = '';
+      if (isLoading && !baseSnapshot) {
+        message = 'Loading coverage snapshot…';
+      } else if (!baseSnapshot) {
+        message = isError ? 'Failed to refresh coverage snapshot.' : 'Coverage snapshot unavailable.';
+      } else {
+        const parts = [];
+        if (isError) {
+          parts.push('Failed to refresh coverage snapshot.');
+        }
+        if (baseSnapshot.generated_at) {
+          try {
+            parts.push(`Snapshot ${new Date(baseSnapshot.generated_at).toLocaleString()}`);
+          } catch {
+            parts.push(`Snapshot ${baseSnapshot.generated_at}`);
+          }
+        }
+        parts.push(`${weights.size} weighted cells`);
+        parts.push(`${history.length} recent assignments`);
+        message = parts.join(' • ');
+      }
+      statusEl.textContent = message;
+    }
+  }
+
   function ensureCoverageContainer() {
     if (typeof document === 'undefined') return null;
     let container = document.getElementById('coverageSummary');
@@ -470,6 +763,25 @@
       .coverage-summary__next-up-label { font-weight: 600; font-size: .95rem; }
       .coverage-summary__next-up-info { font-size: .82rem; color: var(--muted, #555); }
       .coverage-summary__next-up-empty { margin: 0; color: var(--muted, #555); }
+      .allocator-widget { margin-top: 1.5rem; padding: 1rem 1.25rem; border-radius: 12px; border: 1px solid var(--border, #dcdcdc); background: var(--card, #fff); display: flex; flex-direction: column; gap: .75rem; }
+      .allocator-widget h3 { margin: 0; font-size: 1.05rem; }
+      .allocator-widget h4 { margin: 0 0 .35rem 0; font-size: .9rem; color: var(--muted, #444); }
+      .allocator-widget__header { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; justify-content: space-between; }
+      .allocator-widget__alpha { font-size: .85rem; color: var(--muted, #555); display: inline-flex; align-items: center; gap: .35rem; }
+      .allocator-widget__alpha-value { font-weight: 600; }
+      .allocator-widget__recompute { border: 1px solid var(--border, #dcdcdc); background: var(--card, #fff); border-radius: 999px; padding: .4rem .9rem; font-size: .85rem; cursor: pointer; transition: background .15s ease, border-color .15s ease, color .15s ease; }
+      .allocator-widget__recompute:hover:not(:disabled) { border-color: var(--accent, #2b7cff); color: var(--accent, #2b7cff); }
+      .allocator-widget__recompute:disabled { opacity: .6; cursor: default; }
+      .allocator-widget__status { margin: 0; font-size: .85rem; color: var(--muted, #555); }
+      .allocator-widget__top-list { margin: 0; padding-left: 1.25rem; display: grid; gap: .35rem; font-size: .9rem; }
+      .allocator-widget__top-list li { display: flex; justify-content: space-between; gap: .75rem; }
+      .allocator-widget__top-weight { font-variant-numeric: tabular-nums; font-weight: 600; }
+      .allocator-widget__histogram { display: flex; flex-direction: column; gap: .45rem; }
+      .allocator-widget__histogram-row { display: grid; grid-template-columns: minmax(0, 1fr) auto min-content; align-items: center; gap: .6rem; font-size: .85rem; }
+      .allocator-widget__histogram-bar { position: relative; height: 10px; border-radius: 999px; background: rgba(0,0,0,0.08); overflow: hidden; }
+      .allocator-widget__histogram-fill { position: absolute; top: 0; left: 0; bottom: 0; background: var(--accent, #2b7cff); }
+      .allocator-widget__histogram-count { font-variant-numeric: tabular-nums; font-weight: 600; }
+      .allocator-widget__empty { margin: 0; font-size: .85rem; color: var(--muted, #666); }
     `;
     (document.head || document.body || document.documentElement).appendChild(style);
   }
@@ -479,6 +791,7 @@
     if (!container) return;
     injectCoverageStyles();
     container.innerHTML = '';
+    latestCoverageSnapshot = snapshot;
 
     const heading = document.createElement('h2');
     heading.textContent = 'Coverage snapshot';
@@ -490,11 +803,13 @@
 
     if (snapshot === null) {
       meta.textContent = 'Loading coverage snapshot…';
+      renderAllocatorWidget(snapshot);
       return;
     }
 
     if (!snapshot || typeof snapshot !== 'object') {
       meta.textContent = 'Coverage snapshot not available.';
+      renderAllocatorWidget(snapshot);
       return;
     }
 
@@ -511,6 +826,7 @@
       empty.className = 'coverage-summary__empty';
       empty.textContent = 'No coverage cells observed yet.';
       container.appendChild(empty);
+      renderAllocatorWidget(snapshot);
       return;
     }
 
@@ -696,6 +1012,7 @@
     }
 
     container.appendChild(nextUp);
+    renderAllocatorWidget(snapshot);
   }
 
   const QA_TILE_CONTAINER_ID = 'qaDashboardTiles';
@@ -969,7 +1286,7 @@
     if (typeof fetch !== 'function') {
       return Promise.resolve(null);
     }
-    return fetch('coverage_snapshot.json', { cache: 'no-store' })
+    return fetch('/api/coverage', { cache: 'no-store' })
       .then((response) => {
         if (!response.ok) return null;
         return response.json().catch(() => null);

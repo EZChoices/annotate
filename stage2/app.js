@@ -142,6 +142,8 @@ const SAFETY_DEFAULT_DURATION = SAFETY_MIN_DURATION;
 const SAFETY_DRAG_MAX_DELTA = 0.5;
 
 const MANIFEST_STORAGE_KEY = 'ea_stage2_manifest';
+const ALLOCATOR_HISTORY_KEY = 'ea_stage2_allocator_history_v1';
+const ALLOCATOR_HISTORY_MAX = 100;
 
 const DIARIZATION_COLORS = [
   '#4e79a7',
@@ -156,10 +158,79 @@ const DIARIZATION_COLORS = [
   '#bab0ac'
 ];
 
+function recordAllocatorAssignments(manifest){
+  if(!manifest || !Array.isArray(manifest.items)) return;
+  if(typeof localStorage === 'undefined') return;
+  let history = [];
+  try{
+    const raw = localStorage.getItem(ALLOCATOR_HISTORY_KEY);
+    if(raw){
+      const parsed = JSON.parse(raw);
+      if(Array.isArray(parsed)){
+        history = parsed.filter(entry=> entry && typeof entry === 'object' && entry.clip_id);
+      }
+    }
+  }catch{
+    history = [];
+  }
+
+  const byClip = new Map();
+  history.forEach(entry=>{
+    if(!entry || typeof entry !== 'object') return;
+    const clipId = entry.clip_id;
+    if(!clipId) return;
+    byClip.set(clipId, entry);
+  });
+
+  const items = Array.isArray(manifest.items) ? manifest.items : [];
+  const now = Date.now();
+  let changed = false;
+
+  items.forEach((item, index)=>{
+    if(!item || typeof item !== 'object') return;
+    const clipId = item.asset_id || item.id || item.clip_id || item.clipId || item.file_name || item.fileName;
+    const cell = item.assigned_cell || item.assignedCell;
+    if(!clipId || !cell) return;
+    const normalizedCell = String(cell).trim().toLowerCase();
+    const existing = byClip.get(clipId);
+    if(existing && existing.cell === normalizedCell) return;
+
+    const assignedAt = item.assigned_at || item.assignedAt;
+    let timestamp = null;
+    if(assignedAt != null){
+      const parsed = new Date(assignedAt).getTime();
+      if(typeof parsed === 'number' && !Number.isNaN(parsed)){
+        timestamp = parsed;
+      }
+    }
+    if(typeof timestamp !== 'number' || Number.isNaN(timestamp)){
+      timestamp = now + index;
+    }
+
+    byClip.set(clipId, { clip_id: clipId, cell: normalizedCell, ts: timestamp });
+    changed = true;
+  });
+
+  if(!changed) return;
+
+  const updated = Array.from(byClip.values()).sort((a,b)=>{
+    const ta = typeof a.ts === 'number' ? a.ts : 0;
+    const tb = typeof b.ts === 'number' ? b.ts : 0;
+    return ta - tb;
+  });
+  const trimmed = updated.slice(-ALLOCATOR_HISTORY_MAX);
+  try{
+    localStorage.setItem(ALLOCATOR_HISTORY_KEY, JSON.stringify(trimmed));
+  }catch{}
+}
+
 function saveManifestToStorage(manifest){
   if(!manifest) return;
   try{
     localStorage.setItem(MANIFEST_STORAGE_KEY, JSON.stringify(manifest));
+  }catch{}
+  try{
+    recordAllocatorAssignments(manifest);
   }catch{}
 }
 
@@ -1235,6 +1306,7 @@ async function loadManifest(){
     if(cached){
       await hydrateManifestTranslations(cached);
       EAQ.state.manifest = cached;
+      try{ recordAllocatorAssignments(cached); }catch{}
       return cached;
     }
     throw err;
