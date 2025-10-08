@@ -2,7 +2,7 @@
   "name": "annotate",
   "version": "1.0.0",
   "scripts": {
-    "test": "echo \"No tests specified\" && exit 0",
+    "test": "node --test",
     "nightly:irr": "node scripts/nightly_irr.js"
   }
 }
