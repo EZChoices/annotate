@@ -12,11 +12,15 @@ const IRR_DIR = process.env.IRR_OUTPUT_DIR
 const IRR_JSON_PATH = path.join(IRR_DIR, 'irr.json');
 const IRR_TREND_PATH = path.join(IRR_DIR, 'irr_trend.json');
 const IRR_LOG_DIR = path.join(IRR_DIR, 'logs');
+const ADJUDICATION_CONFIG_PATH = process.env.ADJUDICATION_CONFIG_PATH
+  ? path.resolve(process.env.ADJUDICATION_CONFIG_PATH)
+  : path.resolve(__dirname, '..', 'config', 'adjudication.json');
 
 const TARGET_LABEL = 'hasCS';
 const REQUIRED_PASSES = new Set([1, 2]);
 const MIN_CELL_ITEMS = 10;
 const VOICE_TAG_ALIGNMENT_THRESHOLD_SEC = 0.12;
+const DEFAULT_MIN_VOICE_TAG_CUE_PAIRS = 5;
 const DEFAULT_METRIC_KEY = 'hasCS';
 const VOICE_TAG_REGEX = /^<v\s+S\d+>/i;
 
@@ -327,6 +331,18 @@ function isMultiSpeakerMeta(meta) {
   return false;
 }
 
+function getAdjudicationStatus(itemMeta) {
+  if (!itemMeta || typeof itemMeta !== 'object') return null;
+  const adjudication = itemMeta.adjudication;
+  if (adjudication && typeof adjudication === 'object') {
+    const { status } = adjudication;
+    if (typeof status === 'string' && status.trim()) {
+      return status.trim().toLowerCase();
+    }
+  }
+  return null;
+}
+
 function shouldReplace(existingStat, newStat) {
   if (!existingStat && newStat) return true;
   if (!newStat) return false;
@@ -535,7 +551,8 @@ function computeNominalKrippendorffAlpha(items) {
   return Number.isFinite(alpha) ? alpha : null;
 }
 
-async function loadAssetMetrics() {
+async function loadAssetMetrics(options = {}) {
+  const { minVoiceTagCuePairs = 0, skipLockedAssets = false } = options || {};
   let assetEntries;
   try {
     assetEntries = await fsp.readdir(STAGE2_OUTPUT_DIR, { withFileTypes: true });
@@ -577,6 +594,13 @@ async function loadAssetMetrics() {
       console.warn(`Failed to read item_meta.json for asset ${assetId}: ${err.message}`);
     }
 
+    if (skipLockedAssets) {
+      const adjudicationStatus = getAdjudicationStatus(itemMeta);
+      if (adjudicationStatus === 'locked' || adjudicationStatus === 'resolved') {
+        continue;
+      }
+    }
+
     const cell = inferCellKey(itemMeta);
     const multiSpeaker = isMultiSpeakerMeta(itemMeta);
     const assetLabel = inferAssetLabel(itemMeta, assetId);
@@ -591,50 +615,53 @@ async function loadAssetMetrics() {
     const cues1 = Array.isArray(pass1.voiceCues) ? pass1.voiceCues : [];
     const cues2 = Array.isArray(pass2.voiceCues) ? pass2.voiceCues : [];
     const aligned = alignVoiceTagCues(cues1, cues2);
-    aligned.forEach(({ cueA, cueB }) => {
-      const voteA = cueA && cueA.hasVoiceTag ? 1 : 0;
-      const voteB = cueB && cueB.hasVoiceTag ? 1 : 0;
-      voiceTagItems.push({
-        assetId,
-        cell,
-        votes: [voteA, voteB],
-        cueA,
-        cueB,
-        annotators: [pass1.annotatorId || null, pass2.annotatorId || null],
-        multiSpeaker,
-        assetLabel,
-      });
-
-      if (!voteA && !voteB && multiSpeaker) {
-        voiceTagMissing.push({
-          asset_id: assetId,
-          asset_label: assetLabel,
+    const hasEnoughCuePairs = aligned.length >= minVoiceTagCuePairs;
+    if (hasEnoughCuePairs) {
+      aligned.forEach(({ cueA, cueB }) => {
+        const voteA = cueA && cueA.hasVoiceTag ? 1 : 0;
+        const voteB = cueB && cueB.hasVoiceTag ? 1 : 0;
+        voiceTagItems.push({
+          assetId,
           cell,
-          cue_index_pass1: cueA ? cueA.index : null,
-          cue_index_pass2: cueB ? cueB.index : null,
-          start: cueA && Number.isFinite(cueA.start)
-            ? cueA.start
-            : cueB && Number.isFinite(cueB.start)
-              ? cueB.start
-              : null,
-          end: cueA && Number.isFinite(cueA.end)
-            ? cueA.end
-            : cueB && Number.isFinite(cueB.end)
-              ? cueB.end
-              : null,
-          pass_1: {
-            annotator_id: pass1.annotatorId || null,
-            has_voice_tag: false,
-            text: cueA ? cueA.trimmed || cueA.text || '' : '',
-          },
-          pass_2: {
-            annotator_id: pass2.annotatorId || null,
-            has_voice_tag: false,
-            text: cueB ? cueB.trimmed || cueB.text || '' : '',
-          },
+          votes: [voteA, voteB],
+          cueA,
+          cueB,
+          annotators: [pass1.annotatorId || null, pass2.annotatorId || null],
+          multiSpeaker,
+          assetLabel,
         });
-      }
-    });
+
+        if (!voteA && !voteB && multiSpeaker) {
+          voiceTagMissing.push({
+            asset_id: assetId,
+            asset_label: assetLabel,
+            cell,
+            cue_index_pass1: cueA ? cueA.index : null,
+            cue_index_pass2: cueB ? cueB.index : null,
+            start: cueA && Number.isFinite(cueA.start)
+              ? cueA.start
+              : cueB && Number.isFinite(cueB.start)
+                ? cueB.start
+                : null,
+            end: cueA && Number.isFinite(cueA.end)
+              ? cueA.end
+              : cueB && Number.isFinite(cueB.end)
+                ? cueB.end
+                : null,
+            pass_1: {
+              annotator_id: pass1.annotatorId || null,
+              has_voice_tag: false,
+              text: cueA ? cueA.trimmed || cueA.text || '' : '',
+            },
+            pass_2: {
+              annotator_id: pass2.annotatorId || null,
+              has_voice_tag: false,
+              text: cueB ? cueB.trimmed || cueB.text || '' : '',
+            },
+          });
+        }
+      });
+    }
 
     assetSummaries.push({
       assetId,
@@ -769,10 +796,40 @@ async function writeLog({ generatedAt, metrics, assets }) {
   await fsp.writeFile(logPath, `${lines.join('\n')}\n`, 'utf8');
 }
 
+async function resolveMinVoiceTagCuePairs() {
+  let raw;
+  try {
+    raw = await fsp.readFile(ADJUDICATION_CONFIG_PATH, 'utf8');
+  } catch (err) {
+    if (err && err.code !== 'ENOENT') {
+      console.warn(
+        `Failed to read adjudication config at ${ADJUDICATION_CONFIG_PATH}: ${err.message}`
+      );
+    }
+    return DEFAULT_MIN_VOICE_TAG_CUE_PAIRS;
+  }
+
+  try {
+    const config = JSON.parse(raw);
+    const value = config && config.min_cue_pairs_for_voiceTag;
+    if (Number.isFinite(value)) {
+      return Number(value);
+    }
+  } catch (err) {
+    console.warn(`Failed to parse adjudication config: ${err.message}`);
+  }
+
+  return DEFAULT_MIN_VOICE_TAG_CUE_PAIRS;
+}
+
 async function main() {
   await ensureDir(IRR_DIR);
 
-  const metricsData = await loadAssetMetrics();
+  const minVoiceTagCuePairs = await resolveMinVoiceTagCuePairs();
+  const metricsData = await loadAssetMetrics({
+    minVoiceTagCuePairs,
+    skipLockedAssets: true,
+  });
   const hasCSSummary = buildAlphaSummary(metricsData.hasCSItems);
   const voiceTagSummary = buildAlphaSummary(metricsData.voiceTagItems);
   const generatedAt = formatIsoDate();

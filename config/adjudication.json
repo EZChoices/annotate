@@ -1,0 +1,9 @@
+{
+  "gates": {
+    "require_low_f1_lt": 0.85,
+    "require_cues_in_bounds_lt": 85,
+    "include_voice_tag_disagreements": true
+  },
+  "min_cue_pairs_for_voiceTag": 5,
+  "min_items_for_cell_alpha": 10
+}
