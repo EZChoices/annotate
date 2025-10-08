@@ -1188,7 +1188,31 @@
 
   const QA_TILE_CONTAINER_ID = 'qaDashboardTiles';
   const QA_TILE_PROVENANCE_ID = 'qaTileProvenanceComplete';
+  const QA_TILE_CODE_SWITCH_ID = 'qaTileCodeSwitchF1';
+  const QA_TILE_DIARIZATION_ID = 'qaTileDiarizationMae';
+  const QA_TILE_TRANSLATION_ID = 'qaTileTranslationCompleteness';
   const QA_TILE_COVERAGE_ID = 'qaTileCoverageCompleteness';
+
+  const QA_TILE_LINKS = {
+    [QA_TILE_CODE_SWITCH_ID]: '/stage2/review.html?f1_lt=0.85',
+    [QA_TILE_DIARIZATION_ID]: '/stage2/review.html?mae_gt=0.5',
+    [QA_TILE_TRANSLATION_ID]: '/stage2/review.html?translation_lt=0.95',
+    [QA_TILE_COVERAGE_ID]: '/stage2/qa-dashboard.html?coverage=low#coverageSummary',
+  };
+
+  const QA_STATUS_CLASS_MAP = {
+    green: 'qa-status-green',
+    amber: 'qa-status-amber',
+    red: 'qa-status-red',
+    neutral: 'qa-status-neutral',
+  };
+
+  const QA_STATUS_LABELS = {
+    green: 'On track',
+    amber: 'Needs attention',
+    red: 'Action needed',
+    neutral: 'No data',
+  };
 
   function injectDashboardTilesStyles() {
     if (typeof document === 'undefined') return;
@@ -1199,10 +1223,22 @@
       .qa-dashboard-tiles { max-width: 960px; margin: 1.5rem auto 1rem; padding: 0 1rem 1.5rem; }
       .qa-dashboard-tiles__heading { margin: 0 0 1rem 0; font-size: 1.35rem; }
       .qa-dashboard-tiles__grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-      .qa-dashboard-tile { background: var(--card, #fff); border-radius: 12px; border: 1px solid var(--border, #dcdcdc); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.05); padding: 1rem 1.2rem; display: flex; flex-direction: column; gap: 0.35rem; }
+      .qa-dashboard-tile { background: var(--card, #fff); border-radius: 12px; border: 1px solid var(--border, #dcdcdc); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.05); padding: 1rem 1.2rem; display: flex; flex-direction: column; gap: 0.4rem; text-decoration: none; color: inherit; transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease; position: relative; }
+      .qa-dashboard-tile:hover, .qa-dashboard-tile:focus-visible { transform: translateY(-1px); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.08); border-color: rgba(43, 124, 255, 0.45); outline: none; }
+      .qa-dashboard-tile__status { margin: 0; display: inline-flex; align-items: center; gap: .4rem; font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; font-weight: 600; color: var(--muted, #777); }
+      .qa-dashboard-tile__status-dot { width: .55rem; height: .55rem; border-radius: 999px; background: currentColor; box-shadow: 0 0 0 2px rgba(0,0,0,0.05); }
+      .qa-dashboard-tile__status-text { margin: 0; }
       .qa-dashboard-tile__label { margin: 0; font-size: .9rem; color: var(--muted, #555); }
       .qa-dashboard-tile__value { margin: 0; font-size: 2.25rem; font-weight: 600; color: var(--accent, #2b7cff); }
       .qa-dashboard-tile__caption { margin: 0; font-size: .8rem; color: var(--muted, #777); }
+      .qa-dashboard-tile.qa-status-green { border-color: rgba(46, 125, 50, 0.35); box-shadow: 0 8px 22px rgba(46, 125, 50, 0.08); }
+      .qa-dashboard-tile.qa-status-amber { border-color: rgba(249, 168, 37, 0.45); box-shadow: 0 8px 22px rgba(249, 168, 37, 0.08); }
+      .qa-dashboard-tile.qa-status-red { border-color: rgba(211, 47, 47, 0.4); box-shadow: 0 8px 22px rgba(211, 47, 47, 0.08); }
+      .qa-dashboard-tile.qa-status-green .qa-dashboard-tile__status, .qa-dashboard-tile.qa-status-green .qa-dashboard-tile__value { color: #2e7d32; }
+      .qa-dashboard-tile.qa-status-amber .qa-dashboard-tile__status, .qa-dashboard-tile.qa-status-amber .qa-dashboard-tile__value { color: #f9a825; }
+      .qa-dashboard-tile.qa-status-red .qa-dashboard-tile__status, .qa-dashboard-tile.qa-status-red .qa-dashboard-tile__value { color: #d32f2f; }
+      .qa-dashboard-tile.qa-status-neutral .qa-dashboard-tile__status { color: var(--muted, #777); }
+      .qa-dashboard-tile.qa-status-neutral .qa-dashboard-tile__value { color: var(--muted, #666); }
       @media (max-width: 540px) {
         .qa-dashboard-tiles { padding: 0 .75rem 1rem; }
         .qa-dashboard-tile__value { font-size: 1.9rem; }
@@ -1236,6 +1272,346 @@
       }
     }
     return container;
+  }
+
+  function ensureMetricTile(id, options = {}) {
+    if (typeof document === 'undefined') return null;
+    injectDashboardTilesStyles();
+    const container = ensureDashboardTilesContainer();
+    if (!container) return null;
+
+    let grid = container.querySelector('.qa-dashboard-tiles__grid');
+    if (!grid) {
+      grid = document.createElement('div');
+      grid.className = 'qa-dashboard-tiles__grid';
+      container.appendChild(grid);
+    }
+
+    let tile = document.getElementById(id);
+    if (tile && tile.tagName && tile.tagName.toLowerCase() !== 'a') {
+      tile.remove();
+      tile = null;
+    }
+
+    if (!tile) {
+      tile = document.createElement('a');
+      tile.id = id;
+      tile.className = 'qa-dashboard-tile qa-status-neutral';
+      tile.href = options.href || QA_TILE_LINKS[id] || '#';
+
+      const status = document.createElement('div');
+      status.className = 'qa-dashboard-tile__status';
+      const dot = document.createElement('span');
+      dot.className = 'qa-dashboard-tile__status-dot';
+      dot.setAttribute('aria-hidden', 'true');
+      const statusText = document.createElement('span');
+      statusText.className = 'qa-dashboard-tile__status-text';
+      status.appendChild(dot);
+      status.appendChild(statusText);
+      tile.appendChild(status);
+
+      const label = document.createElement('p');
+      label.className = 'qa-dashboard-tile__label';
+      tile.appendChild(label);
+
+      const value = document.createElement('p');
+      value.className = 'qa-dashboard-tile__value';
+      tile.appendChild(value);
+
+      const caption = document.createElement('p');
+      caption.className = 'qa-dashboard-tile__caption';
+      tile.appendChild(caption);
+
+      grid.appendChild(tile);
+    }
+
+    if (options.href) tile.href = options.href;
+    if (options.title) tile.title = options.title;
+
+    return {
+      tile,
+      statusTextEl: tile.querySelector('.qa-dashboard-tile__status-text'),
+      labelEl: tile.querySelector('.qa-dashboard-tile__label'),
+      valueEl: tile.querySelector('.qa-dashboard-tile__value'),
+      captionEl: tile.querySelector('.qa-dashboard-tile__caption'),
+    };
+  }
+
+  function applyTileStatus(elements, status, customLabel) {
+    if (!elements || !elements.tile) return;
+    const tile = elements.tile;
+    const statuses = Object.values(QA_STATUS_CLASS_MAP);
+    statuses.forEach((className) => tile.classList.remove(className));
+    const className = QA_STATUS_CLASS_MAP[status] || QA_STATUS_CLASS_MAP.neutral;
+    tile.classList.add(className);
+    if (elements.statusTextEl) {
+      elements.statusTextEl.textContent = customLabel || QA_STATUS_LABELS[status] || QA_STATUS_LABELS.neutral;
+    }
+    tile.setAttribute('data-qa-status', status || 'neutral');
+  }
+
+  function determineStatus(value, thresholds, direction = 'higher') {
+    if (!Number.isFinite(value)) return 'neutral';
+    const { green, amber } = thresholds || {};
+    if (direction === 'lower') {
+      if (Number.isFinite(green) && value <= green) return 'green';
+      if (Number.isFinite(amber) && value <= amber) return 'amber';
+      return 'red';
+    }
+    if (Number.isFinite(green) && value >= green) return 'green';
+    if (Number.isFinite(amber) && value >= amber) return 'amber';
+    return 'red';
+  }
+
+  function formatPercentMetric(value) {
+    if (!Number.isFinite(value)) return null;
+    const percent = clamp01(value) * 100;
+    const decimals = percent >= 99.95 ? 0 : percent >= 10 ? 1 : 2;
+    return `${percent.toFixed(decimals)}%`;
+  }
+
+  function formatSecondsMetric(value) {
+    if (!Number.isFinite(value)) return null;
+    const normalized = Math.max(0, value);
+    const decimals = normalized >= 10 ? 1 : normalized >= 1 ? 2 : 3;
+    return `${normalized.toFixed(decimals)}s`;
+  }
+
+  function getValueAtPath(source, path) {
+    if (!source || typeof source !== 'object') return undefined;
+    return path.reduce((acc, key) => {
+      if (!acc || typeof acc !== 'object') return undefined;
+      return acc[key];
+    }, source);
+  }
+
+  function findMetricByPatterns(source, patterns) {
+    if (!source || typeof source !== 'object') return null;
+    const stack = [source];
+    const visited = new Set();
+    while (stack.length) {
+      const current = stack.pop();
+      if (!current || typeof current !== 'object') continue;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      const entries = Array.isArray(current)
+        ? current.map((value, index) => [String(index), value])
+        : Object.entries(current);
+      for (const [key, value] of entries) {
+        if (value && typeof value === 'object') {
+          stack.push(value);
+        }
+        if (typeof key !== 'string') continue;
+        const keyLc = key.toLowerCase();
+        const matches = patterns.some((pattern) => pattern.every((piece) => keyLc.includes(piece)));
+        if (!matches) continue;
+        if (value != null && typeof value === 'object' && 'value' in value) {
+          const nested = toFinite(value.value);
+          if (Number.isFinite(nested)) return nested;
+        }
+        const candidate = toFinite(value);
+        if (Number.isFinite(candidate)) {
+          return candidate;
+        }
+      }
+    }
+    return null;
+  }
+
+  function getMetricFromSummary(summary, options = {}) {
+    if (!summary || typeof summary !== 'object') return null;
+    const paths = Array.isArray(options.paths) ? options.paths : [];
+    for (const path of paths) {
+      const raw = getValueAtPath(summary, path);
+      const number = toFinite(raw);
+      if (Number.isFinite(number)) return number;
+      if (raw && typeof raw === 'object') {
+        const nestedValue = toFinite(raw.value ?? raw.average ?? raw.mean);
+        if (Number.isFinite(nestedValue)) return nestedValue;
+      }
+    }
+    const patterns = Array.isArray(options.patterns) ? options.patterns : [];
+    if (patterns.length) {
+      const found = findMetricByPatterns(summary, patterns);
+      if (Number.isFinite(found)) return found;
+    }
+    return null;
+  }
+
+  function normalizeRatioValue(value) {
+    if (!Number.isFinite(value)) return null;
+    if (value > 1 && value <= 100) {
+      return clamp01(value / 100);
+    }
+    return clamp01(value);
+  }
+
+  function extractCodeSwitchF1(summary) {
+    const value = getMetricFromSummary(summary, {
+      paths: [
+        ['metrics', 'codeSwitchF1'],
+        ['metrics', 'code_switch_f1'],
+        ['metrics', 'codeswitch_f1'],
+        ['codeSwitchF1'],
+        ['code_switch_f1'],
+        ['codeswitch_f1'],
+        ['qa', 'codeSwitchF1'],
+        ['qa', 'code_switch_f1'],
+        ['qa', 'codeswitch_f1'],
+      ],
+      patterns: [
+        ['codeswitch', 'f1'],
+        ['code_switch', 'f1'],
+        ['cs', 'f1'],
+      ],
+    });
+    if (!Number.isFinite(value)) return null;
+    return normalizeRatioValue(value);
+  }
+
+  function extractDiarizationMae(summary) {
+    const value = getMetricFromSummary(summary, {
+      paths: [
+        ['metrics', 'diarizationMae'],
+        ['metrics', 'diarization_mae'],
+        ['diarizationMae'],
+        ['diarization_mae'],
+        ['qa', 'diarizationMae'],
+        ['qa', 'diarization_mae'],
+      ],
+      patterns: [
+        ['diar', 'mae'],
+        ['diarization', 'mae'],
+        ['speaker', 'mae'],
+      ],
+    });
+    if (!Number.isFinite(value)) return null;
+    const seconds = value > 10 && value < 1000 ? value / 1000 : value;
+    return Math.max(0, seconds);
+  }
+
+  function extractTranslationCompleteness(summary) {
+    const value = getMetricFromSummary(summary, {
+      paths: [
+        ['metrics', 'translationCompleteness'],
+        ['metrics', 'translation_completeness'],
+        ['translationCompleteness'],
+        ['translation_completeness'],
+        ['qa', 'translationCompleteness'],
+        ['qa', 'translation_completeness'],
+      ],
+      patterns: [
+        ['translation', 'completeness'],
+        ['translation', 'complete'],
+      ],
+    });
+    if (!Number.isFinite(value)) return null;
+    return normalizeRatioValue(value);
+  }
+
+  function renderCodeSwitchTile(summary) {
+    const tile = ensureMetricTile(QA_TILE_CODE_SWITCH_ID, {
+      href: QA_TILE_LINKS[QA_TILE_CODE_SWITCH_ID],
+      title: 'Review clips with code-switch F1 below target',
+    });
+    if (!tile) return;
+    if (tile.labelEl) tile.labelEl.textContent = 'Code-switch F1';
+
+    if (summary === null) {
+      if (tile.valueEl) tile.valueEl.textContent = '—';
+      if (tile.captionEl) tile.captionEl.textContent = 'Loading QA metrics…';
+      applyTileStatus(tile, 'neutral', 'Loading…');
+      return;
+    }
+
+    if (!summary || typeof summary !== 'object') {
+      if (tile.valueEl) tile.valueEl.textContent = '—';
+      if (tile.captionEl) tile.captionEl.textContent = 'QA metrics unavailable';
+      applyTileStatus(tile, 'neutral', 'No data');
+      return;
+    }
+
+    const value = extractCodeSwitchF1(summary);
+    if (Number.isFinite(value)) {
+      if (tile.valueEl) tile.valueEl.textContent = formatPercentMetric(value) || '—';
+      if (tile.captionEl) tile.captionEl.textContent = 'Goal ≥ 0.90 average F1';
+      const status = determineStatus(value, { green: 0.9, amber: 0.85 }, 'higher');
+      applyTileStatus(tile, status);
+    } else {
+      if (tile.valueEl) tile.valueEl.textContent = '—';
+      if (tile.captionEl) tile.captionEl.textContent = 'Code-switch F1 not recorded yet';
+      applyTileStatus(tile, 'neutral', 'No data');
+    }
+  }
+
+  function renderDiarizationTile(summary) {
+    const tile = ensureMetricTile(QA_TILE_DIARIZATION_ID, {
+      href: QA_TILE_LINKS[QA_TILE_DIARIZATION_ID],
+      title: 'Review clips with high diarization error',
+    });
+    if (!tile) return;
+    if (tile.labelEl) tile.labelEl.textContent = 'Diarization MAE';
+
+    if (summary === null) {
+      if (tile.valueEl) tile.valueEl.textContent = '—';
+      if (tile.captionEl) tile.captionEl.textContent = 'Loading QA metrics…';
+      applyTileStatus(tile, 'neutral', 'Loading…');
+      return;
+    }
+
+    if (!summary || typeof summary !== 'object') {
+      if (tile.valueEl) tile.valueEl.textContent = '—';
+      if (tile.captionEl) tile.captionEl.textContent = 'QA metrics unavailable';
+      applyTileStatus(tile, 'neutral', 'No data');
+      return;
+    }
+
+    const value = extractDiarizationMae(summary);
+    if (Number.isFinite(value)) {
+      if (tile.valueEl) tile.valueEl.textContent = formatSecondsMetric(value) || '—';
+      if (tile.captionEl) tile.captionEl.textContent = 'Goal ≤ 0.30s mean absolute error';
+      const status = determineStatus(value, { green: 0.3, amber: 0.5 }, 'lower');
+      applyTileStatus(tile, status);
+    } else {
+      if (tile.valueEl) tile.valueEl.textContent = '—';
+      if (tile.captionEl) tile.captionEl.textContent = 'Diarization QA not enabled';
+      applyTileStatus(tile, 'neutral', 'Not tracked');
+    }
+  }
+
+  function renderTranslationTile(summary) {
+    const tile = ensureMetricTile(QA_TILE_TRANSLATION_ID, {
+      href: QA_TILE_LINKS[QA_TILE_TRANSLATION_ID],
+      title: 'Review clips with incomplete translations',
+    });
+    if (!tile) return;
+    if (tile.labelEl) tile.labelEl.textContent = 'Translation completeness';
+
+    if (summary === null) {
+      if (tile.valueEl) tile.valueEl.textContent = '—';
+      if (tile.captionEl) tile.captionEl.textContent = 'Loading QA metrics…';
+      applyTileStatus(tile, 'neutral', 'Loading…');
+      return;
+    }
+
+    if (!summary || typeof summary !== 'object') {
+      if (tile.valueEl) tile.valueEl.textContent = '—';
+      if (tile.captionEl) tile.captionEl.textContent = 'QA metrics unavailable';
+      applyTileStatus(tile, 'neutral', 'No data');
+      return;
+    }
+
+    const value = extractTranslationCompleteness(summary);
+    if (Number.isFinite(value)) {
+      if (tile.valueEl) tile.valueEl.textContent = formatPercentMetric(value) || '—';
+      if (tile.captionEl) tile.captionEl.textContent = 'Goal ≥ 0.99 fully translated';
+      const status = determineStatus(value, { green: 0.99, amber: 0.95 }, 'higher');
+      applyTileStatus(tile, status);
+    } else {
+      if (tile.valueEl) tile.valueEl.textContent = '—';
+      if (tile.captionEl) tile.captionEl.textContent = 'Translation completeness not recorded yet';
+      applyTileStatus(tile, 'neutral', 'No data');
+    }
   }
 
   function extractProvenanceProportion(summary) {
@@ -1364,42 +1740,13 @@
   }
 
   function renderCoverageCompletenessTile(snapshot) {
-    if (typeof document === 'undefined') return;
-    injectDashboardTilesStyles();
-    const container = ensureDashboardTilesContainer();
-    if (!container) return;
+    const tile = ensureMetricTile(QA_TILE_COVERAGE_ID, {
+      href: QA_TILE_LINKS[QA_TILE_COVERAGE_ID],
+      title: 'Jump to coverage summary',
+    });
+    if (!tile) return;
 
-    let grid = container.querySelector('.qa-dashboard-tiles__grid');
-    if (!grid) {
-      grid = document.createElement('div');
-      grid.className = 'qa-dashboard-tiles__grid';
-      container.appendChild(grid);
-    }
-
-    let tile = document.getElementById(QA_TILE_COVERAGE_ID);
-    if (!tile) {
-      tile = document.createElement('article');
-      tile.id = QA_TILE_COVERAGE_ID;
-      tile.className = 'qa-dashboard-tile';
-
-      const label = document.createElement('p');
-      label.className = 'qa-dashboard-tile__label';
-      tile.appendChild(label);
-
-      const value = document.createElement('p');
-      value.className = 'qa-dashboard-tile__value';
-      tile.appendChild(value);
-
-      const caption = document.createElement('p');
-      caption.className = 'qa-dashboard-tile__caption';
-      tile.appendChild(caption);
-
-      grid.appendChild(tile);
-    }
-
-    const labelEl = tile.querySelector('.qa-dashboard-tile__label');
-    const valueEl = tile.querySelector('.qa-dashboard-tile__value');
-    const captionEl = tile.querySelector('.qa-dashboard-tile__caption');
+    const { labelEl, valueEl, captionEl } = tile;
 
     if (labelEl) {
       labelEl.textContent = 'Coverage completeness';
@@ -1415,12 +1762,14 @@
     if (snapshot === null) {
       if (valueEl) valueEl.textContent = '—';
       if (captionEl) captionEl.textContent = 'Loading coverage snapshot…';
+      applyTileStatus(tile, 'neutral', 'Loading…');
       return;
     }
 
     if (!snapshot || typeof snapshot !== 'object') {
       if (valueEl) valueEl.textContent = '—';
       if (captionEl) captionEl.textContent = 'Coverage snapshot unavailable';
+      applyTileStatus(tile, 'neutral', 'No data');
       return;
     }
 
@@ -1442,9 +1791,12 @@
             ? captionParts.join(' • ')
             : 'Average pct. of target across observed cells';
       }
+      const status = determineStatus(completeness, { green: 0.8, amber: 0.6 }, 'higher');
+      applyTileStatus(tile, status);
     } else {
       if (valueEl) valueEl.textContent = '—';
       if (captionEl) captionEl.textContent = 'Coverage completeness unavailable';
+      applyTileStatus(tile, 'neutral', 'No data');
     }
   }
 
@@ -1511,18 +1863,32 @@
 
   if (typeof window !== 'undefined') {
     window.addEventListener('DOMContentLoaded', () => {
+      renderCodeSwitchTile(null);
+      renderDiarizationTile(null);
+      renderTranslationTile(null);
       renderProvenanceTile(null);
       renderCoverageCompletenessTile(null);
       renderCoverageSnapshot(null);
       fetchTrainingSummary()
         .then((summary) => {
           if (summary) {
+            renderCodeSwitchTile(summary);
+            renderDiarizationTile(summary);
+            renderTranslationTile(summary);
             renderProvenanceTile(summary);
           } else {
+            renderCodeSwitchTile(undefined);
+            renderDiarizationTile(undefined);
+            renderTranslationTile(undefined);
             renderProvenanceTile(undefined);
           }
         })
-        .catch(() => renderProvenanceTile(undefined));
+        .catch(() => {
+          renderCodeSwitchTile(undefined);
+          renderDiarizationTile(undefined);
+          renderTranslationTile(undefined);
+          renderProvenanceTile(undefined);
+        });
 
       Promise.allSettled([fetchCoverageSnapshot(), fetchCoverageAlerts()])
         .then((results) => {
