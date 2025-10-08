@@ -30,6 +30,28 @@
   let latestCoverageAlerts = [];
   let coverageAlertsGeneratedAt = null;
   let activeCoverageHighlightKey = null;
+  let activeCoverageHighlightReason = 'default';
+  let irrSummaryState = null;
+  let irrTrendState = [];
+  let doublePassState = null;
+  const disagreementsState = {
+    entries: [],
+    cells: [],
+    filter: 'all',
+    selectedKey: null,
+    status: 'idle',
+  };
+  const disagreementsUI = {
+    overlay: null,
+    panel: null,
+    closeButton: null,
+    filterSelect: null,
+    summaryBody: null,
+    summaryEmpty: null,
+    list: null,
+    listEmpty: null,
+    hint: null,
+  };
 
   function clone(obj) {
     return obj ? JSON.parse(JSON.stringify(obj)) : obj;
@@ -807,6 +829,7 @@
       .coverage-alerts__item-meta { display: flex; flex-wrap: wrap; gap: .5rem .9rem; font-size: .8rem; color: #7f1d1d; }
       .coverage-alerts__empty { margin: 0; font-size: .85rem; color: var(--muted, #555); }
       .coverage-summary__row--highlight { box-shadow: 0 0 0 3px rgba(211, 47, 47, 0.35) inset; }
+      .coverage-summary__row--disagreement { box-shadow: 0 0 0 3px rgba(249, 168, 37, 0.4) inset; background: rgba(255, 249, 196, 0.6); }
       .qa-dashboard-tile__badge { display: inline-flex; align-items: center; justify-content: center; padding: 0 .55rem; height: 1.3rem; border-radius: 999px; background: #d32f2f; color: #fff; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
       .allocator-widget { margin-top: 1.5rem; padding: 1rem 1.25rem; border-radius: 12px; border: 1px solid var(--border, #dcdcdc); background: var(--card, #fff); display: flex; flex-direction: column; gap: .75rem; }
       .allocator-widget h3 { margin: 0; font-size: 1.05rem; }
@@ -838,11 +861,18 @@
     let targetRow = null;
     const rows = container.querySelectorAll('[data-cell-key]');
     rows.forEach((row) => {
-      if (activeCoverageHighlightKey && row.dataset && row.dataset.cellKey === activeCoverageHighlightKey) {
-        row.classList.add('coverage-summary__row--highlight');
+      row.classList.remove('coverage-summary__row--highlight', 'coverage-summary__row--disagreement');
+      if (
+        activeCoverageHighlightKey &&
+        row.dataset &&
+        row.dataset.cellKey === activeCoverageHighlightKey
+      ) {
+        const highlightClass =
+          activeCoverageHighlightReason === 'disagreement'
+            ? 'coverage-summary__row--disagreement'
+            : 'coverage-summary__row--highlight';
+        row.classList.add(highlightClass);
         if (!targetRow) targetRow = row;
-      } else {
-        row.classList.remove('coverage-summary__row--highlight');
       }
     });
     if (options.scrollIntoView && targetRow) {
@@ -850,18 +880,29 @@
     }
   }
 
-  function highlightCoverageCell(cellKey) {
+  function highlightCoverageCell(cellKey, options = {}) {
+    const reason = options.reason || 'default';
+    const shouldScroll = options.scrollIntoView !== false;
+    const force = options.force === true;
     if (typeof cellKey !== 'string' || !cellKey) {
       activeCoverageHighlightKey = null;
+      activeCoverageHighlightReason = 'default';
       applyCoverageHighlight({ scrollIntoView: false });
       return;
     }
-    if (activeCoverageHighlightKey === cellKey) {
+    if (
+      !force &&
+      activeCoverageHighlightKey === cellKey &&
+      activeCoverageHighlightReason === reason
+    ) {
       activeCoverageHighlightKey = null;
-    } else {
-      activeCoverageHighlightKey = cellKey;
+      activeCoverageHighlightReason = 'default';
+      applyCoverageHighlight({ scrollIntoView: false });
+      return;
     }
-    applyCoverageHighlight({ scrollIntoView: activeCoverageHighlightKey !== null });
+    activeCoverageHighlightKey = cellKey;
+    activeCoverageHighlightReason = reason;
+    applyCoverageHighlight({ scrollIntoView: shouldScroll });
   }
 
   function renderCoverageSnapshot(snapshot) {
@@ -1187,6 +1228,9 @@
   }
 
   const QA_TILE_CONTAINER_ID = 'qaDashboardTiles';
+  const QA_TILE_IRR_ID = 'qaTileIRRAlpha';
+  const QA_TILE_DOUBLE_PASS_ID = 'qaTileDoublePass';
+  const QA_TILE_DISAGREEMENTS_ID = 'qaTileDisagreements';
   const QA_TILE_PROVENANCE_ID = 'qaTileProvenanceComplete';
   const QA_TILE_CODE_SWITCH_ID = 'qaTileCodeSwitchF1';
   const QA_TILE_DIARIZATION_ID = 'qaTileDiarizationMae';
@@ -1194,6 +1238,9 @@
   const QA_TILE_COVERAGE_ID = 'qaTileCoverageCompleteness';
 
   const QA_TILE_LINKS = {
+    [QA_TILE_IRR_ID]: '/stage2/qa-dashboard.html#irr',
+    [QA_TILE_DOUBLE_PASS_ID]: '/stage2/qa-dashboard.html#double-pass',
+    [QA_TILE_DISAGREEMENTS_ID]: '#',
     [QA_TILE_CODE_SWITCH_ID]: '/stage2/review.html?f1_lt=0.85',
     [QA_TILE_DIARIZATION_ID]: '/stage2/review.html?mae_gt=0.5',
     [QA_TILE_TRANSLATION_ID]: '/stage2/review.html?translation_lt=0.95',
@@ -1231,6 +1278,12 @@
       .qa-dashboard-tile__label { margin: 0; font-size: .9rem; color: var(--muted, #555); }
       .qa-dashboard-tile__value { margin: 0; font-size: 2.25rem; font-weight: 600; color: var(--accent, #2b7cff); }
       .qa-dashboard-tile__caption { margin: 0; font-size: .8rem; color: var(--muted, #777); }
+      .qa-dashboard-tile__meta { margin: 0; font-size: .75rem; color: var(--muted, #777); }
+      .qa-dashboard-tile__sparkline { margin-top: .25rem; }
+      .qa-dashboard-tile__sparkline svg { display: block; width: 100%; height: 38px; }
+      .qa-dashboard-tile__sparkline-path { fill: none; stroke: var(--sparkline-color, #5c6bc0); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+      .qa-dashboard-tile__sparkline-area { fill: rgba(92, 107, 192, 0.18); stroke: none; }
+      .qa-dashboard-tile__sparkline-empty { font-size: .75rem; color: var(--muted, #888); }
       .qa-dashboard-tile.qa-status-green { border-color: rgba(46, 125, 50, 0.35); box-shadow: 0 8px 22px rgba(46, 125, 50, 0.08); }
       .qa-dashboard-tile.qa-status-amber { border-color: rgba(249, 168, 37, 0.45); box-shadow: 0 8px 22px rgba(249, 168, 37, 0.08); }
       .qa-dashboard-tile.qa-status-red { border-color: rgba(211, 47, 47, 0.4); box-shadow: 0 8px 22px rgba(211, 47, 47, 0.08); }
@@ -1375,6 +1428,862 @@
     const normalized = Math.max(0, value);
     const decimals = normalized >= 10 ? 1 : normalized >= 1 ? 2 : 3;
     return `${normalized.toFixed(decimals)}s`;
+  }
+
+  function formatAlphaDisplay(value) {
+    const numeric = toFinite(value);
+    if (!Number.isFinite(numeric)) return '—';
+    const clamped = clamp01(numeric);
+    const decimals = clamped >= 0.995 ? 2 : clamped >= 0.1 ? 3 : 4;
+    const text = clamped.toFixed(decimals).replace(/0+$/, '').replace(/\.$/, '');
+    return text || clamped.toFixed(2);
+  }
+
+  function parseTimestamp(value) {
+    if (value == null) return null;
+    if (value instanceof Date) return value.getTime();
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      if (value > 1e12) return value;
+      if (value > 1e9) return value * 1000;
+      if (value > 1e6) return value * 1000;
+      return value;
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      const direct = Number(trimmed);
+      if (Number.isFinite(direct)) {
+        if (direct > 1e12) return direct;
+        if (direct > 1e9) return direct * 1000;
+        if (direct > 1e6) return direct * 1000;
+        return direct;
+      }
+      const parsed = Date.parse(trimmed);
+      if (!Number.isNaN(parsed)) return parsed;
+    }
+    return null;
+  }
+
+  function parseBooleanFlag(value) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value)) return null;
+      if (value === 1) return true;
+      if (value === 0) return false;
+    }
+    if (typeof value === 'string') {
+      const lower = value.trim().toLowerCase();
+      if (!lower) return null;
+      if (['true', '1', 'yes', 'y', 'present', 'pass'].includes(lower)) return true;
+      if (['false', '0', 'no', 'n', 'absent', 'fail'].includes(lower)) return false;
+    }
+    return null;
+  }
+
+  function normalizeCellKey(cell) {
+    if (!cell) return 'unknown';
+    if (typeof cell === 'string') {
+      const trimmed = cell.trim();
+      return trimmed || 'unknown';
+    }
+    if (Array.isArray(cell)) {
+      const parts = cell
+        .map((part) => (part != null ? String(part).trim() : ''))
+        .filter((part) => part);
+      return parts.length ? parts.join(':') : 'unknown';
+    }
+    if (typeof cell === 'object') {
+      const direct =
+        cell.cell_key ||
+        cell.cellKey ||
+        cell.key ||
+        cell.id ||
+        cell.name ||
+        (typeof cell.cell === 'string' ? cell.cell : null);
+      if (typeof direct === 'string' && direct.trim()) return direct.trim();
+      const parts = ['language', 'domain', 'subset', 'bucket', 'label']
+        .map((key) => (cell[key] != null ? String(cell[key]).trim() : ''))
+        .filter(Boolean);
+      if (parts.length) return parts.join(':');
+    }
+    return 'unknown';
+  }
+
+  function formatCellLabel(cellKey) {
+    if (!cellKey) return 'Unknown cell';
+    return String(cellKey)
+      .split(':')
+      .map((part) =>
+        part
+          .replace(/[_\-]+/g, ' ')
+          .replace(/\b\w/g, (letter) => letter.toUpperCase())
+          .trim()
+      )
+      .filter(Boolean)
+      .join(' • ');
+  }
+
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+
+  function describeTrendSeries(series) {
+    if (!Array.isArray(series) || !series.length) return '';
+    return series
+      .map((point) => {
+        const valueText = formatAlphaDisplay(point.value);
+        if (!point) return valueText;
+        const label = point.label || (point.ts ? new Date(point.ts).toLocaleDateString() : '');
+        return label ? `${label}: ${valueText}` : valueText;
+      })
+      .join('; ');
+  }
+
+  function renderSparkline(container, series, options = {}) {
+    if (!container) return;
+    container.innerHTML = '';
+    const sanitized = Array.isArray(series)
+      ? series
+          .map((point, index) => {
+            if (!point || typeof point !== 'object') return null;
+            const value = toFinite(point.value ?? point.alpha ?? point.y ?? point.score);
+            if (!Number.isFinite(value)) return null;
+            const ts =
+              point.ts != null
+                ? parseTimestamp(point.ts)
+                : parseTimestamp(point.date || point.day || point.timestamp);
+            const label =
+              point.label ||
+              (ts != null
+                ? new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+                : point.date || point.day || `Day ${index + 1}`);
+            return {
+              value,
+              ts,
+              label,
+            };
+          })
+          .filter(Boolean)
+      : [];
+
+    if (!sanitized.length) {
+      const empty = document.createElement('span');
+      empty.className = 'qa-dashboard-tile__sparkline-empty';
+      empty.textContent = options.emptyText || 'No trend data';
+      container.appendChild(empty);
+      return;
+    }
+
+    const width = options.width || 140;
+    const height = options.height || 36;
+    const paddingX = options.paddingX != null ? options.paddingX : 6;
+    const paddingY = options.paddingY != null ? options.paddingY : 6;
+    const values = sanitized.map((point) => point.value);
+    const minValue = Math.min.apply(null, values);
+    const maxValue = Math.max.apply(null, values);
+    const range = maxValue - minValue || 1;
+    const usableWidth = Math.max(1, width - paddingX * 2);
+    const usableHeight = Math.max(1, height - paddingY * 2);
+    const step = sanitized.length > 1 ? usableWidth / (sanitized.length - 1) : 0;
+
+    const points = sanitized.map((point, index) => {
+      const normalized = (point.value - minValue) / range;
+      const x = paddingX + step * index;
+      const y = height - paddingY - normalized * usableHeight;
+      return { x, y, data: point };
+    });
+
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('role', 'img');
+    const ariaLabel = options.ariaLabel || 'Trend over time';
+    svg.setAttribute('aria-label', ariaLabel);
+
+    const desc = document.createElementNS(SVG_NS, 'desc');
+    desc.textContent = options.description || describeTrendSeries(sanitized);
+    svg.appendChild(desc);
+
+    if (options.showArea !== false && points.length) {
+      const areaPathParts = [`M${points[0].x} ${height - paddingY}`];
+      points.forEach((point) => {
+        areaPathParts.push(`L${point.x} ${point.y}`);
+      });
+      areaPathParts.push(`L${points[points.length - 1].x} ${height - paddingY} Z`);
+      const areaPath = document.createElementNS(SVG_NS, 'path');
+      areaPath.setAttribute('d', areaPathParts.join(' '));
+      areaPath.classList.add('qa-dashboard-tile__sparkline-area');
+      svg.appendChild(areaPath);
+    }
+
+    const pathParts = points.map((point, index) => {
+      const command = index === 0 ? 'M' : 'L';
+      return `${command}${point.x} ${point.y}`;
+    });
+    if (pathParts.length === 1) {
+      pathParts.push(`L${points[0].x + Math.max(10, usableWidth)} ${points[0].y}`);
+    }
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', pathParts.join(' '));
+    path.classList.add('qa-dashboard-tile__sparkline-path');
+    svg.appendChild(path);
+
+    points.forEach((point) => {
+      const circle = document.createElementNS(SVG_NS, 'circle');
+      circle.setAttribute('cx', point.x);
+      circle.setAttribute('cy', point.y);
+      circle.setAttribute('r', 1.8);
+      circle.setAttribute('fill', 'currentColor');
+      if (point.data) {
+        const title = document.createElementNS(SVG_NS, 'title');
+        const valueText = formatAlphaDisplay(point.data.value);
+        title.textContent = point.data.label
+          ? `${point.data.label}: α ${valueText}`
+          : `α ${valueText}`;
+        circle.appendChild(title);
+      }
+      svg.appendChild(circle);
+    });
+
+    container.appendChild(svg);
+  }
+
+  function ensureTileSparklineContainer(tileElements) {
+    if (!tileElements || !tileElements.tile) return null;
+    let container = tileElements.tile.querySelector('.qa-dashboard-tile__sparkline');
+    if (!container) {
+      container = document.createElement('div');
+      container.className = 'qa-dashboard-tile__sparkline';
+      if (tileElements.captionEl && tileElements.captionEl.parentNode) {
+        tileElements.captionEl.parentNode.insertBefore(
+          container,
+          tileElements.captionEl
+        );
+      } else {
+        tileElements.tile.appendChild(container);
+      }
+    }
+    return container;
+  }
+
+  function ensureTileMetaElement(tileElements, className = 'qa-dashboard-tile__meta') {
+    if (!tileElements || !tileElements.tile) return null;
+    let element = tileElements.tile.querySelector(`.${className}`);
+    if (!element) {
+      element = document.createElement('p');
+      element.className = className;
+      tileElements.tile.appendChild(element);
+    }
+    return element;
+  }
+
+  function extractHasCSVotes(source, options = {}) {
+    if (!source || typeof source !== 'object') return [];
+    const visited = new Set();
+    const votes = [];
+
+    function visit(node) {
+      if (!node || typeof node !== 'object') return;
+      if (visited.has(node)) return;
+      visited.add(node);
+
+      if (Array.isArray(node)) {
+        node.forEach(visit);
+        return;
+      }
+
+      const valueCandidate =
+        node.has_cs ??
+        node.hasCS ??
+        node.code_switch ??
+        node.codeswitch ??
+        node.has_cs_vote ??
+        node.has_code_switch ??
+        node.vote ??
+        node.value;
+      const parsedValue = parseBooleanFlag(valueCandidate);
+      const passCandidate =
+        node.pass ??
+        node.pass_number ??
+        node.passNumber ??
+        node.round ??
+        node.iteration ??
+        node.stage ??
+        node.qa_pass ??
+        node.qa_pass_number ??
+        node.pass_index;
+      const annotatorCandidate =
+        node.annotator_id ??
+        node.annotatorId ??
+        node.annotator ??
+        node.worker_id ??
+        node.workerId ??
+        node.worker ??
+        node.user ??
+        node.user_id ??
+        node.editor ??
+        node.reviewer ??
+        node.reviewer_id ??
+        options.annotatorId ??
+        null;
+
+      if (parsedValue !== null) {
+        const passNumeric = toFinite(passCandidate);
+        votes.push({
+          annotatorId: annotatorCandidate != null ? String(annotatorCandidate) : null,
+          pass: Number.isFinite(passNumeric) ? Math.round(passNumeric) : null,
+          value: parsedValue,
+          raw: node,
+        });
+      }
+
+      const nestedCandidates = [
+        node.votes,
+        node.passes,
+        node.annotations,
+        node.annotators,
+        node.qa,
+        node.metrics,
+      ];
+      nestedCandidates.forEach((candidate) => {
+        if (candidate && typeof candidate === 'object') visit(candidate);
+      });
+
+      Object.keys(node).forEach((key) => {
+        if (
+          key === 'votes' ||
+          key === 'passes' ||
+          key === 'annotations' ||
+          key === 'annotators' ||
+          key === 'qa' ||
+          key === 'metrics'
+        ) {
+          return;
+        }
+        const candidate = node[key];
+        if (candidate && typeof candidate === 'object') visit(candidate);
+      });
+    }
+
+    visit(source);
+
+    const seen = new Set();
+    return votes.filter((vote) => {
+      if (vote.value == null) return false;
+      const key = `${vote.annotatorId || 'unknown'}::${vote.pass != null ? vote.pass : 'na'}::${vote.value}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function deriveCellKeyFromSource(source, fallbackCellKey) {
+    if (!source || typeof source !== 'object') return fallbackCellKey || 'unknown';
+    const candidates = [
+      source.cell,
+      source.cell_key,
+      source.cellKey,
+      source.key,
+      source.id,
+      source.name,
+      source.dataset_cell,
+      source.datasetCell,
+      source.cell_name,
+      source.cellName,
+      source.meta && (source.meta.cell || source.meta.cell_key || source.meta.cellKey),
+      source.metadata && (source.metadata.cell || source.metadata.cell_key || source.metadata.cellKey),
+      source.task && (source.task.cell || source.task.cell_key || source.task.cellKey),
+      source.context && (source.context.cell || source.context.cell_key || source.context.cellKey),
+      fallbackCellKey,
+    ];
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const normalized = normalizeCellKey(candidate);
+      if (normalized && normalized !== 'unknown') return normalized;
+    }
+    return fallbackCellKey || 'unknown';
+  }
+
+  function normalizeDisagreementEntry(entry, fallbackCellKey) {
+    if (!entry || typeof entry !== 'object') return null;
+    const assetIdRaw =
+      entry.assetId ||
+      entry.asset_id ||
+      entry.clip_id ||
+      entry.clipId ||
+      entry.id ||
+      (entry.asset && (entry.asset.asset_id || entry.asset.id)) ||
+      null;
+    const timestamp = parseTimestamp(
+      entry.timestamp ||
+        entry.updated_at ||
+        entry.updatedAt ||
+        entry.reviewed_at ||
+        entry.completed_at ||
+        entry.created_at ||
+        entry.createdAt ||
+        (entry.meta && entry.meta.timestamp)
+    );
+    const cellKey = deriveCellKeyFromSource(entry, fallbackCellKey);
+
+    const collectedVotes = [];
+    [entry, entry.qa, entry.annotations, entry.passes, entry.votes, entry.metrics, entry.details].forEach(
+      (candidate) => {
+        if (!candidate) return;
+        const votes = extractHasCSVotes(candidate);
+        if (votes && votes.length) collectedVotes.push(...votes);
+      }
+    );
+
+    const seenVotes = new Map();
+    const normalizedVotes = collectedVotes
+      .filter((vote) => typeof vote === 'object' && typeof vote.value === 'boolean')
+      .map((vote) => {
+        const annotatorId = vote.annotatorId ? String(vote.annotatorId) : 'unknown';
+        const pass = Number.isFinite(vote.pass) ? Math.round(vote.pass) : null;
+        const key = `${annotatorId}::${pass != null ? pass : 'na'}`;
+        if (seenVotes.has(key)) return null;
+        seenVotes.set(key, true);
+        return {
+          annotatorId,
+          pass,
+          value: !!vote.value,
+          label: vote.value ? 'Yes' : 'No',
+          raw: vote.raw || vote,
+        };
+      })
+      .filter(Boolean);
+
+    if (!normalizedVotes.length) return null;
+    const distinctValues = new Set(normalizedVotes.map((vote) => vote.value));
+    if (normalizedVotes.length < 2 || distinctValues.size < 2) return null;
+
+    normalizedVotes.sort((a, b) => {
+      if (a.pass != null && b.pass != null && a.pass !== b.pass) return a.pass - b.pass;
+      if (a.annotatorId && b.annotatorId) return a.annotatorId.localeCompare(b.annotatorId);
+      return 0;
+    });
+
+    const assetLabel =
+      entry.asset_label ||
+      entry.assetLabel ||
+      entry.clip_name ||
+      entry.clip ||
+      entry.title ||
+      (assetIdRaw != null ? String(assetIdRaw) : 'Unknown asset');
+
+    const keyBase = `${cellKey || 'unknown'}::${assetIdRaw || ''}`.trim();
+    const stableKey = keyBase && keyBase !== '::'
+      ? keyBase
+      : `${cellKey || 'unknown'}::${timestamp != null ? `ts-${timestamp}` : `rand-${Math.random().toString(36).slice(2)}`}`;
+
+    return {
+      key: stableKey,
+      assetId: assetIdRaw != null ? String(assetIdRaw) : null,
+      assetLabel,
+      cellKey: cellKey || 'unknown',
+      cellLabel: formatCellLabel(cellKey || 'unknown'),
+      votes: normalizedVotes,
+      timestamp: timestamp ?? null,
+    };
+  }
+
+  function normalizeDisagreementEntries(collection, fallbackCellKey) {
+    if (!collection) return [];
+    const list = Array.isArray(collection)
+      ? collection
+      : typeof collection === 'object'
+        ? Object.values(collection)
+        : [];
+    return list
+      .map((item) => normalizeDisagreementEntry(item, fallbackCellKey))
+      .filter(Boolean);
+  }
+
+  function dedupeDisagreements(list) {
+    const map = new Map();
+    (list || []).forEach((entry) => {
+      if (!entry || !entry.key) return;
+      if (!map.has(entry.key)) {
+        map.set(entry.key, entry);
+      }
+    });
+    return Array.from(map.values());
+  }
+
+  function computeDisagreementsFromAssets(assets, defaultCellKey) {
+    if (!Array.isArray(assets)) return [];
+    const results = [];
+    assets.forEach((asset) => {
+      if (!asset || typeof asset !== 'object') return;
+      const cellKey = deriveCellKeyFromSource(asset, defaultCellKey);
+      const assetClone = Object.assign({}, asset);
+      if (assetClone && !assetClone.asset_id && assetClone.id) {
+        assetClone.asset_id = assetClone.id;
+      }
+      if (cellKey && !assetClone.cell) {
+        assetClone.cell = cellKey;
+      }
+      const normalized = normalizeDisagreementEntry(assetClone, cellKey);
+      if (normalized) results.push(normalized);
+    });
+    return results;
+  }
+
+  function computeDoublePassFromAssets(assets) {
+    if (!Array.isArray(assets)) return null;
+    const normalized = [];
+    assets.forEach((asset) => {
+      if (!asset || typeof asset !== 'object') return;
+      const assetId =
+        asset.assetId ||
+        asset.asset_id ||
+        asset.clip_id ||
+        asset.clipId ||
+        asset.id ||
+        (asset.asset && (asset.asset.asset_id || asset.asset.id)) ||
+        null;
+      const timestamp = parseTimestamp(
+        asset.timestamp ||
+          asset.updated_at ||
+          asset.updatedAt ||
+          asset.completed_at ||
+          asset.completedAt ||
+          asset.reviewed_at ||
+          (asset.meta && asset.meta.timestamp)
+      );
+      const passCountCandidates = [
+        toFinite(asset.pass_count),
+        toFinite(asset.passCount),
+        toFinite(asset.double_pass_count),
+        toFinite(asset.doublePassCount),
+      ];
+      let passCount = null;
+      passCountCandidates.forEach((candidate) => {
+        if (Number.isFinite(candidate)) {
+          const rounded = Math.max(0, Math.round(candidate));
+          passCount = passCount == null ? rounded : Math.max(passCount, rounded);
+        }
+      });
+      const passesArray = Array.isArray(asset.passes)
+        ? asset.passes
+        : asset.passes && typeof asset.passes === 'object'
+          ? Object.values(asset.passes)
+          : [];
+      if (passesArray.length) {
+        passCount = passCount == null ? passesArray.length : Math.max(passCount, passesArray.length);
+      }
+      const votes = extractHasCSVotes(asset);
+      if (votes.length) {
+        passCount = passCount == null ? votes.length : Math.max(passCount, votes.length);
+      }
+      const cellKey = deriveCellKeyFromSource(asset, null);
+      const assetClone = Object.assign({}, asset);
+      if (!assetClone.asset_id && assetId) assetClone.asset_id = assetId;
+      if (cellKey && !assetClone.cell) assetClone.cell = cellKey;
+      normalized.push({
+        assetId: assetId ? String(assetId) : null,
+        timestamp: timestamp ?? 0,
+        passCount: Number.isFinite(passCount) ? Math.max(0, Math.round(passCount)) : votes.length,
+        cellKey,
+        source: assetClone,
+      });
+    });
+    if (!normalized.length) return null;
+    normalized.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    const sampleSize = Math.min(200, normalized.length);
+    const windowAssets = normalized.slice(0, sampleSize);
+    const doublePassCount = windowAssets.filter((item) => item.passCount >= 2).length;
+    const disagreements = dedupeDisagreements(
+      windowAssets
+        .map((item) => normalizeDisagreementEntry(item.source, item.cellKey))
+        .filter(Boolean)
+    );
+    return {
+      ratio: sampleSize ? doublePassCount / sampleSize : null,
+      sampleSize,
+      doublePassCount,
+      totalCount: normalized.length,
+      disagreements,
+    };
+  }
+
+  function normalizeIrrTrend(raw) {
+    if (!raw) return [];
+    const source = Array.isArray(raw)
+      ? raw
+      : Array.isArray(raw.trend)
+        ? raw.trend
+        : Array.isArray(raw.series)
+          ? raw.series
+          : Array.isArray(raw.data)
+            ? raw.data
+            : [];
+    const normalized = source
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') return null;
+        const value = toFinite(
+          entry.alpha ?? entry.value ?? entry.krippendorff_alpha ?? entry.score ?? entry.y
+        );
+        if (!Number.isFinite(value)) return null;
+        const ts = parseTimestamp(entry.ts ?? entry.timestamp ?? entry.date ?? entry.day);
+        const label =
+          entry.label ||
+          (ts != null
+            ? new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+            : entry.date || entry.day || '');
+        return { value, ts, label };
+      })
+      .filter(Boolean);
+    normalized.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    const start = Math.max(0, normalized.length - 7);
+    return normalized.slice(start);
+  }
+
+  function normalizeIrrData(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const generatedAt = parseTimestamp(
+      raw.generated_at ||
+        raw.generatedAt ||
+        raw.updated_at ||
+        raw.updatedAt ||
+        raw.timestamp ||
+        raw.refreshed_at ||
+        raw.refreshedAt
+    );
+    const alphaCandidates = [
+      raw.alpha,
+      raw.global_alpha,
+      raw.globalAlpha,
+      raw.krippendorff_alpha,
+      raw.krippendorffAlpha,
+      raw.global && (raw.global.alpha || raw.global.krippendorff_alpha),
+      raw.summary && (raw.summary.alpha || raw.summary.krippendorff_alpha),
+    ];
+    let alpha = null;
+    alphaCandidates.forEach((candidate) => {
+      if (alpha != null) return;
+      const numeric = toFinite(candidate);
+      if (Number.isFinite(numeric)) {
+        alpha = numeric;
+      }
+    });
+
+    const cellSources = [];
+    if (Array.isArray(raw.cells)) cellSources.push(...raw.cells);
+    if (Array.isArray(raw.by_cell)) cellSources.push(...raw.by_cell);
+    if (raw.cells && typeof raw.cells === 'object' && !Array.isArray(raw.cells)) {
+      cellSources.push(...Object.values(raw.cells));
+    }
+    if (raw.cell_metrics && typeof raw.cell_metrics === 'object') {
+      cellSources.push(...Object.values(raw.cell_metrics));
+    }
+
+    const cellMap = new Map();
+    const disagreements = [];
+
+    cellSources.forEach((cell) => {
+      if (!cell || typeof cell !== 'object') return;
+      const key = deriveCellKeyFromSource(cell, null);
+      if (!key) return;
+      const alphaValue = toFinite(
+        cell.alpha ?? cell.value ?? cell.krippendorff_alpha ?? cell.krippendorffAlpha
+      );
+      const itemsValue = toFinite(
+        cell.n_items ??
+          cell.nItems ??
+          cell.items ??
+          cell.count ??
+          cell.sample_size ??
+          cell.sampleSize ??
+          cell.n
+      );
+      const existing = cellMap.get(key) || {};
+      cellMap.set(key, {
+        key,
+        label: formatCellLabel(cell.label || existing.label || key),
+        alpha: Number.isFinite(alphaValue) ? alphaValue : existing.alpha ?? null,
+        nItems: Number.isFinite(itemsValue) ? Math.round(itemsValue) : existing.nItems ?? null,
+      });
+      const cellDisagreements = normalizeDisagreementEntries(
+        cell.disagreements || cell.mismatches,
+        key
+      );
+      if (cellDisagreements.length) disagreements.push(...cellDisagreements);
+    });
+
+    const normalizedCells = Array.from(cellMap.values()).sort((a, b) =>
+      a.label.localeCompare(b.label)
+    );
+
+    disagreements.push(...normalizeDisagreementEntries(raw.disagreements || raw.mismatches, null));
+    if (Array.isArray(raw.assets)) {
+      disagreements.push(...computeDisagreementsFromAssets(raw.assets, null));
+    }
+    if (raw.assets && typeof raw.assets === 'object' && !Array.isArray(raw.assets)) {
+      disagreements.push(...computeDisagreementsFromAssets(Object.values(raw.assets), null));
+    }
+    if (Array.isArray(raw.assets_with_disagreement)) {
+      disagreements.push(...normalizeDisagreementEntries(raw.assets_with_disagreement, null));
+    }
+
+    return {
+      alpha,
+      generatedAt,
+      cells: normalizedCells,
+      disagreements: dedupeDisagreements(disagreements),
+    };
+  }
+
+  function normalizeDisagreementsFeed(raw) {
+    if (!raw) return { entries: [], cells: [] };
+    const entries = [];
+    const cellMap = new Map();
+
+    function mergeCells(list) {
+      list.forEach((cell) => {
+        if (!cell || typeof cell !== 'object') return;
+        const key = deriveCellKeyFromSource(cell, null);
+        if (!key) return;
+        const alphaValue = toFinite(
+          cell.alpha ?? cell.value ?? cell.krippendorff_alpha ?? cell.krippendorffAlpha
+        );
+        const itemsValue = toFinite(cell.n_items ?? cell.count ?? cell.items ?? cell.n);
+        const existing = cellMap.get(key) || {};
+        cellMap.set(key, {
+          key,
+          label: formatCellLabel(cell.label || existing.label || key),
+          alpha: Number.isFinite(alphaValue) ? alphaValue : existing.alpha ?? null,
+          nItems: Number.isFinite(itemsValue) ? Math.round(itemsValue) : existing.nItems ?? null,
+        });
+        entries.push(...normalizeDisagreementEntries(cell.disagreements || cell.mismatches, key));
+      });
+    }
+
+    if (Array.isArray(raw)) {
+      entries.push(...normalizeDisagreementEntries(raw, null));
+    } else if (typeof raw === 'object') {
+      if (Array.isArray(raw.disagreements)) {
+        entries.push(...normalizeDisagreementEntries(raw.disagreements, null));
+      }
+      if (Array.isArray(raw.assets)) {
+        entries.push(...computeDisagreementsFromAssets(raw.assets, null));
+      }
+      if (Array.isArray(raw.items)) {
+        entries.push(...normalizeDisagreementEntries(raw.items, null));
+      }
+      if (Array.isArray(raw.cells)) {
+        mergeCells(raw.cells);
+      }
+    }
+
+    const cells = Array.from(cellMap.values()).sort((a, b) => a.label.localeCompare(b.label));
+
+    return { entries: dedupeDisagreements(entries), cells };
+  }
+
+  function normalizeDoublePassData(raw) {
+    if (!raw) return null;
+    if (Array.isArray(raw)) {
+      return computeDoublePassFromAssets(raw);
+    }
+    if (typeof raw !== 'object') return null;
+
+    const results = {
+      ratio: null,
+      sampleSize: null,
+      doublePassCount: null,
+      totalCount: null,
+      disagreements: [],
+    };
+
+    if (Array.isArray(raw.assets)) {
+      const fromAssets = computeDoublePassFromAssets(raw.assets);
+      if (fromAssets) {
+        results.ratio = fromAssets.ratio;
+        results.sampleSize = fromAssets.sampleSize;
+        results.doublePassCount = fromAssets.doublePassCount;
+        results.totalCount = fromAssets.totalCount;
+        results.disagreements = fromAssets.disagreements || [];
+      }
+    }
+
+    const windowCandidate =
+      raw.last_200 || raw.last200 || raw.window_200 || raw.window200 || raw.window;
+    if (windowCandidate && typeof windowCandidate === 'object') {
+      const ratioCandidate = toFinite(
+        windowCandidate.ratio ||
+          windowCandidate.percentage ||
+          windowCandidate.percent ||
+          windowCandidate.value ||
+          windowCandidate.alpha
+      );
+      const sampleCandidate = toFinite(
+        windowCandidate.sample_size ||
+          windowCandidate.sampleSize ||
+          windowCandidate.total ||
+          windowCandidate.count ||
+          windowCandidate.window
+      );
+      const doublePassCandidate = toFinite(
+        windowCandidate.double_pass_count ||
+          windowCandidate.doublePassCount ||
+          windowCandidate.double_pass ||
+          windowCandidate.doublePass
+      );
+      if (Number.isFinite(ratioCandidate)) {
+        results.ratio = ratioCandidate > 1 ? ratioCandidate / 100 : ratioCandidate;
+      }
+      if (Number.isFinite(sampleCandidate)) {
+        results.sampleSize = Math.round(sampleCandidate);
+      }
+      if (Number.isFinite(doublePassCandidate)) {
+        results.doublePassCount = Math.round(doublePassCandidate);
+      }
+      if (Array.isArray(windowCandidate.disagreements)) {
+        results.disagreements = normalizeDisagreementEntries(windowCandidate.disagreements, null);
+      }
+    }
+
+    const ratioCandidate = toFinite(
+      raw.ratio || raw.percentage || raw.percent || raw.double_pass_pct || raw.doublePassPct
+    );
+    if (results.ratio == null && Number.isFinite(ratioCandidate)) {
+      results.ratio = ratioCandidate > 1 ? ratioCandidate / 100 : ratioCandidate;
+    }
+    const sampleCandidate = toFinite(
+      raw.sample_size || raw.sampleSize || raw.count || raw.total || raw.window_size
+    );
+    if (results.sampleSize == null && Number.isFinite(sampleCandidate)) {
+      results.sampleSize = Math.round(sampleCandidate);
+    }
+    const doublePassCandidate = toFinite(
+      raw.double_pass_count || raw.doublePassCount || raw.double_pass || raw.doublePass
+    );
+    if (results.doublePassCount == null && Number.isFinite(doublePassCandidate)) {
+      results.doublePassCount = Math.round(doublePassCandidate);
+    }
+    if (Array.isArray(raw.disagreements)) {
+      results.disagreements = normalizeDisagreementEntries(raw.disagreements, null);
+    }
+    if (Array.isArray(raw.assets_with_disagreement)) {
+      results.disagreements = results.disagreements.concat(
+        normalizeDisagreementEntries(raw.assets_with_disagreement, null)
+      );
+    }
+
+    if (results.sampleSize && results.doublePassCount != null && results.ratio == null) {
+      results.ratio = results.sampleSize
+        ? clamp01(results.doublePassCount / results.sampleSize)
+        : null;
+    }
+    if (results.totalCount == null) {
+      const totalCandidate = toFinite(raw.total || raw.total_count || raw.asset_count);
+      if (Number.isFinite(totalCandidate)) {
+        results.totalCount = Math.round(totalCandidate);
+      }
+    }
+
+    results.disagreements = dedupeDisagreements(results.disagreements);
+    return results;
   }
 
   function getValueAtPath(source, path) {
@@ -1614,6 +2523,554 @@
     }
   }
 
+  function formatRelativeTimestamp(timestamp) {
+    if (!Number.isFinite(timestamp)) return null;
+    const now = Date.now();
+    const diff = now - timestamp;
+    if (!Number.isFinite(diff)) return new Date(timestamp).toLocaleString();
+    if (diff < 60 * 1000) return 'Updated just now';
+    if (diff < 60 * 60 * 1000) {
+      const minutes = Math.max(1, Math.round(diff / (60 * 1000)));
+      return `Updated ${minutes} min ago`;
+    }
+    if (diff < 24 * 60 * 60 * 1000) {
+      const hours = Math.max(1, Math.round(diff / (60 * 60 * 1000)));
+      return `Updated ${hours} hr ago`;
+    }
+    const date = new Date(timestamp);
+    return `Updated ${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  }
+
+  function renderIRRTile(summary, trend) {
+    const tile = ensureMetricTile(QA_TILE_IRR_ID, {
+      href: QA_TILE_LINKS[QA_TILE_IRR_ID],
+      title: 'Krippendorff α thresholds: ≥0.67 good, 0.60–0.67 caution, <0.60 investigate.',
+    });
+    if (!tile) return;
+    if (tile.labelEl) tile.labelEl.textContent = 'Krippendorff α (global)';
+    tile.tile.setAttribute('data-qa-irr', 'true');
+
+    const sparklineContainer = ensureTileSparklineContainer(tile);
+    const metaEl = ensureTileMetaElement(tile);
+
+    if (summary === null) {
+      if (tile.valueEl) tile.valueEl.textContent = '—';
+      if (tile.captionEl) tile.captionEl.textContent = 'Loading inter-rater reliability…';
+      if (metaEl) metaEl.textContent = '';
+      if (sparklineContainer) renderSparkline(sparklineContainer, [], { emptyText: 'Loading…' });
+      applyTileStatus(tile, 'neutral', 'Loading…');
+      return;
+    }
+
+    if (!summary || typeof summary !== 'object') {
+      if (tile.valueEl) tile.valueEl.textContent = '—';
+      if (tile.captionEl) tile.captionEl.textContent = 'IRR data unavailable';
+      if (metaEl) metaEl.textContent = '';
+      if (sparklineContainer) renderSparkline(sparklineContainer, [], { emptyText: 'No trend data' });
+      applyTileStatus(tile, 'neutral', 'No data');
+      return;
+    }
+
+    const alphaValue = Number.isFinite(summary.alpha) ? summary.alpha : null;
+    if (tile.valueEl) tile.valueEl.textContent = alphaValue != null ? formatAlphaDisplay(alphaValue) : '—';
+    const cellCount = Array.isArray(summary.cells) ? summary.cells.length : 0;
+    if (tile.captionEl) {
+      tile.captionEl.textContent = cellCount ? `Across ${cellCount} cells` : 'Trend over last 7 days';
+    }
+    const metaParts = [];
+    if (summary.generatedAt != null) {
+      const relative = formatRelativeTimestamp(summary.generatedAt);
+      if (relative) metaParts.push(relative);
+    }
+    if (metaParts.length && metaEl) {
+      metaEl.textContent = metaParts.join(' • ');
+    } else if (metaEl) {
+      metaEl.textContent = '';
+    }
+
+    if (sparklineContainer) {
+      renderSparkline(sparklineContainer, Array.isArray(trend) ? trend : [], {
+        ariaLabel: 'Krippendorff alpha trend',
+        emptyText: 'No trend data',
+      });
+    }
+
+    if (alphaValue != null) {
+      const status = determineStatus(alphaValue, { green: 0.67, amber: 0.6 }, 'higher');
+      applyTileStatus(tile, status);
+    } else {
+      applyTileStatus(tile, 'neutral', 'No data');
+    }
+  }
+
+  function renderDoublePassTile(stats) {
+    const tile = ensureMetricTile(QA_TILE_DOUBLE_PASS_ID, {
+      href: QA_TILE_LINKS[QA_TILE_DOUBLE_PASS_ID],
+      title: 'Last 200 assets with at least two passes',
+    });
+    if (!tile) return;
+    if (tile.labelEl) tile.labelEl.textContent = 'Double-pass coverage';
+    const metaEl = ensureTileMetaElement(tile);
+
+    if (stats === null) {
+      if (tile.valueEl) tile.valueEl.textContent = '—';
+      if (tile.captionEl) tile.captionEl.textContent = 'Calculating double-pass coverage…';
+      if (metaEl) metaEl.textContent = '';
+      applyTileStatus(tile, 'neutral', 'Loading…');
+      return;
+    }
+
+    if (!stats || typeof stats !== 'object' || stats.ratio == null) {
+      if (tile.valueEl) tile.valueEl.textContent = '—';
+      if (tile.captionEl)
+        tile.captionEl.textContent = 'Double-pass coverage unavailable';
+      if (metaEl) metaEl.textContent = '';
+      applyTileStatus(tile, 'neutral', 'No data');
+      return;
+    }
+
+    const percentText = formatPercentMetric(stats.ratio) || '—';
+    if (tile.valueEl) tile.valueEl.textContent = percentText;
+    const sampleSize = Number.isFinite(stats.sampleSize) ? Math.round(stats.sampleSize) : null;
+    const doublePassCount = Number.isFinite(stats.doublePassCount)
+      ? Math.round(stats.doublePassCount)
+      : null;
+    if (tile.captionEl) {
+      tile.captionEl.textContent = sampleSize
+        ? `Last ${sampleSize} assets`
+        : 'Recent double-pass window';
+    }
+    if (metaEl) {
+      metaEl.textContent = doublePassCount != null ? `${doublePassCount} assets double-passed` : '';
+    }
+    const status = determineStatus(stats.ratio, { green: 0.15, amber: 0.1 }, 'higher');
+    applyTileStatus(tile, status);
+  }
+
+  function getDisagreementFilterLabel() {
+    if (!disagreementsState || !disagreementsState.filter || disagreementsState.filter === 'all') {
+      return 'All cells';
+    }
+    const match = (disagreementsState.cells || []).find(
+      (cell) => cell && cell.key === disagreementsState.filter
+    );
+    if (match) return match.label || formatCellLabel(match.key);
+    return formatCellLabel(disagreementsState.filter);
+  }
+
+  function renderDisagreementsTile(state) {
+    const tile = ensureMetricTile(QA_TILE_DISAGREEMENTS_ID, {
+      href: QA_TILE_LINKS[QA_TILE_DISAGREEMENTS_ID],
+      title: 'Review assets with hasCS disagreements',
+    });
+    if (!tile) return;
+    if (tile.labelEl) tile.labelEl.textContent = 'hasCS disagreements';
+    tile.tile.setAttribute('role', 'button');
+    tile.tile.setAttribute('aria-haspopup', 'dialog');
+    tile.tile.setAttribute('data-qa-disagreements', 'true');
+    if (!tile.tile.dataset.disagreementsListenerAttached) {
+      tile.tile.addEventListener('click', (event) => {
+        event.preventDefault();
+        openDisagreementsPanel();
+      });
+      tile.tile.dataset.disagreementsListenerAttached = 'true';
+    }
+
+    const metaEl = ensureTileMetaElement(tile);
+    const status = state ? state.status : 'loading';
+    const count = state && Array.isArray(state.entries) ? state.entries.length : 0;
+
+    if (status === 'loading') {
+      if (tile.valueEl) tile.valueEl.textContent = '—';
+      if (tile.captionEl) tile.captionEl.textContent = 'Loading disagreements…';
+      if (metaEl) metaEl.textContent = '';
+      applyTileStatus(tile, 'neutral', 'Loading…');
+      return;
+    }
+
+    if (status === 'error') {
+      if (tile.valueEl) tile.valueEl.textContent = '—';
+      if (tile.captionEl) tile.captionEl.textContent = 'Failed to load disagreements';
+      if (metaEl) metaEl.textContent = 'Try refreshing the dashboard';
+      applyTileStatus(tile, 'red', 'Action needed');
+      return;
+    }
+
+    if (tile.valueEl) tile.valueEl.textContent = String(count);
+    if (tile.captionEl) tile.captionEl.textContent = 'Click to review details';
+    if (metaEl) metaEl.textContent = `Filter: ${getDisagreementFilterLabel()}`;
+
+    if (count <= 0) {
+      applyTileStatus(tile, 'green', 'On track');
+    } else if (count < 5) {
+      applyTileStatus(tile, 'amber', 'Needs attention');
+    } else {
+      applyTileStatus(tile, 'red', 'Action needed');
+    }
+  }
+
+  function updateDisagreementsCells(cells) {
+    if (!Array.isArray(cells) || !cells.length) return false;
+    const map = new Map((disagreementsState.cells || []).map((cell) => [cell.key, cell]));
+    let changed = false;
+    cells.forEach((cell) => {
+      if (!cell || !cell.key) return;
+      const existing = map.get(cell.key) || {};
+      const next = {
+        key: cell.key,
+        label: cell.label || existing.label || formatCellLabel(cell.key),
+        alpha: Number.isFinite(cell.alpha) ? cell.alpha : existing.alpha ?? null,
+        nItems: Number.isFinite(cell.nItems) ? Math.round(cell.nItems) : existing.nItems ?? null,
+      };
+      const serializedExisting = JSON.stringify(existing);
+      const serializedNext = JSON.stringify(next);
+      if (serializedExisting !== serializedNext) {
+        changed = true;
+        map.set(cell.key, next);
+      }
+    });
+    if (changed) {
+      disagreementsState.cells = Array.from(map.values()).sort((a, b) =>
+        a.label.localeCompare(b.label)
+      );
+    }
+    return changed;
+  }
+
+  function updateDisagreementsEntries(entries) {
+    if (!Array.isArray(entries) || !entries.length) return false;
+    const map = new Map((disagreementsState.entries || []).map((entry) => [entry.key, entry]));
+    let changed = false;
+    entries.forEach((entry) => {
+      if (!entry || !entry.key) return;
+      const existing = map.get(entry.key);
+      const serializedExisting = existing ? JSON.stringify(existing) : null;
+      const serializedNext = JSON.stringify(entry);
+      if (serializedExisting !== serializedNext) {
+        changed = true;
+        map.set(entry.key, entry);
+      }
+    });
+    if (changed) {
+      disagreementsState.entries = Array.from(map.values()).sort((a, b) => {
+        if (Number.isFinite(b.timestamp) && Number.isFinite(a.timestamp) && b.timestamp !== a.timestamp) {
+          return b.timestamp - a.timestamp;
+        }
+        return (a.assetLabel || '').localeCompare(b.assetLabel || '');
+      });
+    }
+    return changed;
+  }
+
+  function refreshDisagreementsUI() {
+    renderDisagreementsTile(disagreementsState);
+    renderDisagreementsPanel();
+  }
+
+  function buildReviewUrl(entry) {
+    if (!entry) return '/stage2/review.html';
+    const params = new URLSearchParams();
+    if (entry.assetId) params.set('asset', entry.assetId);
+    if (entry.cellKey) params.set('cell', entry.cellKey);
+    const annotators = Array.isArray(entry.votes)
+      ? entry.votes
+          .map((vote) => {
+            if (!vote) return null;
+            const annotator = vote.annotatorId ? String(vote.annotatorId) : 'unknown';
+            const pass = Number.isFinite(vote.pass) ? Math.round(vote.pass) : null;
+            return pass != null ? `${annotator}:p${pass}` : annotator;
+          })
+          .filter(Boolean)
+      : [];
+    if (annotators.length) params.set('annotators', annotators.join(','));
+    const passes = Array.isArray(entry.votes)
+      ? entry.votes
+          .map((vote) => (Number.isFinite(vote.pass) ? Math.round(vote.pass) : null))
+          .filter((value, index, self) => value != null && self.indexOf(value) === index)
+      : [];
+    if (passes.length) params.set('passes', passes.join(','));
+    params.set('mode', 'side-by-side');
+    params.set('focus', 'hasCS');
+    return `/stage2/review.html?${params.toString()}`;
+  }
+
+  function ensureDisagreementsPanel() {
+    if (typeof document === 'undefined') return disagreementsUI;
+    if (disagreementsUI.panel) return disagreementsUI;
+    disagreementsUI.overlay = document.getElementById('qaDisagreementsOverlay');
+    disagreementsUI.panel = document.getElementById('qaDisagreementsPanel');
+    disagreementsUI.closeButton = document.getElementById('qaDisagreementsClose');
+    disagreementsUI.filterSelect = document.getElementById('qaDisagreementsCellFilter');
+    disagreementsUI.summaryBody = document.getElementById('qaDisagreementsSummary');
+    disagreementsUI.summaryEmpty = document.getElementById('qaDisagreementsSummaryEmpty');
+    disagreementsUI.list = document.getElementById('qaDisagreementsList');
+    disagreementsUI.listEmpty = document.getElementById('qaDisagreementsEmpty');
+    disagreementsUI.hint = document.querySelector('.qa-disagreements-panel__hint');
+    disagreementsUI.hintDefault = disagreementsUI.hint ? disagreementsUI.hint.textContent : '';
+
+    if (disagreementsUI.filterSelect) {
+      disagreementsUI.filterSelect.addEventListener('change', (event) => {
+        disagreementsState.filter = event.target.value || 'all';
+        renderDisagreementsTile(disagreementsState);
+        renderDisagreementsPanel();
+      });
+    }
+    if (disagreementsUI.closeButton) {
+      disagreementsUI.closeButton.addEventListener('click', () => closeDisagreementsPanel());
+    }
+    if (disagreementsUI.overlay) {
+      disagreementsUI.overlay.addEventListener('click', () => closeDisagreementsPanel());
+    }
+    if (disagreementsUI.panel) {
+      disagreementsUI.panel.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeDisagreementsPanel();
+        }
+      });
+    }
+
+    return disagreementsUI;
+  }
+
+  function updateDisagreementsStatusFromEntries() {
+    if (disagreementsState.status === 'error') return;
+    disagreementsState.status = disagreementsState.entries && disagreementsState.entries.length
+      ? 'ready'
+      : 'empty';
+  }
+
+  function toggleDisagreementSelection(entry) {
+    if (!entry) {
+      disagreementsState.selectedKey = null;
+      highlightCoverageCell(null);
+      renderDisagreementsPanel();
+      return;
+    }
+    if (disagreementsState.selectedKey === entry.key) {
+      disagreementsState.selectedKey = null;
+      highlightCoverageCell(null);
+    } else {
+      disagreementsState.selectedKey = entry.key;
+      highlightCoverageCell(entry.cellKey, { reason: 'disagreement' });
+    }
+    renderDisagreementsPanel();
+  }
+
+  function renderDisagreementsPanel() {
+    const ui = ensureDisagreementsPanel();
+    if (!ui.panel) return;
+
+    if (ui.hint) {
+      if (disagreementsState.status === 'loading') {
+        ui.hint.textContent = 'Loading disagreements…';
+      } else if (disagreementsState.status === 'error' && !disagreementsState.entries.length) {
+        ui.hint.textContent = 'Unable to load disagreements. Try refreshing later.';
+      } else {
+        ui.hint.textContent =
+          ui.hintDefault ||
+          'Select an asset to highlight its coverage cell and open review links side-by-side.';
+      }
+    }
+
+    const cellMap = new Map();
+    (disagreementsState.cells || []).forEach((cell) => {
+      if (cell && cell.key) cellMap.set(cell.key, cell);
+    });
+    (disagreementsState.entries || []).forEach((entry) => {
+      if (entry && entry.cellKey && !cellMap.has(entry.cellKey)) {
+        cellMap.set(entry.cellKey, {
+          key: entry.cellKey,
+          label: formatCellLabel(entry.cellLabel || entry.cellKey),
+          alpha: null,
+          nItems: null,
+        });
+      }
+    });
+
+    const filterOptions = Array.from(cellMap.values()).sort((a, b) =>
+      (a.label || '').localeCompare(b.label || '')
+    );
+
+    if (ui.filterSelect) {
+      const previous = disagreementsState.filter || 'all';
+      const select = ui.filterSelect;
+      select.innerHTML = '';
+      const allOption = document.createElement('option');
+      allOption.value = 'all';
+      allOption.textContent = 'All cells';
+      select.appendChild(allOption);
+      let hasSelection = previous === 'all';
+      filterOptions.forEach((cell) => {
+        const option = document.createElement('option');
+        option.value = cell.key;
+        option.textContent = cell.label || formatCellLabel(cell.key);
+        if (cell.key === previous) hasSelection = true;
+        select.appendChild(option);
+      });
+      if (!hasSelection) {
+        disagreementsState.filter = 'all';
+      }
+      select.value = disagreementsState.filter || 'all';
+    }
+
+    const summaryTable = ui.summaryBody ? ui.summaryBody.closest('table') : null;
+    if (ui.summaryBody) ui.summaryBody.innerHTML = '';
+    if (!filterOptions.length) {
+      if (summaryTable) summaryTable.classList.add('hide');
+      if (ui.summaryEmpty) ui.summaryEmpty.classList.remove('hide');
+    } else {
+      if (summaryTable) summaryTable.classList.remove('hide');
+      if (ui.summaryEmpty) ui.summaryEmpty.classList.add('hide');
+      const counts = (disagreementsState.entries || []).reduce((acc, entry) => {
+        if (!entry || !entry.cellKey) return acc;
+        acc[entry.cellKey] = (acc[entry.cellKey] || 0) + 1;
+        return acc;
+      }, {});
+      filterOptions.forEach((cell) => {
+        if (!ui.summaryBody) return;
+        const row = document.createElement('tr');
+        const name = document.createElement('th');
+        name.scope = 'row';
+        name.textContent = cell.label || formatCellLabel(cell.key);
+        const alphaCell = document.createElement('td');
+        alphaCell.textContent = Number.isFinite(cell.alpha) ? formatAlphaDisplay(cell.alpha) : '—';
+        const itemsCell = document.createElement('td');
+        itemsCell.textContent = Number.isFinite(cell.nItems) ? Math.round(cell.nItems) : '—';
+        const disagreementsCell = document.createElement('td');
+        disagreementsCell.textContent = counts[cell.key] || 0;
+        row.appendChild(name);
+        row.appendChild(alphaCell);
+        row.appendChild(itemsCell);
+        row.appendChild(disagreementsCell);
+        ui.summaryBody.appendChild(row);
+      });
+    }
+
+    if (ui.list) ui.list.innerHTML = '';
+    const filterValue = disagreementsState.filter || 'all';
+    const filteredEntries =
+      filterValue === 'all'
+        ? disagreementsState.entries || []
+        : (disagreementsState.entries || []).filter((entry) => entry && entry.cellKey === filterValue);
+
+    const stillSelected = filteredEntries.some(
+      (entry) => entry && entry.key === disagreementsState.selectedKey
+    );
+    if (!stillSelected && disagreementsState.selectedKey) {
+      disagreementsState.selectedKey = null;
+      highlightCoverageCell(null);
+    }
+
+    if (!filteredEntries.length) {
+      if (ui.listEmpty) ui.listEmpty.classList.remove('hide');
+      if (ui.list) ui.list.classList.add('hide');
+      return;
+    }
+
+    if (ui.listEmpty) ui.listEmpty.classList.add('hide');
+    if (ui.list) ui.list.classList.remove('hide');
+
+    filteredEntries.forEach((entry) => {
+      if (!entry || !ui.list) return;
+      const item = document.createElement('li');
+      item.className = 'qa-disagreements-list__item';
+      if (entry.key === disagreementsState.selectedKey) {
+        item.classList.add('is-selected');
+      }
+      item.dataset.assetId = entry.assetId || '';
+      item.dataset.cellKey = entry.cellKey || '';
+
+      const meta = document.createElement('div');
+      meta.className = 'qa-disagreements-list__meta';
+      const asset = document.createElement('span');
+      asset.className = 'qa-disagreements-list__asset';
+      asset.textContent = entry.assetLabel || entry.assetId || 'Unknown asset';
+      meta.appendChild(asset);
+      if (entry.cellLabel || entry.cellKey) {
+        const cell = document.createElement('span');
+        cell.textContent = entry.cellLabel || formatCellLabel(entry.cellKey);
+        meta.appendChild(cell);
+      }
+      if (Number.isFinite(entry.timestamp)) {
+        const time = document.createElement('span');
+        const label = formatRelativeTimestamp(entry.timestamp);
+        time.textContent = label || new Date(entry.timestamp).toLocaleString();
+        meta.appendChild(time);
+      }
+      item.appendChild(meta);
+
+      const votesWrapper = document.createElement('div');
+      votesWrapper.className = 'qa-disagreements-list__votes';
+      (entry.votes || []).forEach((vote) => {
+        if (!vote) return;
+        const voteRow = document.createElement('div');
+        voteRow.className = 'qa-disagreements-list__vote';
+        const label = document.createElement('span');
+        label.className = 'qa-disagreements-list__vote-label';
+        const annotator = vote.annotatorId ? String(vote.annotatorId) : 'Annotator';
+        label.textContent = vote.pass != null ? `${annotator} (Pass ${vote.pass})` : annotator;
+        const value = document.createElement('span');
+        value.textContent = vote.label || (vote.value ? 'Yes' : 'No');
+        voteRow.appendChild(label);
+        voteRow.appendChild(document.createTextNode(': '));
+        voteRow.appendChild(value);
+        votesWrapper.appendChild(voteRow);
+      });
+      item.appendChild(votesWrapper);
+
+      const actions = document.createElement('div');
+      actions.className = 'qa-disagreements-list__actions';
+      const reviewLink = document.createElement('a');
+      reviewLink.className = 'qa-disagreements-list__review';
+      reviewLink.href = buildReviewUrl(entry);
+      reviewLink.target = '_blank';
+      reviewLink.rel = 'noopener noreferrer';
+      reviewLink.textContent = 'Open in review';
+      actions.appendChild(reviewLink);
+      item.appendChild(actions);
+
+      item.addEventListener('click', (event) => {
+        if (event.target && event.target.closest && event.target.closest('a')) return;
+        event.preventDefault();
+        toggleDisagreementSelection(entry);
+      });
+
+      ui.list.appendChild(item);
+    });
+  }
+
+  function openDisagreementsPanel() {
+    const ui = ensureDisagreementsPanel();
+    if (!ui.panel) return;
+    if (ui.overlay) {
+      ui.overlay.classList.remove('hide');
+      ui.overlay.setAttribute('aria-hidden', 'false');
+    }
+    ui.panel.classList.remove('hide');
+    ui.panel.setAttribute('aria-hidden', 'false');
+    renderDisagreementsPanel();
+    if (ui.closeButton) {
+      try {
+        ui.closeButton.focus();
+      } catch {}
+    }
+  }
+
+  function closeDisagreementsPanel() {
+    const ui = ensureDisagreementsPanel();
+    if (!ui.panel) return;
+    if (ui.overlay) {
+      ui.overlay.classList.add('hide');
+      ui.overlay.setAttribute('aria-hidden', 'true');
+    }
+    ui.panel.classList.add('hide');
+    ui.panel.setAttribute('aria-hidden', 'true');
+    disagreementsState.selectedKey = null;
+    highlightCoverageCell(null);
+    renderDisagreementsPanel();
+  }
+
   function extractProvenanceProportion(summary) {
     if (!summary || typeof summary !== 'object') return null;
     const nested = summary.provenance_complete;
@@ -1800,16 +3257,64 @@
     }
   }
 
-  function fetchTrainingSummary() {
+  function fetchJsonFromCandidates(urls) {
     if (typeof fetch !== 'function') {
       return Promise.resolve(null);
     }
-    return fetch('training_data_summary.json', { cache: 'no-store' })
-      .then((response) => {
-        if (!response.ok) return null;
-        return response.json().catch(() => null);
-      })
-      .catch(() => null);
+    const queue = Array.isArray(urls) ? urls.filter(Boolean) : [];
+    if (!queue.length) return Promise.resolve(null);
+    const attempt = (index) => {
+      if (index >= queue.length) return Promise.resolve(null);
+      const url = queue[index];
+      return fetch(url, { cache: 'no-store' })
+        .then((response) => {
+          if (!response || !response.ok) throw new Error('Request failed');
+          return response.json().catch(() => null);
+        })
+        .then((data) => {
+          if (data == null) return attempt(index + 1);
+          return data;
+        })
+        .catch(() => attempt(index + 1));
+    };
+    return attempt(0);
+  }
+
+  function fetchTrainingSummary() {
+    return fetchJsonFromCandidates(['training_data_summary.json']);
+  }
+
+  function fetchIRRSummary() {
+    return fetchJsonFromCandidates([
+      '/api/irr',
+      '/api/coverage/irr',
+      '/data/irr/irr.json',
+    ]);
+  }
+
+  function fetchIRRTrend() {
+    return fetchJsonFromCandidates([
+      '/api/irr/trend',
+      '/data/irr/irr_trend.json',
+    ]);
+  }
+
+  function fetchDisagreementsFeed() {
+    return fetchJsonFromCandidates([
+      '/api/irr/disagreements',
+      '/data/irr/disagreements.json',
+    ]);
+  }
+
+  function fetchDoublePassFeed() {
+    return fetchJsonFromCandidates([
+      '/api/stage2/double_pass',
+      '/api/irr/double_pass',
+      '/api/coverage/double_pass',
+      '/data/irr/double_pass.json',
+      '/data/stage2_output/index.json',
+      '/stage2_output/index.json',
+    ]);
   }
 
   function updateCoverageAlerts(feed) {
@@ -1863,12 +3368,19 @@
 
   if (typeof window !== 'undefined') {
     window.addEventListener('DOMContentLoaded', () => {
+      ensureDisagreementsPanel();
+      disagreementsState.status = 'loading';
+      renderIRRTile(null, []);
+      renderDoublePassTile(null);
+      renderDisagreementsTile(disagreementsState);
+      renderDisagreementsPanel();
       renderCodeSwitchTile(null);
       renderDiarizationTile(null);
       renderTranslationTile(null);
       renderProvenanceTile(null);
       renderCoverageCompletenessTile(null);
       renderCoverageSnapshot(null);
+
       fetchTrainingSummary()
         .then((summary) => {
           if (summary) {
@@ -1890,12 +3402,98 @@
           renderProvenanceTile(undefined);
         });
 
+      fetchIRRSummary()
+        .then((data) => {
+          if (data) {
+            const normalized = normalizeIrrData(data);
+            irrSummaryState = normalized;
+            if (normalized) {
+              updateDisagreementsCells(normalized.cells || []);
+              if (normalized.disagreements && normalized.disagreements.length) {
+                updateDisagreementsEntries(normalized.disagreements);
+              }
+              updateDisagreementsStatusFromEntries();
+            } else {
+              irrSummaryState = undefined;
+              updateDisagreementsStatusFromEntries();
+            }
+            renderIRRTile(irrSummaryState, irrTrendState);
+            refreshDisagreementsUI();
+          } else {
+            irrSummaryState = undefined;
+            updateDisagreementsStatusFromEntries();
+            renderIRRTile(undefined, irrTrendState);
+            refreshDisagreementsUI();
+          }
+        })
+        .catch(() => {
+          irrSummaryState = undefined;
+          if (!disagreementsState.entries.length) {
+            disagreementsState.status = 'error';
+          }
+          renderIRRTile(undefined, irrTrendState);
+          refreshDisagreementsUI();
+        });
+
+      fetchIRRTrend()
+        .then((data) => {
+          irrTrendState = normalizeIrrTrend(data) || [];
+          renderIRRTile(irrSummaryState, irrTrendState);
+        })
+        .catch(() => {
+          irrTrendState = [];
+          renderIRRTile(irrSummaryState, irrTrendState);
+        });
+
+      fetchDoublePassFeed()
+        .then((data) => {
+          const stats = data ? normalizeDoublePassData(data) : null;
+          doublePassState = stats;
+          if (stats) {
+            if (stats.disagreements && stats.disagreements.length) {
+              updateDisagreementsEntries(stats.disagreements);
+              updateDisagreementsStatusFromEntries();
+            }
+            renderDoublePassTile(stats);
+          } else {
+            renderDoublePassTile(undefined);
+          }
+          refreshDisagreementsUI();
+        })
+        .catch(() => {
+          doublePassState = undefined;
+          renderDoublePassTile(undefined);
+        });
+
+      fetchDisagreementsFeed()
+        .then((data) => {
+          if (data) {
+            const normalized = normalizeDisagreementsFeed(data);
+            if (normalized) {
+              updateDisagreementsCells(normalized.cells || []);
+              if (normalized.entries && normalized.entries.length) {
+                updateDisagreementsEntries(normalized.entries);
+              }
+              updateDisagreementsStatusFromEntries();
+              refreshDisagreementsUI();
+            }
+          }
+        })
+        .catch(() => {
+          if (!disagreementsState.entries.length) {
+            disagreementsState.status = 'error';
+            refreshDisagreementsUI();
+          }
+        });
+
       Promise.allSettled([fetchCoverageSnapshot(), fetchCoverageAlerts()])
         .then((results) => {
           const snapshotResult = results[0];
           const alertsResult = results[1];
-          const snapshotValue = snapshotResult && snapshotResult.status === 'fulfilled' ? snapshotResult.value : null;
-          const alertsValue = alertsResult && alertsResult.status === 'fulfilled' ? alertsResult.value : null;
+          const snapshotValue =
+            snapshotResult && snapshotResult.status === 'fulfilled' ? snapshotResult.value : null;
+          const alertsValue =
+            alertsResult && alertsResult.status === 'fulfilled' ? alertsResult.value : null;
           updateCoverageAlerts(alertsValue);
 
           if (snapshotValue) {

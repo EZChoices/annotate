@@ -20,6 +20,39 @@
     .qa-report-table th,.qa-report-table td{padding:.65rem 1rem;text-align:left;border-bottom:1px solid var(--border);font-size:.95rem}
     .qa-report-table tbody tr:last-child th,.qa-report-table tbody tr:last-child td{border-bottom:none}
     .qa-report-table thead{background:rgba(0,0,0,0.03);font-size:.85rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+    .qa-disagreements-overlay{position:fixed;inset:0;background:rgba(15,23,42,0.35);backdrop-filter:blur(2px);z-index:80}
+    .qa-disagreements-panel{position:fixed;top:0;right:0;bottom:0;z-index:90;width:min(420px,100%);max-width:100%;background:var(--card);box-shadow:0 12px 32px rgba(15,23,42,0.25);border-left:1px solid var(--border);display:flex;flex-direction:column;transform:translateX(0);transition:transform .2s ease}
+    .qa-disagreements-panel.hide,.qa-disagreements-overlay.hide{display:none}
+    .qa-disagreements-panel__header{display:flex;align-items:center;justify-content:space-between;padding:1rem 1.25rem;border-bottom:1px solid var(--border)}
+    .qa-disagreements-panel__title{margin:0;font-size:1.1rem;font-weight:600}
+    .qa-disagreements-panel__close{background:none;border:none;padding:.35rem .5rem;font-size:1.5rem;line-height:1;border-radius:8px;color:var(--muted);cursor:pointer}
+    .qa-disagreements-panel__close:hover,.qa-disagreements-panel__close:focus-visible{color:var(--accent);outline:2px solid var(--accent);outline-offset:2px}
+    .qa-disagreements-panel__body{padding:1rem 1.25rem;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:1.25rem}
+    .qa-disagreements-panel__controls{display:flex;flex-direction:column;gap:.5rem}
+    .qa-disagreements-panel__controls label{font-size:.85rem;font-weight:600;color:var(--muted)}
+    .qa-disagreements-panel__controls select{padding:.5rem .6rem;border-radius:8px;border:1px solid var(--border);background:var(--card);font-size:.95rem}
+    .qa-disagreements-panel__summary h4{margin:0 0 .5rem 0;font-size:.95rem}
+    .qa-disagreements-summary{width:100%;border-collapse:collapse;font-size:.85rem}
+    .qa-disagreements-summary th,.qa-disagreements-summary td{padding:.5rem .65rem;border:1px solid var(--border);text-align:left}
+    .qa-disagreements-summary thead{background:rgba(0,0,0,0.03);font-weight:600;color:var(--muted)}
+    .qa-disagreements-summary__empty{margin:0;font-size:.85rem;color:var(--muted)}
+    .qa-disagreements-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.75rem}
+    .qa-disagreements-list__item{border:1px solid var(--border);border-radius:12px;padding:.85rem 1rem;background:var(--card);display:flex;flex-direction:column;gap:.55rem;transition:border-color .15s ease,box-shadow .15s ease,transform .15s ease;cursor:pointer}
+    .qa-disagreements-list__item:hover,.qa-disagreements-list__item:focus-within{border-color:var(--accent);box-shadow:0 8px 20px rgba(43,124,255,0.12);transform:translateY(-1px)}
+    .qa-disagreements-list__item.is-selected{border-color:rgba(249,168,37,0.75);box-shadow:0 0 0 3px rgba(249,168,37,0.35) inset;background:rgba(255,249,196,0.65)}
+    .qa-disagreements-list__meta{display:flex;flex-wrap:wrap;gap:.5rem .75rem;font-size:.85rem;color:var(--muted)}
+    .qa-disagreements-list__asset{font-weight:600;color:inherit}
+    .qa-disagreements-list__votes{display:flex;flex-direction:column;gap:.35rem;font-size:.9rem}
+    .qa-disagreements-list__vote{display:flex;align-items:center;gap:.35rem}
+    .qa-disagreements-list__vote-label{font-weight:600}
+    .qa-disagreements-list__actions{display:flex;gap:.5rem;flex-wrap:wrap}
+    .qa-disagreements-list__review{display:inline-flex;align-items:center;justify-content:center;padding:.4rem .75rem;border-radius:999px;border:1px solid var(--accent);background:rgba(43,124,255,0.08);color:var(--accent);font-size:.85rem;text-decoration:none}
+    .qa-disagreements-list__review:hover,.qa-disagreements-list__review:focus-visible{background:rgba(43,124,255,0.16)}
+    .qa-disagreements-list__empty{margin:0;font-size:.9rem;color:var(--muted)}
+    .qa-disagreements-panel__hint{margin:0;font-size:.8rem;color:var(--muted)}
+    @media (max-width:600px){
+      .qa-disagreements-panel{width:100%;border-left:none;border-top:1px solid var(--border)}
+    }
   </style>
 </head>
 <body>
@@ -77,6 +110,40 @@
       </table>
     </section>
   </div>
+
+  <div class="qa-disagreements-overlay hide" id="qaDisagreementsOverlay" aria-hidden="true"></div>
+  <aside class="qa-disagreements-panel hide" id="qaDisagreementsPanel" aria-hidden="true" aria-labelledby="qaDisagreementsTitle">
+    <div class="qa-disagreements-panel__header">
+      <h3 class="qa-disagreements-panel__title" id="qaDisagreementsTitle">hasCS disagreements</h3>
+      <button type="button" class="qa-disagreements-panel__close" id="qaDisagreementsClose" aria-label="Close disagreements panel">&times;</button>
+    </div>
+    <div class="qa-disagreements-panel__body">
+      <p class="qa-disagreements-panel__hint">Select an asset to highlight its coverage cell and open review links side-by-side.</p>
+      <div class="qa-disagreements-panel__controls">
+        <label for="qaDisagreementsCellFilter">Filter by cell</label>
+        <select id="qaDisagreementsCellFilter" aria-label="Filter disagreements by cell"></select>
+      </div>
+      <div class="qa-disagreements-panel__summary">
+        <h4>By-cell Krippendorff α</h4>
+        <table class="qa-disagreements-summary" aria-describedby="qaDisagreementsTitle">
+          <thead>
+            <tr>
+              <th scope="col">Cell</th>
+              <th scope="col">α</th>
+              <th scope="col">Items</th>
+              <th scope="col">Disagreements</th>
+            </tr>
+          </thead>
+          <tbody id="qaDisagreementsSummary"></tbody>
+        </table>
+        <p class="qa-disagreements-summary__empty hide" id="qaDisagreementsSummaryEmpty">No IRR cells available yet.</p>
+      </div>
+      <section aria-label="Disagreement assets">
+        <ul class="qa-disagreements-list" id="qaDisagreementsList"></ul>
+        <p class="qa-disagreements-list__empty hide" id="qaDisagreementsEmpty">No disagreements detected for the selected filter.</p>
+      </section>
+    </div>
+  </aside>
 
   <script src="/public/env.js"></script>
   <script src="/public/config.js"></script>
