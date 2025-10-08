@@ -32,7 +32,7 @@
   let activeCoverageHighlightKey = null;
   let activeCoverageHighlightReason = 'default';
   let irrSummaryState = null;
-  let irrTrendState = [];
+  let irrTrendState = {};
   let doublePassState = null;
   let routingConfigState = null;
   const disagreementsState = {
@@ -41,6 +41,7 @@
     filter: 'all',
     selectedKey: null,
     status: 'idle',
+    specialFilters: {},
   };
   const disagreementsUI = {
     overlay: null,
@@ -1267,6 +1268,7 @@
 
   const QA_TILE_CONTAINER_ID = 'qaDashboardTiles';
   const QA_TILE_IRR_ID = 'qaTileIRRAlpha';
+  const QA_TILE_VOICE_TAG_ID = 'qaTileVoiceTagPresence';
   const QA_TILE_DOUBLE_PASS_ID = 'qaTileDoublePass';
   const QA_TILE_DISAGREEMENTS_ID = 'qaTileDisagreements';
   const QA_TILE_PROVENANCE_ID = 'qaTileProvenanceComplete';
@@ -1277,6 +1279,7 @@
 
   const QA_TILE_LINKS = {
     [QA_TILE_IRR_ID]: '/stage2/qa-dashboard.html#irr',
+    [QA_TILE_VOICE_TAG_ID]: '/stage2/qa-dashboard.html#voice-tag-irr',
     [QA_TILE_DOUBLE_PASS_ID]: '/stage2/qa-dashboard.html#double-pass',
     [QA_TILE_DISAGREEMENTS_ID]: '#',
     [QA_TILE_CODE_SWITCH_ID]: '/stage2/review.html?f1_lt=0.85',
@@ -1284,6 +1287,8 @@
     [QA_TILE_TRANSLATION_ID]: '/stage2/review.html?translation_lt=0.95',
     [QA_TILE_COVERAGE_ID]: '/stage2/qa-dashboard.html?coverage=low#coverageSummary',
   };
+
+  const QA_MIN_CELL_ITEMS = 10;
 
   const QA_STATUS_CLASS_MAP = {
     green: 'qa-status-green',
@@ -1871,6 +1876,7 @@
       }
     );
 
+    const forceInclude = parseBooleanFlag(entry.forceInclude ?? entry.force_include);
     const seenVotes = new Map();
     const normalizedVotes = collectedVotes
       .filter((vote) => typeof vote === 'object' && typeof vote.value === 'boolean')
@@ -1880,11 +1886,13 @@
         const key = `${annotatorId}::${pass != null ? pass : 'na'}`;
         if (seenVotes.has(key)) return null;
         seenVotes.set(key, true);
+        const providedLabel =
+          typeof vote.label === 'string' && vote.label.trim() ? vote.label.trim() : null;
         return {
           annotatorId,
           pass,
           value: !!vote.value,
-          label: vote.value ? 'Yes' : 'No',
+          label: providedLabel || (vote.value ? 'Yes' : 'No'),
           raw: vote.raw || vote,
         };
       })
@@ -1892,7 +1900,7 @@
 
     if (!normalizedVotes.length) return null;
     const distinctValues = new Set(normalizedVotes.map((vote) => vote.value));
-    if (normalizedVotes.length < 2 || distinctValues.size < 2) return null;
+    if (!forceInclude && (normalizedVotes.length < 2 || distinctValues.size < 2)) return null;
 
     normalizedVotes.sort((a, b) => {
       if (a.pass != null && b.pass != null && a.pass !== b.pass) return a.pass - b.pass;
@@ -1913,7 +1921,7 @@
       ? keyBase
       : `${cellKey || 'unknown'}::${timestamp != null ? `ts-${timestamp}` : `rand-${Math.random().toString(36).slice(2)}`}`;
 
-    return {
+    const result = {
       key: stableKey,
       assetId: assetIdRaw != null ? String(assetIdRaw) : null,
       assetLabel,
@@ -1922,6 +1930,14 @@
       votes: normalizedVotes,
       timestamp: timestamp ?? null,
     };
+    const filterKey = entry.filterKey || entry.filter_key;
+    if (filterKey) result.filterKey = String(filterKey);
+    if (forceInclude) result.forceInclude = true;
+    const cueStart = toFinite(entry.cueStart ?? entry.cue_start ?? entry.start);
+    if (Number.isFinite(cueStart)) result.cueStart = cueStart;
+    const cueEnd = toFinite(entry.cueEnd ?? entry.cue_end ?? entry.end);
+    if (Number.isFinite(cueEnd)) result.cueEnd = cueEnd;
+    return result;
   }
 
   function normalizeDisagreementEntries(collection, fallbackCellKey) {
@@ -2045,35 +2061,119 @@
   }
 
   function normalizeIrrTrend(raw) {
-    if (!raw) return [];
-    const source = Array.isArray(raw)
-      ? raw
-      : Array.isArray(raw.trend)
-        ? raw.trend
-        : Array.isArray(raw.series)
-          ? raw.series
-          : Array.isArray(raw.data)
-            ? raw.data
-            : [];
-    const normalized = source
-      .map((entry) => {
-        if (!entry || typeof entry !== 'object') return null;
-        const value = toFinite(
-          entry.alpha ?? entry.value ?? entry.krippendorff_alpha ?? entry.score ?? entry.y
+    if (!raw) return {};
+
+    function normalizeSeries(series) {
+      if (!Array.isArray(series)) return [];
+      const normalized = series
+        .map((entry) => {
+          if (!entry || typeof entry !== 'object') return null;
+          const value = toFinite(
+            entry.alpha ??
+              entry.alpha_global ??
+              entry.value ??
+              entry.krippendorff_alpha ??
+              entry.score ??
+              entry.y
+          );
+          if (!Number.isFinite(value)) return null;
+          const ts = parseTimestamp(entry.ts ?? entry.timestamp ?? entry.date ?? entry.day);
+          const label =
+            entry.label ||
+            (ts != null
+              ? new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+              : entry.date || entry.day || '');
+          return { value, ts, label };
+        })
+        .filter(Boolean);
+      normalized.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+      const start = Math.max(0, normalized.length - 7);
+      return normalized.slice(start);
+    }
+
+    if (Array.isArray(raw)) {
+      return { hasCS: normalizeSeries(raw) };
+    }
+
+    const result = {};
+    const source =
+      raw && typeof raw === 'object'
+        ? raw
+        : Array.isArray(raw && raw.trend)
+          ? { hasCS: raw.trend }
+          : {};
+    Object.keys(source || {}).forEach((key) => {
+      const series = source[key];
+      if (Array.isArray(series)) {
+        result[key] = normalizeSeries(series);
+      }
+    });
+    return result;
+  }
+
+  function normalizeIrrMetric(key, source) {
+    if (!source || typeof source !== 'object') return null;
+    const alpha = toFinite(
+      source.alpha_global ??
+        source.alpha ??
+        source.global_alpha ??
+        source.krippendorff_alpha ??
+        source.krippendorffAlpha ??
+        source.value
+    );
+    const nItems = toFinite(
+      source.n_items ??
+        source.nItems ??
+        source.n_items_global ??
+        source.items ??
+        source.count ??
+        source.sample_size ??
+        source.sampleSize ??
+        source.n
+    );
+    const cellSources = [];
+    if (Array.isArray(source.by_cell)) cellSources.push(...source.by_cell);
+    if (Array.isArray(source.cells)) cellSources.push(...source.cells);
+
+    const cells = cellSources
+      .map((cell) => {
+        if (!cell || typeof cell !== 'object') return null;
+        const cellKey = deriveCellKeyFromSource(cell, null);
+        if (!cellKey) return null;
+        const alphaValue = toFinite(
+          cell.alpha ?? cell.value ?? cell.krippendorff_alpha ?? cell.krippendorffAlpha
         );
-        if (!Number.isFinite(value)) return null;
-        const ts = parseTimestamp(entry.ts ?? entry.timestamp ?? entry.date ?? entry.day);
-        const label =
-          entry.label ||
-          (ts != null
-            ? new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-            : entry.date || entry.day || '');
-        return { value, ts, label };
+        const itemsValue = toFinite(
+          cell.n_items ??
+            cell.nItems ??
+            cell.items ??
+            cell.count ??
+            cell.sample_size ??
+            cell.sampleSize ??
+            cell.n
+        );
+        return {
+          key: cellKey,
+          label: formatCellLabel(cell.label || cellKey),
+          alpha: Number.isFinite(alphaValue) ? alphaValue : null,
+          nItems: Number.isFinite(itemsValue) ? Math.round(itemsValue) : null,
+        };
       })
-      .filter(Boolean);
-    normalized.sort((a, b) => (a.ts || 0) - (b.ts || 0));
-    const start = Math.max(0, normalized.length - 7);
-    return normalized.slice(start);
+      .filter(Boolean)
+      .sort((a, b) => a.label.localeCompare(b.label));
+
+    const missingVoiceTags = Array.isArray(source.missing_voice_tags || source.missingVoiceTags)
+      ? source.missing_voice_tags || source.missingVoiceTags
+      : [];
+
+    return {
+      key,
+      alpha: Number.isFinite(alpha) ? alpha : null,
+      nItems: Number.isFinite(nItems) ? Math.round(nItems) : null,
+      cells,
+      missingVoiceTags,
+      source,
+    };
   }
 
   function normalizeIrrData(raw) {
@@ -2087,71 +2187,42 @@
         raw.refreshed_at ||
         raw.refreshedAt
     );
-    const alphaCandidates = [
-      raw.alpha,
-      raw.global_alpha,
-      raw.globalAlpha,
-      raw.krippendorff_alpha,
-      raw.krippendorffAlpha,
-      raw.global && (raw.global.alpha || raw.global.krippendorff_alpha),
-      raw.summary && (raw.summary.alpha || raw.summary.krippendorff_alpha),
-    ];
-    let alpha = null;
-    alphaCandidates.forEach((candidate) => {
-      if (alpha != null) return;
-      const numeric = toFinite(candidate);
-      if (Number.isFinite(numeric)) {
-        alpha = numeric;
-      }
+    const metrics = {};
+    const metricSources = [];
+    const hasCSMetric = raw.hasCS || raw.has_cs;
+    if (hasCSMetric && typeof hasCSMetric === 'object') {
+      metricSources.push(['hasCS', hasCSMetric]);
+    }
+    const voiceTagMetric = raw.voiceTag_presence || raw.voice_tag_presence || raw.voiceTagPresence;
+    if (voiceTagMetric && typeof voiceTagMetric === 'object') {
+      metricSources.push(['voiceTag_presence', voiceTagMetric]);
+    }
+    if (!metricSources.length) {
+      metricSources.push(['hasCS', raw]);
+    }
+
+    metricSources.forEach(([key, source]) => {
+      const normalized = normalizeIrrMetric(key, source);
+      if (normalized) metrics[key] = normalized;
     });
 
-    const cellSources = [];
-    if (Array.isArray(raw.cells)) cellSources.push(...raw.cells);
-    if (Array.isArray(raw.by_cell)) cellSources.push(...raw.by_cell);
-    if (raw.cells && typeof raw.cells === 'object' && !Array.isArray(raw.cells)) {
-      cellSources.push(...Object.values(raw.cells));
-    }
-    if (raw.cell_metrics && typeof raw.cell_metrics === 'object') {
-      cellSources.push(...Object.values(raw.cell_metrics));
-    }
+    const defaultMetricKey = metrics.hasCS ? 'hasCS' : Object.keys(metrics)[0] || null;
+    const defaultMetric = defaultMetricKey ? metrics[defaultMetricKey] : null;
 
     const cellMap = new Map();
-    const disagreements = [];
-
-    cellSources.forEach((cell) => {
-      if (!cell || typeof cell !== 'object') return;
-      const key = deriveCellKeyFromSource(cell, null);
-      if (!key) return;
-      const alphaValue = toFinite(
-        cell.alpha ?? cell.value ?? cell.krippendorff_alpha ?? cell.krippendorffAlpha
-      );
-      const itemsValue = toFinite(
-        cell.n_items ??
-          cell.nItems ??
-          cell.items ??
-          cell.count ??
-          cell.sample_size ??
-          cell.sampleSize ??
-          cell.n
-      );
-      const existing = cellMap.get(key) || {};
-      cellMap.set(key, {
-        key,
-        label: formatCellLabel(cell.label || existing.label || key),
-        alpha: Number.isFinite(alphaValue) ? alphaValue : existing.alpha ?? null,
-        nItems: Number.isFinite(itemsValue) ? Math.round(itemsValue) : existing.nItems ?? null,
+    if (defaultMetric && Array.isArray(defaultMetric.cells)) {
+      defaultMetric.cells.forEach((cell) => {
+        if (!cell || !cell.key) return;
+        cellMap.set(cell.key, {
+          key: cell.key,
+          label: cell.label,
+          alpha: Number.isFinite(cell.alpha) ? cell.alpha : null,
+          nItems: Number.isFinite(cell.nItems) ? cell.nItems : null,
+        });
       });
-      const cellDisagreements = normalizeDisagreementEntries(
-        cell.disagreements || cell.mismatches,
-        key
-      );
-      if (cellDisagreements.length) disagreements.push(...cellDisagreements);
-    });
+    }
 
-    const normalizedCells = Array.from(cellMap.values()).sort((a, b) =>
-      a.label.localeCompare(b.label)
-    );
-
+    const disagreements = [];
     disagreements.push(...normalizeDisagreementEntries(raw.disagreements || raw.mismatches, null));
     if (Array.isArray(raw.assets)) {
       disagreements.push(...computeDisagreementsFromAssets(raw.assets, null));
@@ -2162,13 +2233,105 @@
     if (Array.isArray(raw.assets_with_disagreement)) {
       disagreements.push(...normalizeDisagreementEntries(raw.assets_with_disagreement, null));
     }
+    Object.values(metrics).forEach((metric) => {
+      if (!metric || !metric.source) return;
+      const metricSource = metric.source;
+      if (Array.isArray(metricSource.disagreements)) {
+        disagreements.push(...normalizeDisagreementEntries(metricSource.disagreements, null));
+      }
+      if (Array.isArray(metricSource.mismatches)) {
+        disagreements.push(...normalizeDisagreementEntries(metricSource.mismatches, null));
+      }
+      if (Array.isArray(metricSource.cells)) {
+        metricSource.cells.forEach((cell) => {
+          const key = deriveCellKeyFromSource(cell, null);
+          if (!key) return;
+          if (!cellMap.has(key)) {
+            cellMap.set(key, {
+              key,
+              label: formatCellLabel(cell.label || key),
+              alpha: null,
+              nItems: null,
+            });
+          }
+        });
+      }
+    });
+
+    const voiceTagMissingEntries = metrics.voiceTag_presence
+      ? normalizeVoiceTagMissingEntries(metrics.voiceTag_presence.missingVoiceTags)
+      : [];
+    if (metrics.voiceTag_presence) {
+      metrics.voiceTag_presence.missingEntries = voiceTagMissingEntries;
+    }
 
     return {
-      alpha,
       generatedAt,
-      cells: normalizedCells,
+      metrics,
+      defaultMetricKey,
+      cells: Array.from(cellMap.values()).sort((a, b) => a.label.localeCompare(b.label)),
       disagreements: dedupeDisagreements(disagreements),
+      voiceTagMissingEntries,
     };
+  }
+
+  function summarizeCueText(text) {
+    if (!text) return '';
+    const trimmed = String(text).trim();
+    if (!trimmed) return '';
+    return trimmed.length > 60 ? `${trimmed.slice(0, 57)}…` : trimmed;
+  }
+
+  function normalizeVoiceTagMissingEntries(list) {
+    if (!Array.isArray(list) || !list.length) return [];
+    return list
+      .map((item, index) => {
+        if (!item || typeof item !== 'object') return null;
+        const cellKey =
+          (typeof item.cell === 'string' && item.cell.trim()) || deriveCellKeyFromSource(item, null) || 'unknown';
+        const assetIdRaw = item.asset_id ?? item.assetId ?? null;
+        const assetLabel =
+          item.asset_label || item.assetLabel || (assetIdRaw != null ? String(assetIdRaw) : 'Unknown asset');
+        const start = toFinite(item.start ?? item.cueStart ?? item.begin);
+        const end = toFinite(item.end ?? item.cueEnd ?? item.finish);
+        const pass1 = item.pass_1 || item.pass1 || {};
+        const pass2 = item.pass_2 || item.pass2 || {};
+        const voteEntries = [
+          {
+            annotatorId: pass1.annotator_id ?? pass1.annotatorId ?? null,
+            pass: 1,
+            value: false,
+            label: pass1.text ? `No tag — "${summarizeCueText(pass1.text)}"` : 'No tag',
+            raw: pass1,
+          },
+          {
+            annotatorId: pass2.annotator_id ?? pass2.annotatorId ?? null,
+            pass: 2,
+            value: false,
+            label: pass2.text ? `No tag — "${summarizeCueText(pass2.text)}"` : 'No tag',
+            raw: pass2,
+          },
+        ];
+        const rawEntry = {
+          asset_id: assetIdRaw,
+          assetLabel,
+          cell: cellKey,
+          filterKey: 'voiceTagMissing',
+          forceInclude: true,
+          cueStart: start,
+          cueEnd: end,
+          votes: voteEntries,
+        };
+        const normalized = normalizeDisagreementEntry(rawEntry, cellKey);
+        if (!normalized) return null;
+        const uniqueKey = `${normalized.key}::voiceTagMissing::${index}`;
+        normalized.key = uniqueKey;
+        normalized.filterKey = 'voiceTagMissing';
+        if (Number.isFinite(start)) normalized.cueStart = start;
+        if (Number.isFinite(end)) normalized.cueEnd = end;
+        return normalized;
+      })
+      .filter(Boolean);
   }
 
   function normalizeDisagreementsFeed(raw) {
@@ -2651,7 +2814,7 @@
     tileElements.tile.title = tooltip || IRR_TILE_BASE_TOOLTIP;
   }
 
-  function renderIRRTile(summary, trend) {
+  function renderIRRTile(summary, trendByMetric) {
     const tile = ensureMetricTile(QA_TILE_IRR_ID, {
       href: QA_TILE_LINKS[QA_TILE_IRR_ID],
       title: IRR_TILE_BASE_TOOLTIP,
@@ -2682,9 +2845,10 @@
       return;
     }
 
-    const alphaValue = Number.isFinite(summary.alpha) ? summary.alpha : null;
+    const metric = summary && summary.metrics ? summary.metrics.hasCS : null;
+    const alphaValue = metric && Number.isFinite(metric.alpha) ? metric.alpha : null;
     if (tile.valueEl) tile.valueEl.textContent = alphaValue != null ? formatAlphaDisplay(alphaValue) : '—';
-    const cellCount = Array.isArray(summary.cells) ? summary.cells.length : 0;
+    const cellCount = metric && Array.isArray(metric.cells) ? metric.cells.length : 0;
     if (tile.captionEl) {
       tile.captionEl.textContent = cellCount ? `Across ${cellCount} cells` : 'Trend over last 7 days';
     }
@@ -2700,8 +2864,76 @@
     }
 
     if (sparklineContainer) {
-      renderSparkline(sparklineContainer, Array.isArray(trend) ? trend : [], {
+      const series = trendByMetric && Array.isArray(trendByMetric.hasCS)
+        ? trendByMetric.hasCS
+        : Array.isArray(trendByMetric)
+          ? trendByMetric
+          : [];
+      renderSparkline(sparklineContainer, series, {
         ariaLabel: 'Krippendorff alpha trend',
+        emptyText: 'No trend data',
+      });
+    }
+
+    if (alphaValue != null) {
+      const status = determineStatus(alphaValue, { green: 0.67, amber: 0.6 }, 'higher');
+      applyTileStatus(tile, status);
+    } else {
+      applyTileStatus(tile, 'neutral', 'No data');
+    }
+  }
+
+  function renderVoiceTagTile(summary, trendByMetric) {
+    const tile = ensureMetricTile(QA_TILE_VOICE_TAG_ID, {
+      href: QA_TILE_LINKS[QA_TILE_VOICE_TAG_ID],
+      title: IRR_TILE_BASE_TOOLTIP,
+    });
+    if (!tile) return;
+    if (tile.labelEl) tile.labelEl.textContent = 'IRR VoiceTag (Presence)';
+    tile.tile.setAttribute('data-qa-irr-voice-tag', 'true');
+
+    const sparklineContainer = ensureTileSparklineContainer(tile);
+    const metaEl = ensureTileMetaElement(tile);
+
+    if (summary === null) {
+      if (tile.valueEl) tile.valueEl.textContent = '—';
+      if (tile.captionEl) tile.captionEl.textContent = 'Loading voice-tag reliability…';
+      if (metaEl) metaEl.textContent = '';
+      if (sparklineContainer) renderSparkline(sparklineContainer, [], { emptyText: 'Loading…' });
+      applyTileStatus(tile, 'neutral', 'Loading…');
+      return;
+    }
+
+    const metric = summary && summary.metrics ? summary.metrics.voiceTag_presence : null;
+    if (!summary || typeof summary !== 'object' || !metric) {
+      if (tile.valueEl) tile.valueEl.textContent = '—';
+      if (tile.captionEl) tile.captionEl.textContent = 'Voice-tag presence IRR unavailable';
+      if (metaEl) metaEl.textContent = '';
+      if (sparklineContainer) renderSparkline(sparklineContainer, [], { emptyText: 'No trend data' });
+      applyTileStatus(tile, 'neutral', 'No data');
+      return;
+    }
+
+    const alphaValue = Number.isFinite(metric.alpha) ? metric.alpha : null;
+    if (tile.valueEl) tile.valueEl.textContent = alphaValue != null ? formatAlphaDisplay(alphaValue) : '—';
+    const cellCount = Array.isArray(metric.cells) ? metric.cells.length : 0;
+    if (tile.captionEl) {
+      tile.captionEl.textContent = cellCount ? `Across ${cellCount} cells` : 'Trend over last 7 days';
+    }
+
+    const metaParts = [];
+    if (summary.generatedAt != null) {
+      const relative = formatRelativeTimestamp(summary.generatedAt);
+      if (relative) metaParts.push(relative);
+    }
+    if (metaEl) metaEl.textContent = metaParts.length ? metaParts.join(' • ') : '';
+
+    if (sparklineContainer) {
+      const series = trendByMetric && Array.isArray(trendByMetric.voiceTag_presence)
+        ? trendByMetric.voiceTag_presence
+        : [];
+      renderSparkline(sparklineContainer, series, {
+        ariaLabel: 'Voice-tag presence alpha trend',
         emptyText: 'No trend data',
       });
     }
@@ -2762,6 +2994,8 @@
     if (!disagreementsState || !disagreementsState.filter || disagreementsState.filter === 'all') {
       return 'All cells';
     }
+    const special = getSpecialFilterInfo(disagreementsState.filter);
+    if (special && special.label) return special.label;
     const match = (disagreementsState.cells || []).find(
       (cell) => cell && cell.key === disagreementsState.filter
     );
@@ -2789,7 +3023,8 @@
 
     const metaEl = ensureTileMetaElement(tile);
     const status = state ? state.status : 'loading';
-    const count = state && Array.isArray(state.entries) ? state.entries.length : 0;
+    const entriesForFilter = getEntriesForFilter(disagreementsState.filter || 'all');
+    const count = Array.isArray(entriesForFilter) ? entriesForFilter.length : 0;
 
     if (status === 'loading') {
       if (tile.valueEl) tile.valueEl.textContent = '—';
@@ -2811,7 +3046,10 @@
     if (tile.captionEl) tile.captionEl.textContent = 'Click to review details';
     if (metaEl) metaEl.textContent = `Filter: ${getDisagreementFilterLabel()}`;
 
-    if (count <= 0) {
+    const isSpecialFilter = disagreementsState.filter && getSpecialFilterInfo(disagreementsState.filter);
+    if (isSpecialFilter) {
+      applyTileStatus(tile, 'neutral', 'Custom filter');
+    } else if (count <= 0) {
       applyTileStatus(tile, 'green', 'On track');
     } else if (count < 5) {
       applyTileStatus(tile, 'amber', 'Needs attention');
@@ -2873,6 +3111,49 @@
     return changed;
   }
 
+  function setSpecialFilterEntries(key, label, entries) {
+    if (!key) return false;
+    const normalizedKey = String(key);
+    const existing = disagreementsState.specialFilters || {};
+    if (!entries || !entries.length) {
+      if (existing[normalizedKey]) {
+        delete existing[normalizedKey];
+        disagreementsState.specialFilters = existing;
+        if (disagreementsState.filter === normalizedKey) {
+          disagreementsState.filter = 'all';
+        }
+        return true;
+      }
+      return false;
+    }
+    existing[normalizedKey] = {
+      label: label || formatCellLabel(normalizedKey),
+      entries: entries.slice(),
+    };
+    disagreementsState.specialFilters = existing;
+    return true;
+  }
+
+  function getSpecialFilterInfo(key) {
+    if (!key) return null;
+    return disagreementsState.specialFilters
+      ? disagreementsState.specialFilters[String(key)] || null
+      : null;
+  }
+
+  function getEntriesForFilter(filterValue) {
+    if (!filterValue || filterValue === 'all') {
+      return disagreementsState.entries || [];
+    }
+    const special = getSpecialFilterInfo(filterValue);
+    if (special && Array.isArray(special.entries)) {
+      return special.entries;
+    }
+    return (disagreementsState.entries || []).filter(
+      (entry) => entry && entry.cellKey === filterValue
+    );
+  }
+
   function refreshDisagreementsUI() {
     renderDisagreementsTile(disagreementsState);
     renderDisagreementsPanel();
@@ -2914,6 +3195,9 @@
     disagreementsUI.filterSelect = document.getElementById('qaDisagreementsCellFilter');
     disagreementsUI.summaryBody = document.getElementById('qaDisagreementsSummary');
     disagreementsUI.summaryEmpty = document.getElementById('qaDisagreementsSummaryEmpty');
+    disagreementsUI.summaryEmptyDefault = disagreementsUI.summaryEmpty
+      ? disagreementsUI.summaryEmpty.textContent
+      : '';
     disagreementsUI.list = document.getElementById('qaDisagreementsList');
     disagreementsUI.listEmpty = document.getElementById('qaDisagreementsEmpty');
     disagreementsUI.hint = document.querySelector('.qa-disagreements-panel__hint');
@@ -2999,9 +3283,18 @@
       }
     });
 
-    const filterOptions = Array.from(cellMap.values()).sort((a, b) =>
+    const cellOptions = Array.from(cellMap.values()).sort((a, b) =>
       (a.label || '').localeCompare(b.label || '')
     );
+    const specialOptions = Object.keys(disagreementsState.specialFilters || {})
+      .map((key) => ({
+        key,
+        label:
+          disagreementsState.specialFilters[key] && disagreementsState.specialFilters[key].label
+            ? disagreementsState.specialFilters[key].label
+            : formatCellLabel(key),
+      }))
+      .sort((a, b) => (a.label || '').localeCompare(b.label || ''));
 
     if (ui.filterSelect) {
       const previous = disagreementsState.filter || 'all';
@@ -3012,11 +3305,19 @@
       allOption.textContent = 'All cells';
       select.appendChild(allOption);
       let hasSelection = previous === 'all';
-      filterOptions.forEach((cell) => {
+      cellOptions.forEach((cell) => {
         const option = document.createElement('option');
         option.value = cell.key;
         option.textContent = cell.label || formatCellLabel(cell.key);
         if (cell.key === previous) hasSelection = true;
+        select.appendChild(option);
+      });
+      specialOptions.forEach((optionInfo) => {
+        const option = document.createElement('option');
+        option.value = optionInfo.key;
+        option.textContent = optionInfo.label;
+        option.dataset.special = 'true';
+        if (optionInfo.key === previous) hasSelection = true;
         select.appendChild(option);
       });
       if (!hasSelection) {
@@ -3027,9 +3328,16 @@
 
     const summaryTable = ui.summaryBody ? ui.summaryBody.closest('table') : null;
     if (ui.summaryBody) ui.summaryBody.innerHTML = '';
-    if (!filterOptions.length) {
+    const filterValue = disagreementsState.filter || 'all';
+    const isSpecialFilter = filterValue !== 'all' && !!getSpecialFilterInfo(filterValue);
+    if (!cellOptions.length || isSpecialFilter) {
       if (summaryTable) summaryTable.classList.add('hide');
-      if (ui.summaryEmpty) ui.summaryEmpty.classList.remove('hide');
+      if (ui.summaryEmpty) {
+        ui.summaryEmpty.textContent = isSpecialFilter
+          ? 'Summary not available for this filter.'
+          : disagreementsUI.summaryEmptyDefault || 'No cells to display.';
+        ui.summaryEmpty.classList.remove('hide');
+      }
     } else {
       if (summaryTable) summaryTable.classList.remove('hide');
       if (ui.summaryEmpty) ui.summaryEmpty.classList.add('hide');
@@ -3038,14 +3346,20 @@
         acc[entry.cellKey] = (acc[entry.cellKey] || 0) + 1;
         return acc;
       }, {});
-      filterOptions.forEach((cell) => {
+      cellOptions.forEach((cell) => {
         if (!ui.summaryBody) return;
         const row = document.createElement('tr');
         const name = document.createElement('th');
         name.scope = 'row';
         name.textContent = cell.label || formatCellLabel(cell.key);
         const alphaCell = document.createElement('td');
-        alphaCell.textContent = Number.isFinite(cell.alpha) ? formatAlphaDisplay(cell.alpha) : '—';
+        if (Number.isFinite(cell.alpha)) {
+          alphaCell.textContent = formatAlphaDisplay(cell.alpha);
+        } else if (Number.isFinite(cell.nItems) && cell.nItems < QA_MIN_CELL_ITEMS) {
+          alphaCell.textContent = 'n<10';
+        } else {
+          alphaCell.textContent = '—';
+        }
         const itemsCell = document.createElement('td');
         itemsCell.textContent = Number.isFinite(cell.nItems) ? Math.round(cell.nItems) : '—';
         const disagreementsCell = document.createElement('td');
@@ -3059,11 +3373,7 @@
     }
 
     if (ui.list) ui.list.innerHTML = '';
-    const filterValue = disagreementsState.filter || 'all';
-    const filteredEntries =
-      filterValue === 'all'
-        ? disagreementsState.entries || []
-        : (disagreementsState.entries || []).filter((entry) => entry && entry.cellKey === filterValue);
+    const filteredEntries = getEntriesForFilter(filterValue);
 
     const stillSelected = filteredEntries.some(
       (entry) => entry && entry.key === disagreementsState.selectedKey
@@ -3102,6 +3412,11 @@
         const cell = document.createElement('span');
         cell.textContent = entry.cellLabel || formatCellLabel(entry.cellKey);
         meta.appendChild(cell);
+      }
+      if (Number.isFinite(entry.cueStart)) {
+        const cue = document.createElement('span');
+        cue.textContent = `Cue @ ${formatSecondsMetric(entry.cueStart)}`;
+        meta.appendChild(cue);
       }
       if (Number.isFinite(entry.timestamp)) {
         const time = document.createElement('span');
@@ -3485,7 +3800,8 @@
     window.addEventListener('DOMContentLoaded', () => {
       ensureDisagreementsPanel();
       disagreementsState.status = 'loading';
-      renderIRRTile(null, []);
+      renderIRRTile(null, {});
+      renderVoiceTagTile(null, {});
       renderDoublePassTile(null);
       renderDisagreementsTile(disagreementsState);
       renderDisagreementsPanel();
@@ -3521,10 +3837,12 @@
         .then((data) => {
           routingConfigState = normalizeRoutingConfig(data);
           renderIRRTile(irrSummaryState, irrTrendState);
+          renderVoiceTagTile(irrSummaryState, irrTrendState);
         })
         .catch(() => {
           routingConfigState = null;
           renderIRRTile(irrSummaryState, irrTrendState);
+          renderVoiceTagTile(irrSummaryState, irrTrendState);
         });
 
       fetchIRRSummary()
@@ -3537,17 +3855,26 @@
               if (normalized.disagreements && normalized.disagreements.length) {
                 updateDisagreementsEntries(normalized.disagreements);
               }
+              setSpecialFilterEntries(
+                'voiceTagMissing',
+                'Cues lacking tags (multi-speaker only)',
+                normalized.voiceTagMissingEntries || []
+              );
               updateDisagreementsStatusFromEntries();
             } else {
               irrSummaryState = undefined;
               updateDisagreementsStatusFromEntries();
+              setSpecialFilterEntries('voiceTagMissing', null, []);
             }
             renderIRRTile(irrSummaryState, irrTrendState);
+            renderVoiceTagTile(irrSummaryState, irrTrendState);
             refreshDisagreementsUI();
           } else {
             irrSummaryState = undefined;
             updateDisagreementsStatusFromEntries();
+            setSpecialFilterEntries('voiceTagMissing', null, []);
             renderIRRTile(undefined, irrTrendState);
+            renderVoiceTagTile(undefined, irrTrendState);
             refreshDisagreementsUI();
           }
         })
@@ -3556,18 +3883,22 @@
           if (!disagreementsState.entries.length) {
             disagreementsState.status = 'error';
           }
+          setSpecialFilterEntries('voiceTagMissing', null, []);
           renderIRRTile(undefined, irrTrendState);
+          renderVoiceTagTile(undefined, irrTrendState);
           refreshDisagreementsUI();
         });
 
       fetchIRRTrend()
         .then((data) => {
-          irrTrendState = normalizeIrrTrend(data) || [];
+          irrTrendState = normalizeIrrTrend(data) || {};
           renderIRRTile(irrSummaryState, irrTrendState);
+          renderVoiceTagTile(irrSummaryState, irrTrendState);
         })
         .catch(() => {
-          irrTrendState = [];
+          irrTrendState = {};
           renderIRRTile(irrSummaryState, irrTrendState);
+          renderVoiceTagTile(irrSummaryState, irrTrendState);
         });
 
       fetchDoublePassFeed()

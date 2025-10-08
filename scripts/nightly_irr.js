@@ -3,8 +3,12 @@
 const fsp = require('fs/promises');
 const path = require('path');
 
-const STAGE2_OUTPUT_DIR = path.resolve(__dirname, '..', 'data', 'stage2_output');
-const IRR_DIR = path.resolve(__dirname, '..', 'data', 'irr');
+const STAGE2_OUTPUT_DIR = process.env.STAGE2_OUTPUT_DIR
+  ? path.resolve(process.env.STAGE2_OUTPUT_DIR)
+  : path.resolve(__dirname, '..', 'data', 'stage2_output');
+const IRR_DIR = process.env.IRR_OUTPUT_DIR
+  ? path.resolve(process.env.IRR_OUTPUT_DIR)
+  : path.resolve(__dirname, '..', 'data', 'irr');
 const IRR_JSON_PATH = path.join(IRR_DIR, 'irr.json');
 const IRR_TREND_PATH = path.join(IRR_DIR, 'irr_trend.json');
 const IRR_LOG_DIR = path.join(IRR_DIR, 'logs');
@@ -12,6 +16,9 @@ const IRR_LOG_DIR = path.join(IRR_DIR, 'logs');
 const TARGET_LABEL = 'hasCS';
 const REQUIRED_PASSES = new Set([1, 2]);
 const MIN_CELL_ITEMS = 10;
+const VOICE_TAG_ALIGNMENT_THRESHOLD_SEC = 0.12;
+const DEFAULT_METRIC_KEY = 'hasCS';
+const VOICE_TAG_REGEX = /^<v\s+S\d+>/i;
 
 function formatIsoDate(date = new Date()) {
   return new Date(date).toISOString();
@@ -50,6 +57,24 @@ function normalizeCategory(value, fallback = 'unknown') {
   const str = String(value).trim();
   if (!str) return fallback;
   return str.toLowerCase();
+}
+
+function parseBooleanFlag(value) {
+  if (value === true) return true;
+  if (value === false) return false;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return null;
+    if (value === 1) return true;
+    if (value === 0) return false;
+    return null;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return null;
+    if (['yes', 'y', 'true', 't', '1'].includes(normalized)) return true;
+    if (['no', 'n', 'false', 'f', '0'].includes(normalized)) return false;
+  }
+  return null;
 }
 
 function getFirstDefined(obj, keys) {
@@ -139,14 +164,209 @@ function inferAnnotatorFromSegments(segments, passIndex) {
   return 'unknown';
 }
 
-async function collectPassAnnotations(assetDir) {
-  const results = new Map();
+function parseVttTimestamp(value) {
+  if (!value) return NaN;
+  const match = String(value).match(/(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?/);
+  if (!match) return NaN;
+  const hours = Number.parseInt(match[1], 10) || 0;
+  const minutes = Number.parseInt(match[2], 10) || 0;
+  const seconds = Number.parseInt(match[3], 10) || 0;
+  const fraction = match[4] ? Number(`0.${match[4]}`) : 0;
+  return hours * 3600 + minutes * 60 + seconds + fraction;
+}
+
+function parseVttCues(content) {
+  const cues = [];
+  if (!content) return cues;
+  const normalized = String(content).replace(/\r/g, '');
+  const blocks = normalized.split(/\n\n+/);
+  blocks.forEach((block) => {
+    const lines = block.split(/\n/).filter((line) => line.trim() !== '');
+    if (!lines.length) return;
+    const timeIndex = lines.findIndex((line) => line.includes('-->'));
+    if (timeIndex === -1) return;
+    const timeLine = lines[timeIndex];
+    const parts = timeLine.split('-->');
+    if (parts.length < 2) return;
+    const start = parseVttTimestamp(parts[0]);
+    const end = parseVttTimestamp(parts[1]);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return;
+    const text = lines.slice(timeIndex + 1).join('\n');
+    cues.push({ start, end, text });
+  });
+  return cues;
+}
+
+function mapVoiceTagCues(cues) {
+  return (Array.isArray(cues) ? cues : []).map((cue, index) => {
+    const text = typeof cue.text === 'string' ? cue.text : '';
+    const trimmed = text.trim();
+    const hasVoiceTag = VOICE_TAG_REGEX.test(trimmed);
+    return {
+      index,
+      start: Number.isFinite(cue.start) ? Number(cue.start) : null,
+      end: Number.isFinite(cue.end) ? Number(cue.end) : null,
+      text,
+      trimmed,
+      hasVoiceTag,
+    };
+  });
+}
+
+function alignVoiceTagCues(cuesA, cuesB, threshold = VOICE_TAG_ALIGNMENT_THRESHOLD_SEC) {
+  const pairs = [];
+  if (!Array.isArray(cuesA) || !Array.isArray(cuesB)) return pairs;
+  let i = 0;
+  let j = 0;
+  while (i < cuesA.length && j < cuesB.length) {
+    const cueA = cuesA[i];
+    const cueB = cuesB[j];
+    const startA = Number.isFinite(cueA.start) ? cueA.start : null;
+    const startB = Number.isFinite(cueB.start) ? cueB.start : null;
+    if (startA == null) {
+      i += 1;
+      continue;
+    }
+    if (startB == null) {
+      j += 1;
+      continue;
+    }
+    const diff = startA - startB;
+    if (Math.abs(diff) <= threshold) {
+      pairs.push({ cueA, cueB });
+      i += 1;
+      j += 1;
+    } else if (diff < 0) {
+      i += 1;
+    } else {
+      j += 1;
+    }
+  }
+  return pairs;
+}
+
+function toFiniteNumber(value) {
+  if (value == null) return null;
+  const num = typeof value === 'string' ? Number.parseFloat(value) : Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function getCandidateObjects(root) {
+  if (!root || typeof root !== 'object') return [];
+  const stack = [root];
+  const visited = new Set();
+  const collected = [];
+  while (stack.length) {
+    const current = stack.pop();
+    if (!current || typeof current !== 'object') continue;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    collected.push(current);
+    Object.values(current).forEach((value) => {
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        stack.push(value);
+      }
+    });
+  }
+  return collected;
+}
+
+function isMultiSpeakerMeta(meta) {
+  const candidates = getCandidateObjects(meta);
+  if (!candidates.length) return false;
+
+  const boolKeys = [
+    'multi_speaker',
+    'multiSpeaker',
+    'multispeaker',
+    'is_multi_speaker',
+    'isMultiSpeaker',
+  ];
+  const countKeys = [
+    'speaker_count',
+    'speakerCount',
+    'num_speakers',
+    'numSpeakers',
+    'speakers_count',
+    'speakersCount',
+    'speaker_count_estimate',
+    'speakerCountEstimate',
+  ];
+  const arrayKeys = [
+    'speaker_profiles',
+    'speakerProfiles',
+    'speakers',
+    'speaker_ids',
+    'speakerIds',
+  ];
+
+  for (const obj of candidates) {
+    for (const key of boolKeys) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        const parsed = parseBooleanFlag(obj[key]);
+        if (parsed === true) return true;
+      }
+    }
+    for (const key of countKeys) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        const numeric = toFiniteNumber(obj[key]);
+        if (Number.isFinite(numeric) && numeric >= 2) return true;
+      }
+    }
+    for (const key of arrayKeys) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        const value = obj[key];
+        if (Array.isArray(value) && value.filter(Boolean).length >= 2) return true;
+        if (value && typeof value === 'object') {
+          const arr = Object.values(value).filter(Boolean);
+          if (arr.length >= 2) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function shouldReplace(existingStat, newStat) {
+  if (!existingStat && newStat) return true;
+  if (!newStat) return false;
+  if (!existingStat) return true;
+  return newStat.mtimeMs >= existingStat.mtimeMs;
+}
+
+function inferAssetLabel(meta, assetId) {
+  const candidates = getCandidateObjects(meta);
+  const labelKeys = [
+    'asset_label',
+    'assetLabel',
+    'clip_label',
+    'clipLabel',
+    'clip_name',
+    'clipName',
+    'title',
+    'name',
+    'display_name',
+    'displayName',
+  ];
+  for (const obj of candidates) {
+    for (const key of labelKeys) {
+      if (Object.prototype.hasOwnProperty.call(obj, key) && obj[key] != null) {
+        const value = String(obj[key]).trim();
+        if (value) return value;
+      }
+    }
+  }
+  return assetId != null ? String(assetId) : null;
+}
+
+async function collectPassData(assetDir) {
+  const passes = new Map();
 
   let entries;
   try {
     entries = await fsp.readdir(assetDir, { withFileTypes: true });
   } catch (err) {
-    if (err.code === 'ENOENT') return { passes: results };
+    if (err.code === 'ENOENT') return { passes };
     throw err;
   }
 
@@ -154,73 +374,98 @@ async function collectPassAnnotations(assetDir) {
     .filter((entry) => entry.isDirectory())
     .map((entry) => ({ rel: entry.name, abs: path.join(assetDir, entry.name) }));
 
-  while (stack.length > 0) {
+  while (stack.length) {
     const current = stack.pop();
+    const { rel, abs } = current;
     let dirEntries;
     try {
-      dirEntries = await fsp.readdir(current.abs, { withFileTypes: true });
+      dirEntries = await fsp.readdir(abs, { withFileTypes: true });
     } catch (err) {
       if (err.code === 'ENOENT') continue;
       throw err;
     }
 
-    for (const dirent of dirEntries) {
-      const relPath = path.join(current.rel, dirent.name);
+    for (const child of dirEntries) {
+      const relPath = path.join(rel, child.name);
       const absPath = path.join(assetDir, relPath);
-      if (dirent.isDirectory()) {
-        stack.push({ rel: relPath, abs: absPath });
+      if (child.isDirectory()) {
+        stack.push({ rel: relPath, abs: absPath, dirent: child });
         continue;
       }
-      if (!dirent.isFile()) continue;
-      if (dirent.name !== 'code_switch_spans.json') continue;
+      if (!child.isFile()) continue;
 
       const segments = relPath.split(path.sep);
       const passIndex = segments.findIndex((segment) => parsePassNumber(segment) != null);
       const passNumber = passIndex >= 0 ? parsePassNumber(segments[passIndex]) : null;
-      if (passNumber == null || !REQUIRED_PASSES.has(passNumber)) {
-        continue;
-      }
+      if (passNumber == null || !REQUIRED_PASSES.has(passNumber)) continue;
 
       const annotatorId = inferAnnotatorFromSegments(segments, passIndex);
-      let spansJson;
-      try {
-        spansJson = await readJson(absPath);
-      } catch (err) {
-        console.warn(`Failed to read ${absPath}: ${err.message}`);
-        continue;
-      }
-      if (!spansJson || typeof spansJson !== 'object') {
-        continue;
-      }
-      const spans = Array.isArray(spansJson.spans) ? spansJson.spans : [];
-      const vote = spans.length > 0 ? 1 : 0;
+      const record = passes.get(passNumber) || {
+        annotatorId,
+        vote: null,
+        voteStat: null,
+        voiceCues: null,
+        voiceStat: null,
+      };
 
-      const existing = results.get(passNumber);
-      if (existing) {
-        // Prefer the latest file modification time if duplicates exist.
-        try {
-          const stat = await fsp.stat(absPath);
-          const existingStat = existing.stat;
-          if (!existingStat || (stat && stat.mtimeMs >= existingStat.mtimeMs)) {
-            results.set(passNumber, { vote, annotatorId, path: absPath, stat });
-          }
-        } catch {
-          // Fallback to overwrite with latest encountered file.
-          results.set(passNumber, { vote, annotatorId });
-        }
-      } else {
+      if (record.annotatorId === 'unknown' && annotatorId && annotatorId !== 'unknown') {
+        record.annotatorId = annotatorId;
+      }
+
+      if (child.name === 'code_switch_spans.json') {
         let stat = null;
         try {
           stat = await fsp.stat(absPath);
         } catch {
           stat = null;
         }
-        results.set(passNumber, { vote, annotatorId, path: absPath, stat });
+        if (!shouldReplace(record.voteStat, stat)) {
+          passes.set(passNumber, record);
+          continue;
+        }
+        let spansJson;
+        try {
+          spansJson = await readJson(absPath);
+        } catch (err) {
+          console.warn(`Failed to read ${absPath}: ${err.message}`);
+          passes.set(passNumber, record);
+          continue;
+        }
+        const spans = Array.isArray(spansJson && spansJson.spans) ? spansJson.spans : [];
+        record.vote = spans.length > 0 ? 1 : 0;
+        record.voteStat = stat;
+        passes.set(passNumber, record);
+        continue;
+      }
+
+      if (child.name === 'transcript.vtt') {
+        let stat = null;
+        try {
+          stat = await fsp.stat(absPath);
+        } catch {
+          stat = null;
+        }
+        if (!shouldReplace(record.voiceStat, stat)) {
+          passes.set(passNumber, record);
+          continue;
+        }
+        let content;
+        try {
+          content = await fsp.readFile(absPath, 'utf8');
+        } catch (err) {
+          console.warn(`Failed to read ${absPath}: ${err.message}`);
+          passes.set(passNumber, record);
+          continue;
+        }
+        const cues = mapVoiceTagCues(parseVttCues(content));
+        record.voiceCues = cues;
+        record.voiceStat = stat;
+        passes.set(passNumber, record);
       }
     }
   }
 
-  return { passes: results };
+  return { passes };
 }
 
 function computeNominalKrippendorffAlpha(items) {
@@ -290,33 +535,32 @@ function computeNominalKrippendorffAlpha(items) {
   return Number.isFinite(alpha) ? alpha : null;
 }
 
-async function loadAssets() {
+async function loadAssetMetrics() {
   let assetEntries;
   try {
     assetEntries = await fsp.readdir(STAGE2_OUTPUT_DIR, { withFileTypes: true });
   } catch (err) {
     if (err.code === 'ENOENT') {
-      return [];
+      return { hasCSItems: [], voiceTagItems: [], voiceTagMissing: [], assets: [] };
     }
     throw new Error(`Failed to read assets from ${STAGE2_OUTPUT_DIR}: ${err.message}`);
   }
 
-  const assets = [];
+  const hasCSItems = [];
+  const voiceTagItems = [];
+  const voiceTagMissing = [];
+  const assetSummaries = [];
 
   for (const entry of assetEntries) {
     if (!entry.isDirectory()) continue;
     const assetId = entry.name;
     const assetDir = path.join(STAGE2_OUTPUT_DIR, assetId);
 
-    const { passes } = await collectPassAnnotations(assetDir);
+    const { passes } = await collectPassData(assetDir);
     const pass1 = passes.get(1);
     const pass2 = passes.get(2);
+    if (!pass1 || !pass2) continue;
 
-    if (!pass1 || !pass2) {
-      continue;
-    }
-
-    const votes = [pass1.vote, pass2.vote];
     const annotatorSet = new Set();
     if (pass1.annotatorId && pass1.annotatorId !== 'unknown') {
       annotatorSet.add(pass1.annotatorId);
@@ -324,10 +568,7 @@ async function loadAssets() {
     if (pass2.annotatorId && pass2.annotatorId !== 'unknown') {
       annotatorSet.add(pass2.annotatorId);
     }
-
-    if (annotatorSet.size < 2) {
-      continue;
-    }
+    if (annotatorSet.size < 2) continue;
 
     let itemMeta = null;
     try {
@@ -337,22 +578,98 @@ async function loadAssets() {
     }
 
     const cell = inferCellKey(itemMeta);
-    assets.push({ assetId, cell, votes });
+    const multiSpeaker = isMultiSpeakerMeta(itemMeta);
+    const assetLabel = inferAssetLabel(itemMeta, assetId);
+
+    const hasCSVotes = [];
+    if (typeof pass1.vote === 'number') hasCSVotes.push(pass1.vote);
+    if (typeof pass2.vote === 'number') hasCSVotes.push(pass2.vote);
+    if (hasCSVotes.length >= 2) {
+      hasCSItems.push({ assetId, cell, votes: hasCSVotes.slice(0, 2) });
+    }
+
+    const cues1 = Array.isArray(pass1.voiceCues) ? pass1.voiceCues : [];
+    const cues2 = Array.isArray(pass2.voiceCues) ? pass2.voiceCues : [];
+    const aligned = alignVoiceTagCues(cues1, cues2);
+    aligned.forEach(({ cueA, cueB }) => {
+      const voteA = cueA && cueA.hasVoiceTag ? 1 : 0;
+      const voteB = cueB && cueB.hasVoiceTag ? 1 : 0;
+      voiceTagItems.push({
+        assetId,
+        cell,
+        votes: [voteA, voteB],
+        cueA,
+        cueB,
+        annotators: [pass1.annotatorId || null, pass2.annotatorId || null],
+        multiSpeaker,
+        assetLabel,
+      });
+
+      if (!voteA && !voteB && multiSpeaker) {
+        voiceTagMissing.push({
+          asset_id: assetId,
+          asset_label: assetLabel,
+          cell,
+          cue_index_pass1: cueA ? cueA.index : null,
+          cue_index_pass2: cueB ? cueB.index : null,
+          start: cueA && Number.isFinite(cueA.start)
+            ? cueA.start
+            : cueB && Number.isFinite(cueB.start)
+              ? cueB.start
+              : null,
+          end: cueA && Number.isFinite(cueA.end)
+            ? cueA.end
+            : cueB && Number.isFinite(cueB.end)
+              ? cueB.end
+              : null,
+          pass_1: {
+            annotator_id: pass1.annotatorId || null,
+            has_voice_tag: false,
+            text: cueA ? cueA.trimmed || cueA.text || '' : '',
+          },
+          pass_2: {
+            annotator_id: pass2.annotatorId || null,
+            has_voice_tag: false,
+            text: cueB ? cueB.trimmed || cueB.text || '' : '',
+          },
+        });
+      }
+    });
+
+    assetSummaries.push({
+      assetId,
+      cell,
+      hasCSVotes: hasCSVotes.length >= 2,
+      voiceTagPairs: aligned.length,
+    });
   }
 
-  return assets;
+  return { hasCSItems, voiceTagItems, voiceTagMissing, assets: assetSummaries };
 }
 
-function buildSummary(assets) {
-  const items = assets.map((asset) => asset.votes);
-  const alphaGlobal = computeNominalKrippendorffAlpha(items);
+function buildAlphaSummary(items) {
+  const valid = (items || [])
+    .map((item) => {
+      if (!item || !Array.isArray(item.votes)) return null;
+      const filteredVotes = item.votes
+        .map((value) => (value == null ? null : Number(value)))
+        .filter((value) => value === 0 || value === 1);
+      if (filteredVotes.length < 2) return null;
+      return {
+        cell: item.cell || 'unknown:unknown:*:*',
+        votes: filteredVotes,
+      };
+    })
+    .filter(Boolean);
+
+  const alphaGlobal = computeNominalKrippendorffAlpha(valid.map((item) => item.votes));
 
   const grouped = new Map();
-  assets.forEach((asset) => {
-    if (!grouped.has(asset.cell)) {
-      grouped.set(asset.cell, []);
+  valid.forEach((item) => {
+    if (!grouped.has(item.cell)) {
+      grouped.set(item.cell, []);
     }
-    grouped.get(asset.cell).push(asset.votes);
+    grouped.get(item.cell).push(item.votes);
   });
 
   const byCell = [];
@@ -366,58 +683,86 @@ function buildSummary(assets) {
 
   return {
     alphaGlobal,
-    nItemsGlobal: assets.length,
+    nItemsGlobal: valid.length,
     byCell,
   };
 }
 
-async function updateTrend({ alphaGlobal, nItemsGlobal, byCell }) {
-  let trend = [];
+async function updateTrend(metricSummaries) {
+  let existing;
   try {
-    const existing = await readJson(IRR_TREND_PATH);
-    if (Array.isArray(existing)) {
-      trend = existing;
-    }
+    existing = await readJson(IRR_TREND_PATH);
   } catch (err) {
     console.warn(`Failed to read existing trend data: ${err.message}`);
   }
 
-  const today = formatDateYMD();
-  const filtered = trend.filter((entry) => entry && entry.date !== today);
-
-  filtered.push({
-    date: today,
-    alpha_global: alphaGlobal,
-    n_items_global: nItemsGlobal,
-    by_cell: byCell.map((entry) => ({
-      cell: entry.cell,
-      alpha: entry.alpha,
-      n_items: entry.n_items,
-    })),
-  });
-
-  while (filtered.length > 30) {
-    filtered.shift();
+  let trendData;
+  if (Array.isArray(existing)) {
+    trendData = { [DEFAULT_METRIC_KEY]: existing };
+  } else if (existing && typeof existing === 'object') {
+    trendData = existing;
+  } else {
+    trendData = {};
   }
 
-  await writeJson(IRR_TREND_PATH, filtered);
+  const today = formatDateYMD();
+  const nextTrend = {};
+
+  Object.entries(metricSummaries || {}).forEach(([metricKey, summary]) => {
+    if (!summary) return;
+    const previousSeries = Array.isArray(trendData[metricKey]) ? trendData[metricKey] : [];
+    const filtered = previousSeries.filter((entry) => entry && entry.date !== today);
+    filtered.push({
+      date: today,
+      alpha_global: summary.alphaGlobal,
+      n_items: summary.nItemsGlobal,
+      by_cell: Array.isArray(summary.byCell)
+        ? summary.byCell.map((entry) => ({
+            cell: entry.cell,
+            alpha: entry.alpha,
+            n_items: entry.n_items,
+          }))
+        : [],
+    });
+    while (filtered.length > 30) {
+      filtered.shift();
+    }
+    nextTrend[metricKey] = filtered;
+  });
+
+  await writeJson(IRR_TREND_PATH, nextTrend);
 }
 
-async function writeLog({ alphaGlobal, nItemsGlobal, byCell, assets }) {
+async function writeLog({ generatedAt, metrics, assets }) {
   const timestamp = formatIsoDate();
   const today = formatDateYMD();
   const logPath = path.join(IRR_LOG_DIR, `irr_${today.replace(/-/g, '')}.txt`);
 
   const lines = [];
   lines.push(`[${timestamp}] IRR nightly summary`);
-  lines.push(`Assets considered: ${assets.length}`);
-  lines.push(`Global alpha: ${alphaGlobal == null ? 'null' : alphaGlobal.toFixed(6)}`);
-  lines.push(`Global items: ${nItemsGlobal}`);
+  if (generatedAt) {
+    lines.push(`Generated at: ${generatedAt}`);
+  }
+  if (Array.isArray(assets)) {
+    lines.push(`Assets considered: ${assets.length}`);
+  }
   lines.push('');
-  lines.push('Per-cell metrics:');
-  byCell.forEach((entry) => {
-    const alphaStr = entry.alpha == null ? 'null' : entry.alpha.toFixed(6);
-    lines.push(`  - ${entry.cell}: n=${entry.n_items}, alpha=${alphaStr}`);
+
+  Object.entries(metrics || {}).forEach(([key, summary]) => {
+    if (!summary) return;
+    const alphaStr = summary.alphaGlobal == null ? 'null' : summary.alphaGlobal.toFixed(6);
+    lines.push(`Metric ${key}: alpha=${alphaStr}, items=${summary.nItemsGlobal}`);
+    if (key === 'voiceTag_presence' && summary.missingCount != null) {
+      lines.push(`  Missing voice tags (multi-speaker): ${summary.missingCount}`);
+    }
+    if (Array.isArray(summary.byCell) && summary.byCell.length) {
+      lines.push('  Per-cell metrics:');
+      summary.byCell.forEach((entry) => {
+        const alphaDisplay = entry.alpha == null ? 'n<10' : entry.alpha.toFixed(6);
+        lines.push(`    - ${entry.cell}: n=${entry.n_items}, alpha=${alphaDisplay}`);
+      });
+    }
+    lines.push('');
   });
 
   await ensureDir(IRR_LOG_DIR);
@@ -427,23 +772,58 @@ async function writeLog({ alphaGlobal, nItemsGlobal, byCell, assets }) {
 async function main() {
   await ensureDir(IRR_DIR);
 
-  const assets = await loadAssets();
-  const summary = buildSummary(assets);
+  const metricsData = await loadAssetMetrics();
+  const hasCSSummary = buildAlphaSummary(metricsData.hasCSItems);
+  const voiceTagSummary = buildAlphaSummary(metricsData.voiceTagItems);
+  const generatedAt = formatIsoDate();
 
   const output = {
-    generated_at: formatIsoDate(),
+    generated_at: generatedAt,
     label: TARGET_LABEL,
-    alpha_global: summary.alphaGlobal,
-    n_items_global: summary.nItemsGlobal,
-    by_cell: summary.byCell,
+    hasCS: {
+      alpha_global: hasCSSummary.alphaGlobal,
+      n_items: hasCSSummary.nItemsGlobal,
+      by_cell: hasCSSummary.byCell,
+    },
+    voiceTag_presence: {
+      alpha_global: voiceTagSummary.alphaGlobal,
+      n_items: voiceTagSummary.nItemsGlobal,
+      by_cell: voiceTagSummary.byCell,
+      missing_voice_tags: metricsData.voiceTagMissing,
+    },
   };
 
   await writeJson(IRR_JSON_PATH, output);
-  await updateTrend(summary);
-  await writeLog({ ...summary, assets });
+  await updateTrend({
+    hasCS: hasCSSummary,
+    voiceTag_presence: voiceTagSummary,
+  });
+  await writeLog({
+    generatedAt,
+    metrics: {
+      hasCS: hasCSSummary,
+      voiceTag_presence: { ...voiceTagSummary, missingCount: metricsData.voiceTagMissing.length },
+    },
+    assets: metricsData.assets,
+  });
 
-  console.log(`Generated IRR summary for ${summary.nItemsGlobal} assets.`);
+  console.log(
+    `Generated IRR summary for ${hasCSSummary.nItemsGlobal} assets and ${voiceTagSummary.nItemsGlobal} aligned cues.`
+  );
 }
+
+module.exports = {
+  buildAlphaSummary,
+  computeNominalKrippendorffAlpha,
+  alignVoiceTagCues,
+  mapVoiceTagCues,
+  parseVttCues,
+  parseVttTimestamp,
+  loadAssetMetrics,
+  isMultiSpeakerMeta,
+  VOICE_TAG_ALIGNMENT_THRESHOLD_SEC,
+  MIN_CELL_ITEMS,
+};
 
 if (require.main === module) {
   main().catch((err) => {

@@ -1,0 +1,10 @@
+{
+  "assigned_cell": {
+    "dialect_family": "testfam",
+    "subregion": "testreg"
+  },
+  "speaker_profiles": [
+    { "id": "S1" },
+    { "id": "S2" }
+  ]
+}
