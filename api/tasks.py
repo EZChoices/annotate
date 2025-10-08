@@ -1,10 +1,11 @@
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
+from pathlib import Path
 import json
 import os
 import random
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 import requests
@@ -91,6 +92,43 @@ AGE_KEYS = [
     "age_group",
     "ageGroup",
 ]
+
+
+STAGE2_OUTPUT_DIR = Path(os.environ.get("STAGE2_OUTPUT_DIR", "data/stage2_output"))
+
+DOUBLE_PASS_BASE_PROB = float(os.environ.get("STAGE2_DOUBLE_PASS_BASE_PROB", "0.15"))
+DOUBLE_PASS_MAX_PROB = float(os.environ.get("STAGE2_DOUBLE_PASS_MAX_PROB", "0.40"))
+DOUBLE_PASS_MULTIPLIER = 1.5
+DOUBLE_PASS_QA_F1_THRESHOLD = 0.80
+DOUBLE_PASS_QA_CUES_THRESHOLD = 0.85
+DOUBLE_PASS_LOOKBACK_HOURS = int(os.environ.get("STAGE2_DOUBLE_PASS_LOOKBACK_HOURS", "24") or 24)
+DOUBLE_PASS_ANNOTATOR_CAP = float(os.environ.get("STAGE2_DOUBLE_PASS_ANNOTATOR_CAP", "0.20"))
+MAX_PASSES_PER_ASSET = 2
+ASSIGNMENT_ACTIVE_HOURS = int(os.environ.get("STAGE2_ASSIGNMENT_ACTIVE_HOURS", "6") or 6)
+
+QA_F1_KEYS = [
+    "rolling_median_code_switch_f1",
+    "rolling_median_codeswitch_f1",
+    "median_code_switch_f1",
+    "median_codeswitch_f1",
+    "codeswitch_f1_median",
+    "code_switch_median_f1",
+    "codeswitch_median_f1",
+    "median_codeswitch",
+]
+
+QA_CUES_KEYS = [
+    "pct_cues_in_bounds",
+    "pct_cues_within_bounds",
+    "percent_cues_in_bounds",
+    "percentage_cues_in_bounds",
+    "cues_pct_in_bounds",
+    "cues_in_bounds_pct",
+]
+
+COVERAGE_PCT_KEYS = ["pct_of_target", "coverage_pct", "coverage_ratio"]
+TARGET_KEYS = ["target", "target_hours", "target_count", "target_clips"]
+COUNT_KEYS = ["count", "completed", "clips", "observed", "current"]
 
 
 def _supabase_headers() -> Dict[str, str]:
@@ -268,6 +306,251 @@ def _derive_primary_cell(row: Any) -> str:
     return keys[0] if keys else UNKNOWN_CELL_KEY
 
 
+def _safe_asset_dirname(asset_id: str) -> str:
+    text = str(asset_id or "asset").strip()
+    if not text:
+        text = "asset"
+    safe = "".join(
+        ch if ch.isalnum() or ch in {"_", "-", "."} else "_" for ch in text
+    )
+    return safe or "asset"
+
+
+def _asset_output_dir(asset_id: str) -> Path:
+    return STAGE2_OUTPUT_DIR / _safe_asset_dirname(asset_id)
+
+
+def _load_meta_from_dir(path: Path) -> Optional[Dict[str, Any]]:
+    meta_path = path / "item_meta.json"
+    if not meta_path.is_file():
+        return None
+    try:
+        with meta_path.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _load_item_meta(asset_id: str, cache: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    if asset_id in cache:
+        return cache[asset_id]
+    meta_path = _asset_output_dir(asset_id) / "item_meta.json"
+    data: Dict[str, Any] = {}
+    if meta_path.is_file():
+        try:
+            with meta_path.open("r", encoding="utf-8") as fh:
+                loaded = json.load(fh)
+                if isinstance(loaded, dict):
+                    data = loaded
+        except Exception:
+            data = {}
+    cache[asset_id] = data
+    return data
+
+
+def _to_float(value: Any) -> Optional[float]:
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not (num == num and abs(num) != float("inf")):
+        return None
+    return num
+
+
+def _extract_metric(containers: List[Dict[str, Any]], keys: List[str]) -> Optional[float]:
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        for key in keys:
+            if key not in container:
+                continue
+            num = _to_float(container.get(key))
+            if num is not None:
+                return num
+    return None
+
+
+def _collect_metric_containers(cell: Dict[str, Any]) -> List[Dict[str, Any]]:
+    containers: List[Dict[str, Any]] = []
+    if isinstance(cell, dict):
+        containers.append(cell)
+        for key in (
+            "qa_metrics",
+            "qa",
+            "metrics",
+            "quality",
+            "recent_metrics",
+            "qa_summary",
+        ):
+            value = cell.get(key)
+            if isinstance(value, dict):
+                containers.append(value)
+    return containers
+
+
+def _build_cell_metric_lookup(snapshot: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, Optional[float]]]:
+    if not isinstance(snapshot, dict):
+        return {}
+    cells = snapshot.get("cells")
+    if not isinstance(cells, list):
+        return {}
+
+    lookup: Dict[str, Dict[str, Optional[float]]] = {}
+    for cell in cells:
+        if not isinstance(cell, dict):
+            continue
+        key_raw = cell.get("cell_key") or cell.get("cellKey")
+        cell_key = None
+        if isinstance(key_raw, str) and key_raw.strip():
+            cell_key = key_raw.strip().lower()
+        if not cell_key:
+            cell_key = _build_cell_key(
+                cell.get("dialect_family"),
+                cell.get("subregion") or cell.get("dialect_subregion"),
+                cell.get("apparent_gender"),
+                cell.get("apparent_age_band"),
+            )
+        containers = _collect_metric_containers(cell)
+        coverage_pct = None
+        for key in COVERAGE_PCT_KEYS:
+            coverage_pct = _to_float(cell.get(key))
+            if coverage_pct is not None:
+                break
+        if coverage_pct is None:
+            target = None
+            for key in TARGET_KEYS:
+                target = _to_float(cell.get(key))
+                if target is not None:
+                    break
+            count = None
+            for key in COUNT_KEYS:
+                count = _to_float(cell.get(key))
+                if count is not None:
+                    break
+            if target and target > 0 and count is not None:
+                coverage_pct = max(0.0, min(1.0, count / target))
+        elif coverage_pct > 1.0 and coverage_pct <= 100.0:
+            coverage_pct = coverage_pct / 100.0
+
+        median_f1 = _extract_metric(containers, QA_F1_KEYS)
+        cues_pct = _extract_metric(containers, QA_CUES_KEYS)
+        if cues_pct is not None and cues_pct > 1.0 and cues_pct <= 100.0:
+            cues_pct = cues_pct / 100.0
+
+        lookup[cell_key] = {
+            "coverage_pct": coverage_pct,
+            "median_f1": median_f1,
+            "cues_pct": cues_pct,
+        }
+
+    return lookup
+
+
+def _parse_iso_datetime(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except ValueError:
+        pass
+    for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ"):
+        try:
+            dt = datetime.strptime(str(value), fmt)
+            return dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+def _iter_all_item_metas(cache: Dict[str, Dict[str, Any]]) -> List[Tuple[str, Dict[str, Any]]]:
+    records: List[Tuple[str, Dict[str, Any]]] = []
+    if not STAGE2_OUTPUT_DIR.exists():
+        return records
+    try:
+        dirs = [p for p in STAGE2_OUTPUT_DIR.iterdir() if p.is_dir()]
+    except FileNotFoundError:
+        return records
+    for entry in dirs:
+        meta = _load_meta_from_dir(entry)
+        if not meta:
+            continue
+        asset_id = str(meta.get("asset_id") or entry.name)
+        cache.setdefault(asset_id, meta)
+        records.append((asset_id, meta))
+    return records
+
+
+def _compute_recent_double_pass_stats(
+    annotator_id: str, cache: Dict[str, Dict[str, Any]]
+) -> Tuple[int, int]:
+    if not annotator_id:
+        return (0, 0)
+    records = _iter_all_item_metas(cache)
+    if not records:
+        return (0, 0)
+    now = datetime.utcnow().replace(tzinfo=timezone.utc)
+    cutoff = now - timedelta(hours=max(1, DOUBLE_PASS_LOOKBACK_HOURS))
+    double_count = 0
+    total_count = 0
+    for _, meta in records:
+        assignments = meta.get("assignments")
+        if not isinstance(assignments, list):
+            continue
+        for assignment in assignments:
+            if not isinstance(assignment, dict):
+                continue
+            if str(assignment.get("annotator_id") or "").strip() != annotator_id:
+                continue
+            submitted = _parse_iso_datetime(assignment.get("submitted_at"))
+            if submitted is None or submitted < cutoff:
+                continue
+            total_count += 1
+            try:
+                pass_number = int(assignment.get("pass_number", 1))
+            except (TypeError, ValueError):
+                pass_number = 1
+            if pass_number >= 2:
+                double_count += 1
+    return (double_count, total_count)
+
+
+def _compute_effective_double_pass_probability(
+    cell_key: str, lookup: Dict[str, Dict[str, Optional[float]]]
+) -> float:
+    base = DOUBLE_PASS_BASE_PROB
+    info = lookup.get((cell_key or "").lower()) if lookup else None
+    p = base
+    coverage_pct = None
+    median_f1 = None
+    cues_pct = None
+    if isinstance(info, dict):
+        coverage_pct = info.get("coverage_pct")
+        median_f1 = info.get("median_f1")
+        cues_pct = info.get("cues_pct")
+    if coverage_pct is not None and coverage_pct < 0.5:
+        p *= DOUBLE_PASS_MULTIPLIER
+    quality_flag = False
+    if median_f1 is not None and median_f1 < DOUBLE_PASS_QA_F1_THRESHOLD:
+        quality_flag = True
+    if cues_pct is not None and cues_pct < DOUBLE_PASS_QA_CUES_THRESHOLD:
+        quality_flag = True
+    if quality_flag:
+        p *= DOUBLE_PASS_MULTIPLIER
+    return min(p, DOUBLE_PASS_MAX_PROB)
+
+
 def _compute_allocator_weights(snapshot: Dict[str, Any]) -> Dict[str, float]:
     cells = snapshot.get("cells") if isinstance(snapshot, dict) else None
     if not isinstance(cells, list):
@@ -430,15 +713,26 @@ async def get_tasks(
             keep_resp.raise_for_status()
             rows = keep_resp.json()
 
-            assign_endpoint = f"{SUPABASE_URL}/rest/v1/{ASSIGN2_TABLE}?select={ASSIGN2_FILE_COL},{ASSIGN2_USER_COL}"
+            assign_endpoint = (
+                f"{SUPABASE_URL}/rest/v1/{ASSIGN2_TABLE}?select={ASSIGN2_FILE_COL},{ASSIGN2_USER_COL},{ASSIGN2_TIME_COL}"
+            )
             assigned_resp = requests.get(assign_endpoint, headers=headers, timeout=20)
             assigned_resp.raise_for_status()
-            assigned = {r.get(ASSIGN2_FILE_COL) for r in assigned_resp.json()}
+            assigned_rows = assigned_resp.json()
+            active_cutoff = datetime.utcnow().replace(tzinfo=timezone.utc) - timedelta(
+                hours=max(1, ASSIGNMENT_ACTIVE_HOURS)
+            )
+            active_assigned = set()
+            for entry in assigned_rows:
+                fname = entry.get(ASSIGN2_FILE_COL)
+                if not fname:
+                    continue
+                assigned_at = _parse_iso_datetime(entry.get(ASSIGN2_TIME_COL))
+                if assigned_at and assigned_at >= active_cutoff:
+                    active_assigned.add(fname)
 
             available_rows = [
-                r
-                for r in rows
-                if r and r.get(FILE_COL) and r.get(FILE_COL) not in assigned
+                r for r in rows if r and r.get(FILE_COL) and r.get(FILE_COL) not in active_assigned
             ]
 
             coverage_weights: Dict[str, float] = {}
@@ -480,11 +774,6 @@ async def get_tasks(
                     )
 
 
-            assigned_cell_lookup = {
-                id(entry["row"]): entry.get("cell", _derive_primary_cell(entry["row"]))
-                for entry in selected_entries
-            }
-
             gold_rows: List[Dict[str, Any]] = []
             if GOLD_TABLE and GOLD_RATE > 0:
                 try:
@@ -495,45 +784,40 @@ async def get_tasks(
                 except Exception:
                     gold_rows = []
 
-            if selected_entries:
-                assign_rows = []
-                for entry in selected_entries:
-                    row = entry["row"]
-                    fname = row.get(FILE_COL)
-                    if not fname or fname in assigned:
+            candidate_entries = list(selected_entries)
+            if limit and rows and len(candidate_entries) < limit * 2:
+                existing_ids = {id(entry["row"]) for entry in candidate_entries}
+                extras: List[Dict[str, Any]] = []
+                for row in rows:
+                    if not row or id(row) in existing_ids:
                         continue
-                    assign_rows.append(
-                        {
-                            ASSIGN2_FILE_COL: fname,
-                            ASSIGN2_USER_COL: annotator_id,
-                            ASSIGN2_TIME_COL: datetime.utcnow().isoformat(),
-                        }
-                    )
-                if assign_rows:
-                    try:
-                        post_headers = dict(headers)
-                        post_headers.update(
-                            {
-                                "Content-Type": "application/json",
-                                "Prefer": "return=representation",
-                            }
-                        )
-                        requests.post(
-                            f"{SUPABASE_URL}/rest/v1/{ASSIGN2_TABLE}",
-                            headers=post_headers,
-                            json=assign_rows,
-                            timeout=20,
-                        )
-                    except Exception as e:
-                        print("[tasks] stage2 assignment insert failed:", repr(e))
+                    extras.append({"row": row, "cell": _derive_primary_cell(row)})
+                random.shuffle(extras)
+                max_extras = max(limit * 3 - len(candidate_entries), 0)
+                if max_extras:
+                    candidate_entries.extend(extras[:max_extras])
 
+            cell_lookup = _build_cell_metric_lookup(snapshot)
+            meta_cache: Dict[str, Dict[str, Any]] = {}
+            annot_double_count, annot_total_count = _compute_recent_double_pass_stats(
+                annotator_id, meta_cache
+            )
+            assignment_rows: List[Dict[str, Any]] = []
+            seen_assets: set = set()
             base = BUNNY_KEEP_URL.rstrip("/")
-            for entry in selected_entries:
-                r = entry["row"]
+
+            for entry in candidate_entries:
+                if len(items) >= limit:
+                    break
+                row_ref = entry.get("row")
+                if not isinstance(row_ref, dict):
+                    continue
+                r = row_ref
                 is_gold = False
                 if gold_rows and GOLD_RATE > 0:
                     try:
                         import random as _rnd
+
                         if _rnd.random() < GOLD_RATE:
                             gr = _rnd.choice(gold_rows)
                             if gr and gr.get(GOLD_FILE_COL):
@@ -541,18 +825,100 @@ async def get_tasks(
                                 is_gold = True
                     except Exception:
                         pass
+
                 fname = r.get(FILE_COL)
                 if not fname:
                     continue
-                assigned_cell = assigned_cell_lookup.get(id(entry["row"]), _derive_primary_cell(entry["row"]))
+                fname = str(fname)
+                if fname in seen_assets:
+                    continue
+
+                assigned_cell = entry.get("cell") or _derive_primary_cell(row_ref)
                 if is_gold:
                     assigned_cell = "gold:gold:gold:gold"
-                media_url = f"{base}/{str(fname).lstrip('/')}"
-                audio_url = f"/api/proxy_audio?file={quote(str(fname))}"
+
+                meta = _load_item_meta(fname, meta_cache)
+                if not isinstance(meta, dict):
+                    meta = {}
+                review_status = str(meta.get("review_status") or "").lower()
+                if review_status == "locked":
+                    continue
+
+                assignments_meta = meta.get("assignments") if isinstance(meta.get("assignments"), list) else []
+                normalized_assignments: List[Dict[str, Any]] = []
+                previous_annotators: List[str] = []
+                annotator_already_assigned = False
+                second_pass_recorded = False
+                for record in assignments_meta:
+                    if not isinstance(record, dict):
+                        continue
+                    annot = str(record.get("annotator_id") or "").strip()
+                    try:
+                        pass_num = int(record.get("pass_number", 1))
+                    except (TypeError, ValueError):
+                        pass_num = 1
+                    pass_num = max(1, pass_num)
+                    if annot:
+                        normalized_assignments.append(
+                            {"annotator_id": annot, "pass_number": pass_num}
+                        )
+                        if annot == annotator_id:
+                            annotator_already_assigned = True
+                        elif annot not in previous_annotators:
+                            previous_annotators.append(annot)
+                    if pass_num >= 2:
+                        second_pass_recorded = True
+
+                if annotator_already_assigned:
+                    continue
+                if second_pass_recorded or len(normalized_assignments) >= MAX_PASSES_PER_ASSET:
+                    continue
+
+                eligible_for_second = bool(normalized_assignments) and not is_gold
+                pass_number = 1
+                double_pass_target = False
+
+                if eligible_for_second:
+                    prob_cell_key = assigned_cell if assigned_cell else UNKNOWN_CELL_KEY
+                    probability = _compute_effective_double_pass_probability(
+                        prob_cell_key, cell_lookup
+                    )
+                    current_ratio = (
+                        (annot_double_count / annot_total_count)
+                        if annot_total_count
+                        else 0.0
+                    )
+                    assign_second = False
+                    if annot_total_count and current_ratio >= DOUBLE_PASS_ANNOTATOR_CAP:
+                        assign_second = False
+                    else:
+                        projected_total = annot_total_count + 1
+                        projected_double = annot_double_count + 1
+                        if (
+                            projected_total > 0
+                            and projected_double / projected_total > DOUBLE_PASS_ANNOTATOR_CAP
+                        ):
+                            assign_second = False
+                        else:
+                            assign_second = random.random() < probability
+                    if assign_second:
+                        pass_number = min(
+                            MAX_PASSES_PER_ASSET, len(normalized_assignments) + 1
+                        )
+                        double_pass_target = True
+                    else:
+                        continue
+
+                annot_total_count += 1
+                if double_pass_target:
+                    annot_double_count += 1
+
+                media_url = f"{base}/{fname.lstrip('/')}"
+                audio_url = f"/api/proxy_audio?file={quote(fname)}"
                 if KEEP_AUDIO_COL and r.get(KEEP_AUDIO_COL):
                     audio_url = r.get(KEEP_AUDIO_COL)
                 elif AUDIO_PROXY_BASE:
-                    name_no_ext = str(fname).rsplit('.', 1)[0]
+                    name_no_ext = fname.rsplit('.', 1)[0]
                     audio_url = (
                         AUDIO_PROXY_BASE.rstrip("/")
                         + "/"
@@ -563,29 +929,58 @@ async def get_tasks(
                             else ("." + AUDIO_PROXY_EXT)
                         )
                     )
-                items.append(
+
+                manifest_item = {
+                    "asset_id": fname,
+                    "media": {
+                        "audio_proxy_url": audio_url or media_url,
+                        "video_hls_url": media_url if media_url.endswith(".m3u8") else None,
+                        "poster_url": None,
+                    },
+                    "prefill": {
+                        "diarization_rttm_url": r.get(PREFILL_DIA) if PREFILL_DIA else None,
+                        "transcript_vtt_url": r.get(PREFILL_TR_VTT) if PREFILL_TR_VTT else None,
+                        "transcript_ctm_url": r.get(PREFILL_TR_CTM) if PREFILL_TR_CTM else None,
+                        "translation_vtt_url": r.get(PREFILL_TL_VTT) if PREFILL_TL_VTT else None,
+                        "code_switch_vtt_url": r.get(PREFILL_CS_VTT) if PREFILL_CS_VTT else None,
+                    },
+                    "is_gold": is_gold,
+                    "stage0_status": "validated",
+                    "stage1_status": "validated",
+                    "language_hint": "ar",
+                    "notes": None,
+                    "assigned_cell": assigned_cell,
+                    "double_pass_target": double_pass_target,
+                    "pass_number": pass_number,
+                    "previous_annotators": previous_annotators,
+                }
+                items.append(manifest_item)
+                seen_assets.add(fname)
+                assignment_rows.append(
                     {
-                        "asset_id": fname,
-                        "media": {
-                            "audio_proxy_url": audio_url or media_url,
-                            "video_hls_url": media_url if media_url.endswith(".m3u8") else None,
-                            "poster_url": None,
-                        },
-                        "prefill": {
-                            "diarization_rttm_url": r.get(PREFILL_DIA) if PREFILL_DIA else None,
-                            "transcript_vtt_url": r.get(PREFILL_TR_VTT) if PREFILL_TR_VTT else None,
-                            "transcript_ctm_url": r.get(PREFILL_TR_CTM) if PREFILL_TR_CTM else None,
-                            "translation_vtt_url": r.get(PREFILL_TL_VTT) if PREFILL_TL_VTT else None,
-                            "code_switch_vtt_url": r.get(PREFILL_CS_VTT) if PREFILL_CS_VTT else None,
-                        },
-                        "is_gold": is_gold,
-                        "stage0_status": "validated",
-                        "stage1_status": "validated",
-                        "language_hint": "ar",
-                        "notes": None,
-                        "assigned_cell": assigned_cell,
+                        ASSIGN2_FILE_COL: fname,
+                        ASSIGN2_USER_COL: annotator_id,
+                        ASSIGN2_TIME_COL: datetime.utcnow().isoformat(),
                     }
                 )
+
+            if assignment_rows:
+                try:
+                    post_headers = dict(headers)
+                    post_headers.update(
+                        {
+                            "Content-Type": "application/json",
+                            "Prefer": "return=representation",
+                        }
+                    )
+                    requests.post(
+                        f"{SUPABASE_URL}/rest/v1/{ASSIGN2_TABLE}",
+                        headers=post_headers,
+                        json=assignment_rows,
+                        timeout=20,
+                    )
+                except Exception as e:
+                    print("[tasks] stage2 assignment insert failed:", repr(e))
         except Exception as e:
             print("[tasks] Supabase keep fetch failed:", repr(e))
 
@@ -611,6 +1006,9 @@ async def get_tasks(
                 "language_hint": "ar",
                 "notes": None,
                 "assigned_cell": UNKNOWN_CELL_KEY,
+                "double_pass_target": False,
+                "pass_number": 1,
+                "previous_annotators": [],
             }
         ]
 

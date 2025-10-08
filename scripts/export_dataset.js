@@ -1175,7 +1175,8 @@ async function main() {
   const clipCandidates = [];
   const clipDirs = listSubdirs(sourceDir).filter(isAssetId);
   for (const assetId of clipDirs) {
-    const clipSource = path.join(sourceDir, assetId);
+    const mergedDir = path.join(sourceDir, assetId, 'merged');
+    const clipSource = fs.existsSync(mergedDir) ? mergedDir : path.join(sourceDir, assetId);
     const qaPath = path.join(clipSource, 'qa_result.json');
     if (!fs.existsSync(qaPath)) {
       logEntries.push(`SKIPPED ${assetId} reason=missing_qa_result`);
