@@ -1,0 +1,57 @@
+{
+  "meta": {
+    "default_target_per_cell": 25,
+    "notes": "Targets prioritize the most specific rule by dialect family, subregion, gender, and age band."
+  },
+  "targets": [
+    {
+      "dialect_family": "english",
+      "subregion": "west_africa",
+      "apparent_gender": "*",
+      "apparent_age_band": "*",
+      "target": 35
+    },
+    {
+      "dialect_family": "english",
+      "subregion": "east_africa",
+      "apparent_gender": "female",
+      "apparent_age_band": "adult",
+      "target": 40
+    },
+    {
+      "dialect_family": "english",
+      "subregion": "east_africa",
+      "apparent_gender": "male",
+      "apparent_age_band": "adult",
+      "target": 38
+    },
+    {
+      "dialect_family": "english",
+      "subregion": "east_africa",
+      "apparent_gender": "*",
+      "apparent_age_band": "*",
+      "target": 32
+    },
+    {
+      "dialect_family": "arabic",
+      "subregion": "levant",
+      "apparent_gender": "*",
+      "apparent_age_band": "*",
+      "target": 30
+    },
+    {
+      "dialect_family": "arabic",
+      "subregion": "*",
+      "apparent_gender": "female",
+      "apparent_age_band": "*",
+      "target": 28
+    },
+    {
+      "dialect_family": "swahili",
+      "subregion": "*",
+      "apparent_gender": "*",
+      "apparent_age_band": "*",
+      "target": 26
+    }
+  ]
+}

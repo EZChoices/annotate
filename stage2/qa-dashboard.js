@@ -386,106 +386,35 @@
     return text.replace(/\b([a-z])/g, (match, letter) => letter.toUpperCase());
   }
 
-  const COVERAGE_QUOTA_TARGETS = {
-    default: 25,
-    byDialectFamily: {},
-    bySubregion: {},
-    byCombination: {},
-  };
-
-  function getCoverageTarget(dialectFamily, subregion) {
-    const comboKey = `${dialectFamily}||${subregion}`;
-    const combinationOverride = COVERAGE_QUOTA_TARGETS.byCombination[comboKey];
-    if (Number.isFinite(combinationOverride)) {
-      return combinationOverride;
-    }
-    const familyOverride = COVERAGE_QUOTA_TARGETS.byDialectFamily[dialectFamily];
-    if (Number.isFinite(familyOverride)) {
-      return familyOverride;
-    }
-    const subregionOverride = COVERAGE_QUOTA_TARGETS.bySubregion[subregion];
-    if (Number.isFinite(subregionOverride)) {
-      return subregionOverride;
-    }
-    return COVERAGE_QUOTA_TARGETS.default;
+  function describeCoverageCell(cell) {
+    if (!cell || typeof cell !== 'object') return 'Unknown';
+    const parts = [
+      formatCoverageLabel(cell.dialect_family),
+      formatCoverageLabel(cell.subregion),
+      formatCoverageLabel(cell.apparent_gender),
+      formatCoverageLabel(cell.apparent_age_band),
+    ];
+    return parts.join(' • ');
   }
 
-  function aggregateCoverageCombinations(summary) {
-    const rowsByKey = {};
-    const heatmap = summary && summary.coverage_heatmap;
-    const totalProfiles = Number(summary && summary.total_profiles) || 0;
-
-    const pushRow = (dialectFamily, subregion, increment) => {
-      const key = `${dialectFamily}||${subregion}`;
-      if (!rowsByKey[key]) {
-        rowsByKey[key] = {
-          dialectFamily,
-          subregion,
-          count: 0,
-        };
-      }
-      rowsByKey[key].count += increment;
-    };
-
-    if (heatmap && typeof heatmap === 'object') {
-      Object.entries(heatmap).forEach(([dialectFamily, subregions]) => {
-        if (!subregions || typeof subregions !== 'object') {
-          return;
-        }
-        Object.entries(subregions).forEach(([subregion, genders]) => {
-          if (!genders || typeof genders !== 'object') {
-            return;
-          }
-          let total = 0;
-          Object.values(genders).forEach((ageBands) => {
-            if (!ageBands || typeof ageBands !== 'object') {
-              return;
-            }
-            Object.values(ageBands).forEach((value) => {
-              const numeric = Number(value);
-              if (Number.isFinite(numeric)) {
-                total += numeric;
-              }
-            });
-          });
-          pushRow(dialectFamily, subregion, total);
-        });
-      });
-    } else if (Array.isArray(summary && summary.coverage)) {
-      summary.coverage.forEach((entry) => {
-        if (!entry) return;
-        const dialectFamily = entry.dialect_family || 'unknown';
-        const subregion = entry.dialect_subregion || 'unknown';
-        const count = Number(entry.count) || 0;
-        pushRow(dialectFamily, subregion, count);
-      });
-    }
-
-    const rows = Object.values(rowsByKey).map((row) => {
-      const target = getCoverageTarget(row.dialectFamily, row.subregion);
-      const progressRatio = target > 0 ? row.count / target : 0;
-      const proportion = totalProfiles > 0 ? row.count / totalProfiles : 0;
-      const status = progressRatio >= 1 ? 'met' : progressRatio >= 0.6 ? 'partial' : 'low';
-      return {
-        ...row,
-        target,
-        progressRatio,
-        proportion,
-        status,
-      };
-    });
-
-    rows.sort(
-      (a, b) =>
-        a.dialectFamily.localeCompare(b.dialectFamily) ||
-        a.subregion.localeCompare(b.subregion)
-    );
-
-    return rows;
+  function getCoverageStatus(pct) {
+    if (!Number.isFinite(pct)) return 'low';
+    if (pct >= 1) return 'met';
+    if (pct >= 0.6) return 'partial';
+    return 'low';
   }
 
-  function describeCoverageCombination(row) {
-    return `${formatCoverageLabel(row.dialectFamily)} / ${formatCoverageLabel(row.subregion)}`;
+  function formatCoveragePercent(pct) {
+    if (!Number.isFinite(pct)) return null;
+    const percent = Math.max(0, pct) * 100;
+    const decimals = percent >= 100 ? 0 : percent >= 10 ? 1 : 2;
+    return `${percent.toFixed(decimals)}%`;
+  }
+
+  function formatCoverageShortfall(deficit) {
+    const value = Number(deficit);
+    if (!Number.isFinite(value) || value <= 0) return null;
+    return Math.max(1, Math.ceil(value));
   }
 
   function ensureCoverageContainer() {
@@ -513,94 +442,97 @@
     const style = document.createElement('style');
     style.id = 'coverageSummaryStyles';
     style.textContent = `
-      .coverage-summary { max-width: 920px; margin: 1.5rem auto; padding: 1rem; background: var(--card, #fff); border-radius: 12px; border: 1px solid var(--border, #dcdcdc); box-shadow: 0 4px 24px rgba(0, 0, 0, 0.04); }
-      .coverage-summary h2 { margin: 0 0 .75rem 0; font-size: 1.25rem; }
-      .coverage-summary__meta { margin: 0 0 1rem 0; color: var(--muted, #555); }
-      .coverage-summary__insight { margin: 0 0 .75rem 0; font-size: .9rem; color: var(--muted, #555); }
-      .coverage-summary__legend { margin: 0 0 1rem 0; display: flex; flex-wrap: wrap; gap: .5rem 1rem; font-size: .8rem; color: var(--muted, #555); }
-      .coverage-summary__legend-item { display: inline-flex; align-items: center; gap: .35rem; }
-      .coverage-summary__legend-swatch { width: 12px; height: 12px; border-radius: 999px; display: inline-block; }
-      .coverage-summary__legend-swatch--met { background: #2e7d32; }
-      .coverage-summary__legend-swatch--partial { background: #f9a825; }
-      .coverage-summary__legend-swatch--low { background: #d32f2f; }
+      .coverage-summary { max-width: 960px; margin: 1.5rem auto; padding: 1.25rem; background: var(--card, #fff); border-radius: 12px; border: 1px solid var(--border, #dcdcdc); box-shadow: 0 4px 24px rgba(0, 0, 0, 0.04); }
+      .coverage-summary h2 { margin: 0 0 .75rem 0; font-size: 1.3rem; }
+      .coverage-summary__meta { margin: 0 0 .75rem 0; color: var(--muted, #555); font-size: .85rem; }
+      .coverage-summary__insight { margin: 0 0 1rem 0; font-size: .9rem; color: var(--muted, #555); }
       .coverage-summary__table { width: 100%; border-collapse: collapse; font-size: .95rem; }
-      .coverage-summary__table th, .coverage-summary__table td { padding: .5rem .65rem; border: 1px solid var(--border, #e2e2e2); text-align: left; vertical-align: top; }
+      .coverage-summary__table th, .coverage-summary__table td { padding: .6rem .75rem; border: 1px solid var(--border, #e2e2e2); text-align: left; vertical-align: top; }
       .coverage-summary__table th { background: rgba(0,0,0,0.04); font-weight: 600; }
-      .coverage-summary__cell--count { font-weight: 600; }
-      .coverage-summary__row--met .coverage-summary__cell--count { color: #2e7d32; }
-      .coverage-summary__row--partial .coverage-summary__cell--count { color: #f9a825; }
-      .coverage-summary__row--low .coverage-summary__cell--count { color: #d32f2f; }
+      .coverage-summary__count { display: inline-flex; align-items: center; gap: .4rem; font-weight: 600; }
+      .coverage-summary__count-value { display: inline-block; }
+      .coverage-summary__row--met .coverage-summary__count-value { color: #2e7d32; }
+      .coverage-summary__row--partial .coverage-summary__count-value { color: #f9a825; }
+      .coverage-summary__row--low .coverage-summary__count-value { color: #d32f2f; }
+      .coverage-summary__deficit-badge { display: inline-flex; align-items: center; gap: .25rem; padding: 0 .55rem; height: 1.35rem; border-radius: 999px; background: rgba(211, 47, 47, 0.12); color: #b71c1c; font-size: .75rem; font-weight: 600; }
       .coverage-summary__progress { position: relative; background: rgba(0,0,0,0.08); border-radius: 999px; height: 12px; overflow: hidden; }
+      .coverage-summary__progress--compact { height: 8px; }
       .coverage-summary__progress-fill { height: 100%; border-radius: inherit; background: var(--accent, #2b7cff); transition: width .3s ease; }
-      .coverage-summary__row--met .coverage-summary__progress-fill { background: #2e7d32; }
-      .coverage-summary__row--partial .coverage-summary__progress-fill { background: #f9a825; }
-      .coverage-summary__row--low .coverage-summary__progress-fill { background: #d32f2f; }
-      .coverage-summary__progress-label { display: block; margin-top: .25rem; font-size: .75rem; color: var(--muted, #666); }
+      .coverage-summary__progress-fill--met { background: #2e7d32; }
+      .coverage-summary__progress-fill--partial { background: #f9a825; }
+      .coverage-summary__progress-fill--low { background: #d32f2f; }
+      .coverage-summary__progress-meta { display: block; margin-top: .35rem; font-size: .78rem; color: var(--muted, #666); }
       .coverage-summary__empty { margin: 0; color: var(--muted, #666); }
+      .coverage-summary__next-up { margin-top: 1.5rem; padding: 1rem 1.25rem; border-radius: 12px; border: 1px solid rgba(43, 124, 255, 0.18); background: rgba(43, 124, 255, 0.06); }
+      .coverage-summary__next-up h3 { margin: 0 0 .65rem 0; font-size: 1rem; }
+      .coverage-summary__next-up-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .85rem; }
+      .coverage-summary__next-up-item { display: flex; flex-direction: column; gap: .35rem; }
+      .coverage-summary__next-up-label { font-weight: 600; font-size: .95rem; }
+      .coverage-summary__next-up-info { font-size: .82rem; color: var(--muted, #555); }
+      .coverage-summary__next-up-empty { margin: 0; color: var(--muted, #555); }
     `;
     (document.head || document.body || document.documentElement).appendChild(style);
   }
 
-  function renderCoverageTable(summary) {
+  function renderCoverageSnapshot(snapshot) {
     const container = ensureCoverageContainer();
     if (!container) return;
     injectCoverageStyles();
     container.innerHTML = '';
 
     const heading = document.createElement('h2');
-    heading.textContent = 'Coverage summary';
+    heading.textContent = 'Coverage snapshot';
     container.appendChild(heading);
 
     const meta = document.createElement('p');
     meta.className = 'coverage-summary__meta';
-    const total = Number(summary && summary.total_profiles);
-    meta.textContent = Number.isFinite(total)
-      ? `Total speaker profiles: ${total}`
-      : 'Coverage summary by speaker profile attributes.';
     container.appendChild(meta);
 
-    const rows = aggregateCoverageCombinations(summary);
-    if (!rows.length) {
+    if (snapshot === null) {
+      meta.textContent = 'Loading coverage snapshot…';
+      return;
+    }
+
+    if (!snapshot || typeof snapshot !== 'object') {
+      meta.textContent = 'Coverage snapshot not available.';
+      return;
+    }
+
+    const generated = snapshot.generated_at ? new Date(snapshot.generated_at).toLocaleString() : null;
+    const defaultTarget = toFinite(snapshot.default_target_per_cell);
+    const metaParts = [];
+    if (generated) metaParts.push(`Generated ${generated}`);
+    if (defaultTarget != null) metaParts.push(`Default target per cell: ${Math.round(defaultTarget)}`);
+    meta.textContent = metaParts.length ? metaParts.join(' • ') : 'Coverage snapshot by speaker profile attributes.';
+
+    const cells = Array.isArray(snapshot.cells) ? snapshot.cells.slice() : [];
+    if (!cells.length) {
       const empty = document.createElement('p');
       empty.className = 'coverage-summary__empty';
-      empty.textContent = 'No coverage information available.';
+      empty.textContent = 'No coverage cells observed yet.';
       container.appendChild(empty);
       return;
     }
 
-    const insight = document.createElement('p');
-    insight.className = 'coverage-summary__insight';
-    const met = rows.filter((row) => row.status === 'met');
-    const partial = rows.filter((row) => row.status === 'partial');
-    const low = rows.filter((row) => row.status === 'low');
-    const listToText = (list) =>
-      list.length ? list.slice(0, 3).map((row) => describeCoverageCombination(row)).join(', ') : 'None';
-    const parts = [
-      `Well-covered: ${listToText(met)}.`,
-      partial.length ? `Building coverage: ${listToText(partial)}.` : '',
-      `Needs focus: ${listToText(low)}.`,
-    ].filter(Boolean);
-    insight.textContent = parts.join(' ');
-    container.appendChild(insight);
-
-    const legend = document.createElement('div');
-    legend.className = 'coverage-summary__legend';
-    [
-      { key: 'met', label: 'Target met' },
-      { key: 'partial', label: 'Approaching target' },
-      { key: 'low', label: 'Needs attention' },
-    ].forEach((entry) => {
-      const item = document.createElement('span');
-      item.className = 'coverage-summary__legend-item';
-      const swatch = document.createElement('span');
-      swatch.className = `coverage-summary__legend-swatch coverage-summary__legend-swatch--${entry.key}`;
-      const text = document.createElement('span');
-      text.textContent = entry.label;
-      item.appendChild(swatch);
-      item.appendChild(text);
-      legend.appendChild(item);
+    cells.sort((a, b) => {
+      const pctA = toFinite(a && a.pct_of_target) ?? 0;
+      const pctB = toFinite(b && b.pct_of_target) ?? 0;
+      if (pctA !== pctB) return pctA - pctB;
+      const deficitA = toFinite(a && a.deficit) ?? 0;
+      const deficitB = toFinite(b && b.deficit) ?? 0;
+      if (deficitA !== deficitB) return deficitB - deficitA;
+      return describeCoverageCell(a).localeCompare(describeCoverageCell(b));
     });
-    container.appendChild(legend);
+
+    const completenessRaw = toFinite(snapshot.coverage_completeness);
+    if (completenessRaw != null) {
+      const completeness = clamp01(completenessRaw);
+      const insight = document.createElement('p');
+      insight.className = 'coverage-summary__insight';
+      const percentText = formatCoveragePercent(completeness) || '—';
+      insight.textContent = `Overall coverage completeness: ${percentText} of target across ${cells.length} cells.`;
+      container.appendChild(insight);
+    }
 
     const table = document.createElement('table');
     table.className = 'coverage-summary__table';
@@ -609,10 +541,12 @@
     const headerRow = document.createElement('tr');
     [
       'Dialect family',
-      'Dialect subregion',
+      'Subregion',
+      'Gender',
+      'Age band',
       'Count',
       'Target',
-      'Progress toward quota',
+      'Progress toward target',
     ].forEach((label) => {
       const cell = document.createElement('th');
       cell.textContent = label;
@@ -622,60 +556,151 @@
     table.appendChild(thead);
 
     const tbody = document.createElement('tbody');
-    rows.forEach((row) => {
+    cells.forEach((cell) => {
+      const pctValue = toFinite(cell && cell.pct_of_target) ?? 0;
+      const status = getCoverageStatus(pctValue);
       const tr = document.createElement('tr');
-      tr.className = `coverage-summary__row coverage-summary__row--${row.status}`;
+      tr.className = `coverage-summary__row coverage-summary__row--${status}`;
 
-      const familyCell = document.createElement('td');
-      familyCell.textContent = formatCoverageLabel(row.dialectFamily);
-      tr.appendChild(familyCell);
-
-      const subregionCell = document.createElement('td');
-      subregionCell.textContent = formatCoverageLabel(row.subregion);
-      tr.appendChild(subregionCell);
+      [
+        formatCoverageLabel(cell.dialect_family),
+        formatCoverageLabel(cell.subregion),
+        formatCoverageLabel(cell.apparent_gender),
+        formatCoverageLabel(cell.apparent_age_band),
+      ].forEach((value) => {
+        const td = document.createElement('td');
+        td.textContent = value;
+        tr.appendChild(td);
+      });
 
       const countCell = document.createElement('td');
-      countCell.className = 'coverage-summary__cell coverage-summary__cell--count';
-      countCell.textContent = `${row.count}`;
+      const countWrapper = document.createElement('span');
+      countWrapper.className = 'coverage-summary__count';
+      const countValue = document.createElement('span');
+      countValue.className = 'coverage-summary__count-value';
+      const countNumber = toFinite(cell && cell.count);
+      countValue.textContent = Number.isFinite(countNumber) ? `${Math.round(countNumber)}` : '—';
+      countWrapper.appendChild(countValue);
+      const shortfall = formatCoverageShortfall(cell && cell.deficit);
+      if (shortfall != null) {
+        const badge = document.createElement('span');
+        badge.className = 'coverage-summary__deficit-badge';
+        badge.textContent = `Needs ${shortfall} more`;
+        countWrapper.appendChild(badge);
+      }
+      countCell.appendChild(countWrapper);
       tr.appendChild(countCell);
 
       const targetCell = document.createElement('td');
-      targetCell.textContent = Number.isFinite(row.target) ? `${Math.round(row.target)}` : '—';
+      const targetNumber = toFinite(cell && cell.target);
+      if (targetNumber != null) {
+        const rounded = Math.round(targetNumber);
+        targetCell.textContent = Math.abs(targetNumber - rounded) < 0.1 ? `${rounded}` : targetNumber.toFixed(1);
+      } else {
+        targetCell.textContent = '—';
+      }
       tr.appendChild(targetCell);
 
       const progressCell = document.createElement('td');
-      progressCell.className = 'coverage-summary__cell coverage-summary__cell--progress';
       const progress = document.createElement('div');
       progress.className = 'coverage-summary__progress';
       const progressFill = document.createElement('div');
-      progressFill.className = 'coverage-summary__progress-fill';
-      const progressPercent = Math.max(0, Math.min(row.progressRatio, 1));
-      progressFill.style.width = `${(progressPercent * 100).toFixed(1)}%`;
+      progressFill.className = `coverage-summary__progress-fill coverage-summary__progress-fill--${status}`;
+      const progressPercent = Math.max(0, Math.min(pctValue, 1)) * 100;
+      progressFill.style.width = `${progressPercent.toFixed(1)}%`;
       progress.appendChild(progressFill);
       progressCell.appendChild(progress);
 
-      const progressLabel = document.createElement('span');
-      progressLabel.className = 'coverage-summary__progress-label';
-      const targetPercent = row.progressRatio * 100;
-      const datasetPercent = row.proportion * 100;
-      const targetText = Number.isFinite(targetPercent)
-        ? `${targetPercent.toFixed(targetPercent >= 100 ? 0 : 1)}% of target`
-        : 'Target unavailable';
-      const datasetText = Number.isFinite(datasetPercent)
-        ? `${datasetPercent.toFixed(datasetPercent >= 10 ? 1 : 2)}% of dataset`
-        : '';
-      progressLabel.textContent = datasetText ? `${targetText} • ${datasetText}` : targetText;
-      progressCell.appendChild(progressLabel);
+      const progressMeta = document.createElement('span');
+      progressMeta.className = 'coverage-summary__progress-meta';
+      const percentText = formatCoveragePercent(pctValue) || 'Target progress unavailable';
+      if (shortfall != null) {
+        progressMeta.textContent = `${percentText} of target • Needs ${shortfall} more`;
+      } else if (pctValue >= 1) {
+        progressMeta.textContent = `${percentText} of target`;
+      } else {
+        progressMeta.textContent = percentText;
+      }
+      progressCell.appendChild(progressMeta);
 
       tr.appendChild(progressCell);
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
     container.appendChild(table);
+
+    const nextUp = document.createElement('section');
+    nextUp.className = 'coverage-summary__next-up';
+    const nextHeading = document.createElement('h3');
+    nextHeading.textContent = 'Next-Up (Top deficits)';
+    nextUp.appendChild(nextHeading);
+
+    const nextCandidatesSource = Array.isArray(snapshot.lowest_cells) && snapshot.lowest_cells.length
+      ? snapshot.lowest_cells
+      : cells;
+    const nextCandidates = nextCandidatesSource
+      .filter((item) => {
+        const pct = toFinite(item && item.pct_of_target) ?? 0;
+        const shortfallValue = formatCoverageShortfall(item && item.deficit);
+        return pct < 0.5 && shortfallValue != null;
+      })
+      .sort((a, b) => {
+        const deficitA = toFinite(a && a.deficit) ?? 0;
+        const deficitB = toFinite(b && b.deficit) ?? 0;
+        if (deficitA !== deficitB) return deficitB - deficitA;
+        const pctA = toFinite(a && a.pct_of_target) ?? 0;
+        const pctB = toFinite(b && b.pct_of_target) ?? 0;
+        if (pctA !== pctB) return pctA - pctB;
+        return describeCoverageCell(a).localeCompare(describeCoverageCell(b));
+      })
+      .slice(0, 10);
+
+    if (!nextCandidates.length) {
+      const empty = document.createElement('p');
+      empty.className = 'coverage-summary__next-up-empty';
+      empty.textContent = 'All observed cells are at least 50% of their targets — great work!';
+      nextUp.appendChild(empty);
+    } else {
+      const list = document.createElement('ol');
+      list.className = 'coverage-summary__next-up-list';
+      nextCandidates.forEach((itemCell) => {
+        const item = document.createElement('li');
+        item.className = 'coverage-summary__next-up-item';
+
+        const label = document.createElement('span');
+        label.className = 'coverage-summary__next-up-label';
+        label.textContent = describeCoverageCell(itemCell);
+        item.appendChild(label);
+
+        const info = document.createElement('span');
+        info.className = 'coverage-summary__next-up-info';
+        const pct = toFinite(itemCell && itemCell.pct_of_target) ?? 0;
+        const percentText = formatCoveragePercent(pct) || 'Target progress unavailable';
+        const shortfallValue = formatCoverageShortfall(itemCell && itemCell.deficit);
+        info.textContent = shortfallValue != null ? `${percentText} of target • Needs ${shortfallValue} more` : percentText;
+        item.appendChild(info);
+
+        const progress = document.createElement('div');
+        progress.className = 'coverage-summary__progress coverage-summary__progress--compact';
+        const progressFill = document.createElement('div');
+        const normalized = Math.max(0, Math.min(pct, 1));
+        const status = getCoverageStatus(normalized);
+        progressFill.className = `coverage-summary__progress-fill coverage-summary__progress-fill--${status}`;
+        progressFill.style.width = `${(normalized * 100).toFixed(1)}%`;
+        progress.appendChild(progressFill);
+        item.appendChild(progress);
+
+        list.appendChild(item);
+      });
+      nextUp.appendChild(list);
+    }
+
+    container.appendChild(nextUp);
   }
 
   const QA_TILE_CONTAINER_ID = 'qaDashboardTiles';
   const QA_TILE_PROVENANCE_ID = 'qaTileProvenanceComplete';
+  const QA_TILE_COVERAGE_ID = 'qaTileCoverageCompleteness';
 
   function injectDashboardTilesStyles() {
     if (typeof document === 'undefined') return;
@@ -850,6 +875,84 @@
     }
   }
 
+  function renderCoverageCompletenessTile(snapshot) {
+    if (typeof document === 'undefined') return;
+    injectDashboardTilesStyles();
+    const container = ensureDashboardTilesContainer();
+    if (!container) return;
+
+    let grid = container.querySelector('.qa-dashboard-tiles__grid');
+    if (!grid) {
+      grid = document.createElement('div');
+      grid.className = 'qa-dashboard-tiles__grid';
+      container.appendChild(grid);
+    }
+
+    let tile = document.getElementById(QA_TILE_COVERAGE_ID);
+    if (!tile) {
+      tile = document.createElement('article');
+      tile.id = QA_TILE_COVERAGE_ID;
+      tile.className = 'qa-dashboard-tile';
+
+      const label = document.createElement('p');
+      label.className = 'qa-dashboard-tile__label';
+      tile.appendChild(label);
+
+      const value = document.createElement('p');
+      value.className = 'qa-dashboard-tile__value';
+      tile.appendChild(value);
+
+      const caption = document.createElement('p');
+      caption.className = 'qa-dashboard-tile__caption';
+      tile.appendChild(caption);
+
+      grid.appendChild(tile);
+    }
+
+    const labelEl = tile.querySelector('.qa-dashboard-tile__label');
+    const valueEl = tile.querySelector('.qa-dashboard-tile__value');
+    const captionEl = tile.querySelector('.qa-dashboard-tile__caption');
+
+    if (labelEl) {
+      labelEl.textContent = 'Coverage completeness';
+    }
+
+    if (snapshot === null) {
+      if (valueEl) valueEl.textContent = '—';
+      if (captionEl) captionEl.textContent = 'Loading coverage snapshot…';
+      return;
+    }
+
+    if (!snapshot || typeof snapshot !== 'object') {
+      if (valueEl) valueEl.textContent = '—';
+      if (captionEl) captionEl.textContent = 'Coverage snapshot unavailable';
+      return;
+    }
+
+    const completenessRaw = toFinite(snapshot.coverage_completeness);
+    if (completenessRaw != null) {
+      const completeness = clamp01(completenessRaw);
+      const percentValue = completeness * 100;
+      const decimals = percentValue >= 99.95 ? 0 : percentValue >= 10 ? 1 : 2;
+      if (valueEl) valueEl.textContent = `${percentValue.toFixed(decimals)}%`;
+
+      const cellsCount = Array.isArray(snapshot.cells) ? snapshot.cells.length : 0;
+      const defaultTarget = toFinite(snapshot.default_target_per_cell);
+      const captionParts = [];
+      if (cellsCount) captionParts.push(`${cellsCount} cells`);
+      if (defaultTarget != null) captionParts.push(`Default ${Math.round(defaultTarget)} clips`);
+      if (captionEl) {
+        captionEl.textContent =
+          captionParts.length
+            ? captionParts.join(' • ')
+            : 'Average pct. of target across observed cells';
+      }
+    } else {
+      if (valueEl) valueEl.textContent = '—';
+      if (captionEl) captionEl.textContent = 'Coverage completeness unavailable';
+    }
+  }
+
   function fetchTrainingSummary() {
     if (typeof fetch !== 'function') {
       return Promise.resolve(null);
@@ -862,11 +965,11 @@
       .catch(() => null);
   }
 
-  function fetchCoverageSummary() {
+  function fetchCoverageSnapshot() {
     if (typeof fetch !== 'function') {
       return Promise.resolve(null);
     }
-    return fetch('coverage_summary.json', { cache: 'no-store' })
+    return fetch('coverage_snapshot.json', { cache: 'no-store' })
       .then((response) => {
         if (!response.ok) return null;
         return response.json().catch(() => null);
@@ -877,6 +980,8 @@
   if (typeof window !== 'undefined') {
     window.addEventListener('DOMContentLoaded', () => {
       renderProvenanceTile(null);
+      renderCoverageCompletenessTile(null);
+      renderCoverageSnapshot(null);
       fetchTrainingSummary()
         .then((summary) => {
           if (summary) {
@@ -887,24 +992,20 @@
         })
         .catch(() => renderProvenanceTile(undefined));
 
-      fetchCoverageSummary().then((summary) => {
-        if (summary) {
-          renderCoverageTable(summary);
-        } else {
-          const container = ensureCoverageContainer();
-          if (container) {
-            injectCoverageStyles();
-            container.innerHTML = '';
-            const heading = document.createElement('h2');
-            heading.textContent = 'Coverage summary';
-            container.appendChild(heading);
-            const empty = document.createElement('p');
-            empty.className = 'coverage-summary__empty';
-            empty.textContent = 'Coverage summary not available.';
-            container.appendChild(empty);
+      fetchCoverageSnapshot()
+        .then((snapshot) => {
+          if (snapshot) {
+            renderCoverageSnapshot(snapshot);
+            renderCoverageCompletenessTile(snapshot);
+          } else {
+            renderCoverageSnapshot(undefined);
+            renderCoverageCompletenessTile(undefined);
           }
-        }
-      });
+        })
+        .catch(() => {
+          renderCoverageSnapshot(undefined);
+          renderCoverageCompletenessTile(undefined);
+        });
     });
   }
 
