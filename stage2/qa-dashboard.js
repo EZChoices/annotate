@@ -27,6 +27,9 @@
   const ALLOCATOR_HISTORY_KEY = "ea_stage2_allocator_history_v1";
   const ALLOCATOR_HISTORY_MAX = 100;
   let latestCoverageSnapshot = null;
+  let latestCoverageAlerts = [];
+  let coverageAlertsGeneratedAt = null;
+  let activeCoverageHighlightKey = null;
 
   function clone(obj) {
     return obj ? JSON.parse(JSON.stringify(obj)) : obj;
@@ -422,6 +425,34 @@
     return Math.max(1, Math.ceil(value));
   }
 
+  function formatAlertTimestamp(value) {
+    if (!value) return 'Unknown time';
+    try {
+      const ts = new Date(value);
+      if (Number.isNaN(ts.getTime())) return String(value);
+      return ts.toLocaleString();
+    } catch {
+      return String(value);
+    }
+  }
+
+  function getCoverageAlertsList() {
+    return Array.isArray(latestCoverageAlerts) ? latestCoverageAlerts : [];
+  }
+
+  function hasRecentCoverageAlerts(thresholdHours = 24) {
+    const alerts = getCoverageAlertsList();
+    if (!alerts.length) return false;
+    const now = Date.now();
+    const limitMs = thresholdHours * 3_600_000;
+    return alerts.some((alert) => {
+      if (!alert || !alert.timestamp) return false;
+      const time = Date.parse(alert.timestamp);
+      if (!Number.isFinite(time)) return false;
+      return now - time <= limitMs;
+    });
+  }
+
   function normalizeAllocatorCategory(value) {
     if (value == null) return "unknown";
     if (typeof value === "number" && Number.isFinite(value)) {
@@ -763,6 +794,20 @@
       .coverage-summary__next-up-label { font-weight: 600; font-size: .95rem; }
       .coverage-summary__next-up-info { font-size: .82rem; color: var(--muted, #555); }
       .coverage-summary__next-up-empty { margin: 0; color: var(--muted, #555); }
+      .coverage-alerts { margin: 0 0 1.25rem 0; padding: 1rem 1.25rem; border-radius: 12px; border: 1px solid rgba(211, 47, 47, 0.25); background: rgba(211, 47, 47, 0.08); display: flex; flex-direction: column; gap: .75rem; }
+      .coverage-alerts__header { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; justify-content: space-between; }
+      .coverage-alerts__title { margin: 0; font-size: 1rem; font-weight: 600; color: #b71c1c; display: inline-flex; align-items: center; gap: .5rem; }
+      .coverage-alerts__count { display: inline-flex; align-items: center; justify-content: center; padding: 0 .6rem; height: 1.4rem; border-radius: 999px; background: #d32f2f; color: #fff; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+      .coverage-alerts__meta { font-size: .78rem; color: var(--muted, #666); margin-left: auto; }
+      .coverage-alerts__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .6rem; }
+      .coverage-alerts__item { border: 1px solid rgba(211, 47, 47, 0.25); background: #fff; border-radius: 12px; padding: .75rem .85rem; display: flex; flex-direction: column; align-items: flex-start; gap: .45rem; cursor: pointer; text-align: left; transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; font: inherit; color: inherit; appearance: none; -webkit-appearance: none; }
+      .coverage-alerts__item:hover { border-color: #d32f2f; box-shadow: 0 8px 18px rgba(211, 47, 47, 0.18); transform: translateY(-1px); }
+      .coverage-alerts__item:focus-visible { outline: 2px solid #d32f2f; outline-offset: 2px; }
+      .coverage-alerts__item-cell { font-size: .95rem; font-weight: 600; color: #b71c1c; }
+      .coverage-alerts__item-meta { display: flex; flex-wrap: wrap; gap: .5rem .9rem; font-size: .8rem; color: #7f1d1d; }
+      .coverage-alerts__empty { margin: 0; font-size: .85rem; color: var(--muted, #555); }
+      .coverage-summary__row--highlight { box-shadow: 0 0 0 3px rgba(211, 47, 47, 0.35) inset; }
+      .qa-dashboard-tile__badge { display: inline-flex; align-items: center; justify-content: center; padding: 0 .55rem; height: 1.3rem; border-radius: 999px; background: #d32f2f; color: #fff; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
       .allocator-widget { margin-top: 1.5rem; padding: 1rem 1.25rem; border-radius: 12px; border: 1px solid var(--border, #dcdcdc); background: var(--card, #fff); display: flex; flex-direction: column; gap: .75rem; }
       .allocator-widget h3 { margin: 0; font-size: 1.05rem; }
       .allocator-widget h4 { margin: 0 0 .35rem 0; font-size: .9rem; color: var(--muted, #444); }
@@ -784,6 +829,39 @@
       .allocator-widget__empty { margin: 0; font-size: .85rem; color: var(--muted, #666); }
     `;
     (document.head || document.body || document.documentElement).appendChild(style);
+  }
+
+  function applyCoverageHighlight(options = {}) {
+    if (typeof document === 'undefined') return;
+    const container = document.getElementById('coverageSummary');
+    if (!container) return;
+    let targetRow = null;
+    const rows = container.querySelectorAll('[data-cell-key]');
+    rows.forEach((row) => {
+      if (activeCoverageHighlightKey && row.dataset && row.dataset.cellKey === activeCoverageHighlightKey) {
+        row.classList.add('coverage-summary__row--highlight');
+        if (!targetRow) targetRow = row;
+      } else {
+        row.classList.remove('coverage-summary__row--highlight');
+      }
+    });
+    if (options.scrollIntoView && targetRow) {
+      targetRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
+
+  function highlightCoverageCell(cellKey) {
+    if (typeof cellKey !== 'string' || !cellKey) {
+      activeCoverageHighlightKey = null;
+      applyCoverageHighlight({ scrollIntoView: false });
+      return;
+    }
+    if (activeCoverageHighlightKey === cellKey) {
+      activeCoverageHighlightKey = null;
+    } else {
+      activeCoverageHighlightKey = cellKey;
+    }
+    applyCoverageHighlight({ scrollIntoView: activeCoverageHighlightKey !== null });
   }
 
   function renderCoverageSnapshot(snapshot) {
@@ -820,6 +898,95 @@
     if (defaultTarget != null) metaParts.push(`Default target per cell: ${Math.round(defaultTarget)}`);
     meta.textContent = metaParts.length ? metaParts.join(' • ') : 'Coverage snapshot by speaker profile attributes.';
 
+    const alerts = getCoverageAlertsList();
+    const alertsSection = document.createElement('section');
+    alertsSection.className = 'coverage-alerts';
+    const alertsHeader = document.createElement('div');
+    alertsHeader.className = 'coverage-alerts__header';
+    const alertsTitle = document.createElement('h3');
+    alertsTitle.className = 'coverage-alerts__title';
+    alertsTitle.textContent = 'Coverage alerts';
+    if (alerts.length) {
+      const countBadge = document.createElement('span');
+      countBadge.className = 'coverage-alerts__count';
+      countBadge.textContent = `${alerts.length} active`;
+      alertsTitle.appendChild(countBadge);
+    }
+    alertsHeader.appendChild(alertsTitle);
+    const alertsMeta = document.createElement('span');
+    alertsMeta.className = 'coverage-alerts__meta';
+    if (coverageAlertsGeneratedAt) {
+      alertsMeta.textContent = `Updated ${formatAlertTimestamp(coverageAlertsGeneratedAt)}`;
+    } else {
+      alertsMeta.textContent = 'Updated recently';
+    }
+    alertsHeader.appendChild(alertsMeta);
+    alertsSection.appendChild(alertsHeader);
+
+    if (!alerts.length) {
+      const emptyAlert = document.createElement('p');
+      emptyAlert.className = 'coverage-alerts__empty';
+      emptyAlert.textContent = 'No persistent low-coverage cells detected in the last 48 hours.';
+      alertsSection.appendChild(emptyAlert);
+    } else {
+      const list = document.createElement('ul');
+      list.className = 'coverage-alerts__list';
+      alerts.slice(-50).forEach((alert) => {
+        if (!alert || typeof alert !== 'object') return;
+        const cellKey = typeof alert.cell === 'string' && alert.cell
+          ? alert.cell
+          : 'unknown:unknown:unknown:unknown';
+        const item = document.createElement('li');
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'coverage-alerts__item';
+        button.dataset.cellKey = cellKey;
+        button.title = 'Highlight in coverage table';
+        button.addEventListener('click', () => highlightCoverageCell(cellKey));
+
+        const label = document.createElement('span');
+        label.className = 'coverage-alerts__item-cell';
+        label.textContent = describeAllocatorCellKey(cellKey);
+        button.appendChild(label);
+
+        const metaLine = document.createElement('div');
+        metaLine.className = 'coverage-alerts__item-meta';
+
+        const timestamp = document.createElement('span');
+        timestamp.textContent = formatAlertTimestamp(alert.timestamp);
+        metaLine.appendChild(timestamp);
+
+        const pctValue = toFinite(alert.pct_of_target);
+        const pctText = pctValue != null ? formatCoveragePercent(pctValue) : null;
+        if (pctText) {
+          const pctSpan = document.createElement('span');
+          pctSpan.textContent = `${pctText} of target`;
+          metaLine.appendChild(pctSpan);
+        }
+
+        const staleValue = toFinite(alert.stale_hours);
+        if (staleValue != null) {
+          const staleSpan = document.createElement('span');
+          staleSpan.textContent = `Stale ${staleValue.toFixed(1)}h`;
+          metaLine.appendChild(staleSpan);
+        }
+
+        const deficitValue = toFinite(alert.deficit);
+        if (deficitValue != null && deficitValue > 0) {
+          const deficitSpan = document.createElement('span');
+          deficitSpan.textContent = `Needs ${Math.max(1, Math.ceil(deficitValue))} more`;
+          metaLine.appendChild(deficitSpan);
+        }
+
+        button.appendChild(metaLine);
+        item.appendChild(button);
+        list.appendChild(item);
+      });
+      alertsSection.appendChild(list);
+    }
+
+    container.appendChild(alertsSection);
+
     const cells = Array.isArray(snapshot.cells) ? snapshot.cells.slice() : [];
     if (!cells.length) {
       const empty = document.createElement('p');
@@ -827,6 +994,7 @@
       empty.textContent = 'No coverage cells observed yet.';
       container.appendChild(empty);
       renderAllocatorWidget(snapshot);
+      applyCoverageHighlight({ scrollIntoView: false });
       return;
     }
 
@@ -877,6 +1045,8 @@
       const status = getCoverageStatus(pctValue);
       const tr = document.createElement('tr');
       tr.className = `coverage-summary__row coverage-summary__row--${status}`;
+      const cellKey = buildAllocatorCellKey(cell);
+      tr.dataset.cellKey = cellKey;
 
       [
         formatCoverageLabel(cell.dialect_family),
@@ -1013,6 +1183,7 @@
 
     container.appendChild(nextUp);
     renderAllocatorWidget(snapshot);
+    applyCoverageHighlight({ scrollIntoView: false });
   }
 
   const QA_TILE_CONTAINER_ID = 'qaDashboardTiles';
@@ -1232,6 +1403,13 @@
 
     if (labelEl) {
       labelEl.textContent = 'Coverage completeness';
+      if (hasRecentCoverageAlerts()) {
+        labelEl.appendChild(document.createTextNode(' '));
+        const badge = document.createElement('span');
+        badge.className = 'qa-dashboard-tile__badge';
+        badge.textContent = 'Alert';
+        labelEl.appendChild(badge);
+      }
     }
 
     if (snapshot === null) {
@@ -1282,11 +1460,48 @@
       .catch(() => null);
   }
 
+  function updateCoverageAlerts(feed) {
+    const alerts = Array.isArray(feed && feed.alerts) ? feed.alerts : [];
+    latestCoverageAlerts = alerts
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') return null;
+        const cellKey = typeof entry.cell === 'string' && entry.cell
+          ? entry.cell
+          : 'unknown:unknown:unknown:unknown';
+        const pct = toFinite(entry.pct_of_target);
+        const deficit = toFinite(entry.deficit);
+        const stale = toFinite(entry.stale_hours);
+        return {
+          timestamp: entry.timestamp || null,
+          cell: cellKey,
+          pct_of_target: pct != null ? pct : null,
+          deficit: deficit != null ? deficit : null,
+          stale_hours: stale != null ? stale : null,
+        };
+      })
+      .filter(Boolean);
+    coverageAlertsGeneratedAt = feed && typeof feed.generated_at === 'string' ? feed.generated_at : null;
+    renderCoverageSnapshot(latestCoverageSnapshot);
+    renderCoverageCompletenessTile(latestCoverageSnapshot);
+  }
+
   function fetchCoverageSnapshot() {
     if (typeof fetch !== 'function') {
       return Promise.resolve(null);
     }
     return fetch('/api/coverage', { cache: 'no-store' })
+      .then((response) => {
+        if (!response.ok) return null;
+        return response.json().catch(() => null);
+      })
+      .catch(() => null);
+  }
+
+  function fetchCoverageAlerts() {
+    if (typeof fetch !== 'function') {
+      return Promise.resolve(null);
+    }
+    return fetch('/api/coverage/alerts', { cache: 'no-store' })
       .then((response) => {
         if (!response.ok) return null;
         return response.json().catch(() => null);
@@ -1309,17 +1524,27 @@
         })
         .catch(() => renderProvenanceTile(undefined));
 
-      fetchCoverageSnapshot()
-        .then((snapshot) => {
-          if (snapshot) {
-            renderCoverageSnapshot(snapshot);
-            renderCoverageCompletenessTile(snapshot);
+      Promise.allSettled([fetchCoverageSnapshot(), fetchCoverageAlerts()])
+        .then((results) => {
+          const snapshotResult = results[0];
+          const alertsResult = results[1];
+          const snapshotValue = snapshotResult && snapshotResult.status === 'fulfilled' ? snapshotResult.value : null;
+          const alertsValue = alertsResult && alertsResult.status === 'fulfilled' ? alertsResult.value : null;
+          updateCoverageAlerts(alertsValue);
+
+          if (snapshotValue) {
+            renderCoverageSnapshot(snapshotValue);
+            renderCoverageCompletenessTile(snapshotValue);
+          } else if (snapshotResult && snapshotResult.status === 'fulfilled') {
+            renderCoverageSnapshot(undefined);
+            renderCoverageCompletenessTile(undefined);
           } else {
             renderCoverageSnapshot(undefined);
             renderCoverageCompletenessTile(undefined);
           }
         })
         .catch(() => {
+          updateCoverageAlerts(null);
           renderCoverageSnapshot(undefined);
           renderCoverageCompletenessTile(undefined);
         });

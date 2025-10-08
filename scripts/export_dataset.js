@@ -95,6 +95,14 @@ function formatCoveragePercentage(value) {
   return percent.toFixed(decimals);
 }
 
+function formatCoveragePercentLabel(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+  return `${formatCoveragePercentage(numeric)}%`;
+}
+
 function aggregateCoverageRows(summary) {
   if (!summary || typeof summary !== 'object') {
     return [];
@@ -212,6 +220,45 @@ function buildCoverageRepresentationSection(summary) {
     : '\nTotal profiles analyzed: not available.';
 
   return header + tableHeader + tableBody + '\n' + notes + totalsLine + '\n';
+}
+
+function buildCoverageSnapshotSection(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') {
+    return '';
+  }
+
+  const timestamp = snapshot.generated_at || 'unknown';
+  const completeness = Number(snapshot.coverage_completeness);
+  const completenessLabel = Number.isFinite(completeness)
+    ? formatCoveragePercentLabel(completeness)
+    : null;
+
+  const lines = [`\n\n## Coverage snapshot (as of ${timestamp})`];
+  lines.push(
+    completenessLabel
+      ? `- Coverage completeness: ${completenessLabel}`
+      : '- Coverage completeness: unavailable'
+  );
+
+  const lowest = Array.isArray(snapshot.lowest_cells) ? snapshot.lowest_cells.slice(0, 10) : [];
+  if (lowest.length) {
+    lines.push('- Lowest coverage cells:');
+    lowest.forEach((cell) => {
+      if (!cell || typeof cell !== 'object') return;
+      const labelParts = [
+        titleizeCoverageLabel(cell.dialect_family || 'unknown'),
+        titleizeCoverageLabel(cell.subregion || 'unknown'),
+        titleizeCoverageLabel(cell.apparent_gender || cell.gender || 'unknown'),
+        titleizeCoverageLabel(cell.apparent_age_band || cell.age_band || 'unknown'),
+      ];
+      const pctLabel = formatCoveragePercentLabel(cell.pct_of_target) || 'N/A';
+      lines.push(`  - ${labelParts.join(' / ')}: ${pctLabel} of target`);
+    });
+  } else {
+    lines.push('- Lowest coverage cells: none below target thresholds');
+  }
+
+  return `${lines.join('\n')}\n`;
 }
 
 const PROVENANCE_FIELDS = [
@@ -1170,6 +1217,28 @@ async function main() {
   const datasetCardPath = path.join(datasetRoot, 'dataset_card.md');
   const trainingSummaryPath = path.join(datasetRoot, 'training_data_summary.json');
   const exportLogPath = path.join(datasetRoot, 'export_log.txt');
+  const coverageSnapshotSourcePath = path.resolve(
+    __dirname,
+    '..',
+    'stage2',
+    'data',
+    'coverage_snapshot.json'
+  );
+  const coverageSnapshotDestPath = path.join(datasetRoot, 'coverage_snapshot.json');
+  let coverageSnapshotData = null;
+  if (fs.existsSync(coverageSnapshotSourcePath)) {
+    try {
+      const snapshotText = fs.readFileSync(coverageSnapshotSourcePath, 'utf-8');
+      coverageSnapshotData = JSON.parse(snapshotText);
+    } catch (err) {
+      console.warn('Warning: failed to parse coverage snapshot for dataset export', err);
+    }
+    try {
+      fs.copyFileSync(coverageSnapshotSourcePath, coverageSnapshotDestPath);
+    } catch (err) {
+      console.warn('Warning: failed to copy coverage snapshot into dataset export', err);
+    }
+  }
 
   const datasetJsonl = datasetRecords.map((record) => JSON.stringify(record)).join('\n');
   fs.writeFileSync(datasetJsonlPath, datasetJsonl + (datasetRecords.length ? '\n' : ''));
@@ -1247,6 +1316,20 @@ async function main() {
     }
   } catch (err) {
     console.warn('Warning: failed to append coverage section to dataset card', err);
+  }
+
+  if (coverageSnapshotData) {
+    datasetCard += buildCoverageSnapshotSection(coverageSnapshotData);
+  } else {
+    try {
+      if (fs.existsSync(coverageSnapshotDestPath)) {
+        const snapshotText = fs.readFileSync(coverageSnapshotDestPath, 'utf-8');
+        const parsed = JSON.parse(snapshotText);
+        datasetCard += buildCoverageSnapshotSection(parsed);
+      }
+    } catch (err) {
+      console.warn('Warning: failed to append coverage snapshot section to dataset card', err);
+    }
   }
 
   fs.writeFileSync(datasetCardPath, datasetCard);
