@@ -131,6 +131,81 @@ TARGET_KEYS = ["target", "target_hours", "target_count", "target_clips"]
 COUNT_KEYS = ["count", "completed", "clips", "observed", "current"]
 
 
+def _resolve_routing_config_path() -> Path:
+    base_dir = Path(__file__).resolve().parent.parent
+    raw_path = os.environ.get("ROUTING_CONFIG_PATH") or "config/routing.json"
+    candidate = Path(raw_path)
+    if not candidate.is_absolute():
+        candidate = (base_dir / candidate).resolve()
+    return candidate
+
+
+ROUTING_CONFIG_PATH = _resolve_routing_config_path()
+
+DEFAULT_ROUTING_CONFIG: Dict[str, float] = {
+    "p_base": DOUBLE_PASS_BASE_PROB,
+    "coverage_boost_threshold": 0.50,
+    "coverage_boost_factor": DOUBLE_PASS_MULTIPLIER,
+    "qa_boost_f1_threshold": DOUBLE_PASS_QA_F1_THRESHOLD,
+    "qa_boost_cue_in_bounds_threshold": DOUBLE_PASS_QA_CUES_THRESHOLD,
+    "qa_boost_factor": DOUBLE_PASS_MULTIPLIER,
+    "p_max": DOUBLE_PASS_MAX_PROB,
+    "annotator_daily_cap": DOUBLE_PASS_ANNOTATOR_CAP,
+}
+
+
+def _coerce_float(value: Any, fallback: float) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    if numeric != numeric:  # NaN guard
+        return fallback
+    return numeric
+
+
+def _load_routing_config() -> Dict[str, float]:
+    config = dict(DEFAULT_ROUTING_CONFIG)
+    path = ROUTING_CONFIG_PATH
+    try:
+        with path.open("r", encoding="utf-8") as fp:
+            data = json.load(fp)
+    except FileNotFoundError:
+        return config
+    except json.JSONDecodeError as exc:
+        print(f"[tasks] failed to parse routing config at {path}: {exc}")
+        return config
+    except OSError as exc:
+        print(f"[tasks] unable to read routing config at {path}: {exc}")
+        return config
+
+    source = data
+    if isinstance(source, dict) and "routing" in source and isinstance(source["routing"], dict):
+        source = source["routing"]
+
+    if isinstance(source, dict):
+        for key, fallback in DEFAULT_ROUTING_CONFIG.items():
+            if key in source:
+                config[key] = _coerce_float(source.get(key), fallback)
+    return config
+
+
+def _normalize_probability(value: Any) -> Optional[float]:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if numeric != numeric:
+        return None
+    if numeric > 1.0:
+        numeric = numeric / 100.0
+    if numeric < 0.0:
+        numeric = 0.0
+    if numeric > 1.0:
+        numeric = 1.0
+    return numeric
+
+
 def _supabase_headers() -> Dict[str, str]:
     return {
         "apikey": SUPABASE_KEY or "",
@@ -527,11 +602,19 @@ def _compute_recent_double_pass_stats(
 
 
 def _compute_effective_double_pass_probability(
-    cell_key: str, lookup: Dict[str, Dict[str, Optional[float]]]
+    cell_key: str,
+    lookup: Dict[str, Dict[str, Optional[float]]],
+    routing_config: Optional[Dict[str, float]] = None,
 ) -> float:
-    base = DOUBLE_PASS_BASE_PROB
+    config = routing_config or _load_routing_config()
+    base_prob = (
+        _normalize_probability(config.get("p_base"))
+        or _normalize_probability(DEFAULT_ROUTING_CONFIG["p_base"])
+        or 0.0
+    )
+    p = base_prob
+
     info = lookup.get((cell_key or "").lower()) if lookup else None
-    p = base
     coverage_pct = None
     median_f1 = None
     cues_pct = None
@@ -539,16 +622,71 @@ def _compute_effective_double_pass_probability(
         coverage_pct = info.get("coverage_pct")
         median_f1 = info.get("median_f1")
         cues_pct = info.get("cues_pct")
-    if coverage_pct is not None and coverage_pct < 0.5:
-        p *= DOUBLE_PASS_MULTIPLIER
+
+    coverage_threshold = _normalize_probability(
+        config.get("coverage_boost_threshold")
+    ) or _normalize_probability(DEFAULT_ROUTING_CONFIG["coverage_boost_threshold"])
+    coverage_factor = max(
+        0.0,
+        _coerce_float(
+            config.get("coverage_boost_factor"),
+            DEFAULT_ROUTING_CONFIG["coverage_boost_factor"],
+        ),
+    )
+    coverage_ratio = _normalize_probability(coverage_pct)
+    if (
+        coverage_ratio is not None
+        and coverage_threshold is not None
+        and coverage_ratio < coverage_threshold
+    ):
+        p *= coverage_factor
+
+    qa_factor = max(
+        0.0,
+        _coerce_float(
+            config.get("qa_boost_factor"),
+            DEFAULT_ROUTING_CONFIG["qa_boost_factor"],
+        ),
+    )
+    qa_f1_threshold = _normalize_probability(config.get("qa_boost_f1_threshold"))
+    if qa_f1_threshold is None:
+        qa_f1_threshold = _normalize_probability(
+            DEFAULT_ROUTING_CONFIG["qa_boost_f1_threshold"]
+        )
+    qa_cues_threshold = _normalize_probability(
+        config.get("qa_boost_cue_in_bounds_threshold")
+    )
+    if qa_cues_threshold is None:
+        qa_cues_threshold = _normalize_probability(
+            DEFAULT_ROUTING_CONFIG["qa_boost_cue_in_bounds_threshold"]
+        )
+
     quality_flag = False
-    if median_f1 is not None and median_f1 < DOUBLE_PASS_QA_F1_THRESHOLD:
+    median_f1_ratio = _normalize_probability(median_f1)
+    if (
+        median_f1_ratio is not None
+        and qa_f1_threshold is not None
+        and median_f1_ratio < qa_f1_threshold
+    ):
         quality_flag = True
-    if cues_pct is not None and cues_pct < DOUBLE_PASS_QA_CUES_THRESHOLD:
+    cues_ratio = _normalize_probability(cues_pct)
+    if (
+        cues_ratio is not None
+        and qa_cues_threshold is not None
+        and cues_ratio < qa_cues_threshold
+    ):
         quality_flag = True
+
     if quality_flag:
-        p *= DOUBLE_PASS_MULTIPLIER
-    return min(p, DOUBLE_PASS_MAX_PROB)
+        p *= qa_factor
+
+    p = max(0.0, p)
+    p_max = (
+        _normalize_probability(config.get("p_max"))
+        or _normalize_probability(DEFAULT_ROUTING_CONFIG["p_max"])
+        or 1.0
+    )
+    return min(p, p_max)
 
 
 def _compute_allocator_weights(snapshot: Dict[str, Any]) -> Dict[str, float]:
@@ -684,6 +822,12 @@ def _select_with_allocator(
     return selections
 
 
+@app.get("/api/config")
+async def get_config() -> JSONResponse:
+    config = _load_routing_config()
+    return JSONResponse(config)
+
+
 @app.get("/api/tasks")
 async def get_tasks(
     stage: int = 2,
@@ -691,6 +835,12 @@ async def get_tasks(
     limit: int = Query(10, ge=1, le=200),
 ):
     items: List[Dict[str, Any]] = []
+    routing_config = _load_routing_config()
+    annotator_cap = _normalize_probability(routing_config.get("annotator_daily_cap"))
+    if annotator_cap is None:
+        annotator_cap = (
+            _normalize_probability(DEFAULT_ROUTING_CONFIG["annotator_daily_cap"]) or 1.0
+        )
 
     if BUNNY_KEEP_URL and SUPABASE_URL and SUPABASE_KEY:
         try:
@@ -881,7 +1031,7 @@ async def get_tasks(
                 if eligible_for_second:
                     prob_cell_key = assigned_cell if assigned_cell else UNKNOWN_CELL_KEY
                     probability = _compute_effective_double_pass_probability(
-                        prob_cell_key, cell_lookup
+                        prob_cell_key, cell_lookup, routing_config
                     )
                     current_ratio = (
                         (annot_double_count / annot_total_count)
@@ -889,14 +1039,14 @@ async def get_tasks(
                         else 0.0
                     )
                     assign_second = False
-                    if annot_total_count and current_ratio >= DOUBLE_PASS_ANNOTATOR_CAP:
+                    if annot_total_count and current_ratio >= annotator_cap:
                         assign_second = False
                     else:
                         projected_total = annot_total_count + 1
                         projected_double = annot_double_count + 1
                         if (
                             projected_total > 0
-                            and projected_double / projected_total > DOUBLE_PASS_ANNOTATOR_CAP
+                            and projected_double / projected_total > annotator_cap
                         ):
                             assign_second = False
                         else:
