@@ -43,6 +43,12 @@
     status: 'idle',
     specialFilters: {},
   };
+  const adjudicationState = {
+    entries: [],
+    status: 'idle',
+    counts: { pending: 0, assigned: 0, locked: 0 },
+    lastUpdated: null,
+  };
   const disagreementsUI = {
     overlay: null,
     panel: null,
@@ -1267,6 +1273,7 @@
   }
 
   const QA_TILE_CONTAINER_ID = 'qaDashboardTiles';
+  const QA_TILE_ADJUDICATION_ID = 'qaTileAdjudication';
   const QA_TILE_IRR_ID = 'qaTileIRRAlpha';
   const QA_TILE_VOICE_TAG_ID = 'qaTileVoiceTagPresence';
   const QA_TILE_DOUBLE_PASS_ID = 'qaTileDoublePass';
@@ -1278,6 +1285,7 @@
   const QA_TILE_COVERAGE_ID = 'qaTileCoverageCompleteness';
 
   const QA_TILE_LINKS = {
+    [QA_TILE_ADJUDICATION_ID]: '#adjudication',
     [QA_TILE_IRR_ID]: '/stage2/qa-dashboard.html#irr',
     [QA_TILE_VOICE_TAG_ID]: '/stage2/qa-dashboard.html#voice-tag-irr',
     [QA_TILE_DOUBLE_PASS_ID]: '/stage2/qa-dashboard.html#double-pass',
@@ -1322,6 +1330,7 @@
       .qa-dashboard-tile__value { margin: 0; font-size: 2.25rem; font-weight: 600; color: var(--accent, #2b7cff); }
       .qa-dashboard-tile__caption { margin: 0; font-size: .8rem; color: var(--muted, #777); }
       .qa-dashboard-tile__meta { margin: 0; font-size: .75rem; color: var(--muted, #777); }
+      .qa-dashboard-tile__label .qa-dashboard-tile__badge { margin-left: .4rem; }
       .qa-dashboard-tile__sparkline { margin-top: .25rem; }
       .qa-dashboard-tile__sparkline svg { display: block; width: 100%; height: 38px; }
       .qa-dashboard-tile__sparkline-path { fill: none; stroke: var(--sparkline-color, #5c6bc0); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
@@ -1433,6 +1442,69 @@
     };
   }
 
+  function normalizeAdjudicationEntries(entries) {
+    if (!Array.isArray(entries)) return [];
+    return entries
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') return null;
+        const assetId = entry.asset_id || entry.assetId || entry.clip_id;
+        if (!assetId) return null;
+        const status = typeof entry.status === 'string' ? entry.status : 'pending';
+        const reasons = Array.isArray(entry.reasons)
+          ? entry.reasons.filter((reason) => typeof reason === 'string')
+          : [];
+        const cell = entry.cell || entry.cell_key || entry.cellKey || null;
+        const queuedAt = typeof entry.queued_at === 'string' ? entry.queued_at : null;
+        const lastSeenAt = typeof entry.last_seen_at === 'string' ? entry.last_seen_at : null;
+        const assignee = typeof entry.assignee === 'string' ? entry.assignee : null;
+        return {
+          assetId,
+          status,
+          reasons,
+          cell,
+          queuedAt,
+          lastSeenAt,
+          assignee,
+        };
+      })
+      .filter(Boolean);
+  }
+
+  function computeAdjudicationCounts(entries) {
+    const counts = { pending: 0, assigned: 0, locked: 0 };
+    (entries || []).forEach((entry) => {
+      if (!entry || typeof entry.status !== 'string') return;
+      const normalized = entry.status.toLowerCase();
+      if (normalized === 'pending') counts.pending += 1;
+      else if (normalized === 'assigned') counts.assigned += 1;
+      else if (normalized === 'locked') counts.locked += 1;
+    });
+    return counts;
+  }
+
+  function adjudicationHasOpenQueue() {
+    const counts = adjudicationState && adjudicationState.counts ? adjudicationState.counts : null;
+    if (!counts) return false;
+    return (Number(counts.pending) || 0) + (Number(counts.assigned) || 0) > 0;
+  }
+
+  function ensureAdjudicationStatus(state) {
+    if (!state || typeof state !== 'object') return 'idle';
+    return state.status || 'idle';
+  }
+
+  function ensureAdjudicationCounts(state) {
+    if (!state || typeof state !== 'object' || !state.counts) {
+      return { pending: 0, assigned: 0, locked: 0 };
+    }
+    const { pending = 0, assigned = 0, locked = 0 } = state.counts;
+    return {
+      pending: Number.isFinite(pending) ? pending : 0,
+      assigned: Number.isFinite(assigned) ? assigned : 0,
+      locked: Number.isFinite(locked) ? locked : 0,
+    };
+  }
+
   function applyTileStatus(elements, status, customLabel) {
     if (!elements || !elements.tile) return;
     const tile = elements.tile;
@@ -1444,6 +1516,28 @@
       elements.statusTextEl.textContent = customLabel || QA_STATUS_LABELS[status] || QA_STATUS_LABELS.neutral;
     }
     tile.setAttribute('data-qa-status', status || 'neutral');
+  }
+
+  function applyIrrQueueBadge(tileElements) {
+    if (!tileElements || !tileElements.labelEl) return;
+    const needsBadge = adjudicationHasOpenQueue();
+    const labelEl = tileElements.labelEl;
+    let badge = labelEl.querySelector('.qa-dashboard-tile__badge[data-role="adjudication-badge"]');
+    if (needsBadge) {
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'qa-dashboard-tile__badge';
+        badge.dataset.role = 'adjudication-badge';
+        badge.textContent = 'Queue';
+        badge.setAttribute('aria-label', 'Adjudication queue pending');
+        badge.title = 'Pending adjudication items require attention';
+        badge.style.backgroundColor = '#d32f2f';
+        badge.style.color = '#fff';
+        labelEl.appendChild(badge);
+      }
+    } else if (badge) {
+      badge.remove();
+    }
   }
 
   function determineStatus(value, thresholds, direction = 'higher') {
@@ -2808,6 +2902,53 @@
     return `${base}\n\n${sections.join('; ')}.`;
   }
 
+  function renderAdjudicationTile(state) {
+    const tile = ensureMetricTile(QA_TILE_ADJUDICATION_ID, {
+      href: QA_TILE_LINKS[QA_TILE_ADJUDICATION_ID],
+      title: 'Review adjudication queue',
+    });
+    if (!tile) return;
+    if (tile.labelEl) tile.labelEl.textContent = 'Adjudication';
+    const metaEl = ensureTileMetaElement(tile);
+
+    const status = ensureAdjudicationStatus(state);
+    if (status === 'loading') {
+      if (tile.valueEl) tile.valueEl.textContent = '—';
+      if (tile.captionEl) tile.captionEl.textContent = 'Loading adjudication queue…';
+      if (metaEl) metaEl.textContent = '';
+      applyTileStatus(tile, 'neutral', 'Loading…');
+      return;
+    }
+
+    if (status === 'error') {
+      if (tile.valueEl) tile.valueEl.textContent = '—';
+      if (tile.captionEl) tile.captionEl.textContent = 'Unable to load adjudication queue';
+      if (metaEl) metaEl.textContent = 'Try refreshing the dashboard';
+      applyTileStatus(tile, 'red', 'Action needed');
+      return;
+    }
+
+    const counts = ensureAdjudicationCounts(state);
+    const pending = counts.pending;
+    const assigned = counts.assigned;
+    const locked = counts.locked;
+    if (tile.valueEl) tile.valueEl.textContent = String(pending);
+    if (tile.captionEl) tile.captionEl.textContent = `Assigned ${assigned} • Locked ${locked}`;
+
+    if (metaEl) {
+      const updated = state && state.lastUpdated ? formatRelativeTimestamp(state.lastUpdated) : null;
+      metaEl.textContent = updated ? `Updated ${updated}` : '';
+    }
+
+    if (pending + assigned > 0) {
+      applyTileStatus(tile, 'red', 'Action needed');
+    } else if (locked > 0) {
+      applyTileStatus(tile, 'green', 'Queue clear');
+    } else {
+      applyTileStatus(tile, 'neutral', 'No data');
+    }
+  }
+
   function applyIrrTileTooltip(tileElements) {
     if (!tileElements || !tileElements.tile) return;
     const tooltip = buildRoutingTooltip(routingConfigState);
@@ -2823,6 +2964,7 @@
     if (tile.labelEl) tile.labelEl.textContent = 'Krippendorff α (global)';
     tile.tile.setAttribute('data-qa-irr', 'true');
     applyIrrTileTooltip(tile);
+    applyIrrQueueBadge(tile);
 
     const sparklineContainer = ensureTileSparklineContainer(tile);
     const metaEl = ensureTileMetaElement(tile);
@@ -2891,6 +3033,7 @@
     if (!tile) return;
     if (tile.labelEl) tile.labelEl.textContent = 'IRR VoiceTag (Presence)';
     tile.tile.setAttribute('data-qa-irr-voice-tag', 'true');
+    applyIrrQueueBadge(tile);
 
     const sparklineContainer = ensureTileSparklineContainer(tile);
     const metaEl = ensureTileMetaElement(tile);
@@ -3796,10 +3939,27 @@
       .catch(() => null);
   }
 
+  function fetchAdjudicationQueue() {
+    if (typeof fetch !== 'function') {
+      return Promise.resolve(null);
+    }
+    return fetch('/api/adjudication/queue', { cache: 'no-store' })
+      .then((response) => {
+        if (!response.ok) return null;
+        return response.json().catch(() => null);
+      })
+      .catch(() => null);
+  }
+
   if (typeof window !== 'undefined') {
     window.addEventListener('DOMContentLoaded', () => {
       ensureDisagreementsPanel();
       disagreementsState.status = 'loading';
+      adjudicationState.status = 'loading';
+      adjudicationState.entries = [];
+      adjudicationState.counts = { pending: 0, assigned: 0, locked: 0 };
+      adjudicationState.lastUpdated = null;
+      renderAdjudicationTile(adjudicationState);
       renderIRRTile(null, {});
       renderVoiceTagTile(null, {});
       renderDoublePassTile(null);
@@ -3811,6 +3971,43 @@
       renderProvenanceTile(null);
       renderCoverageCompletenessTile(null);
       renderCoverageSnapshot(null);
+
+      fetchAdjudicationQueue()
+        .then((data) => {
+          if (Array.isArray(data)) {
+            adjudicationState.entries = normalizeAdjudicationEntries(data);
+            adjudicationState.counts = computeAdjudicationCounts(adjudicationState.entries);
+            adjudicationState.status = 'ready';
+            adjudicationState.lastUpdated = new Date().toISOString();
+          } else if (data && Array.isArray(data.items)) {
+            adjudicationState.entries = normalizeAdjudicationEntries(data.items);
+            adjudicationState.counts = computeAdjudicationCounts(adjudicationState.entries);
+            adjudicationState.status = 'ready';
+            adjudicationState.lastUpdated = new Date().toISOString();
+          } else if (data == null) {
+            adjudicationState.entries = [];
+            adjudicationState.counts = { pending: 0, assigned: 0, locked: 0 };
+            adjudicationState.status = 'error';
+            adjudicationState.lastUpdated = null;
+          } else {
+            adjudicationState.entries = normalizeAdjudicationEntries([]);
+            adjudicationState.counts = { pending: 0, assigned: 0, locked: 0 };
+            adjudicationState.status = 'ready';
+            adjudicationState.lastUpdated = new Date().toISOString();
+          }
+          renderAdjudicationTile(adjudicationState);
+          renderIRRTile(irrSummaryState, irrTrendState);
+          renderVoiceTagTile(irrSummaryState, irrTrendState);
+        })
+        .catch(() => {
+          adjudicationState.entries = [];
+          adjudicationState.counts = { pending: 0, assigned: 0, locked: 0 };
+          adjudicationState.status = 'error';
+          adjudicationState.lastUpdated = null;
+          renderAdjudicationTile(adjudicationState);
+          renderIRRTile(irrSummaryState, irrTrendState);
+          renderVoiceTagTile(irrSummaryState, irrTrendState);
+        });
 
       fetchTrainingSummary()
         .then((summary) => {
