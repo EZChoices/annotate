@@ -48,6 +48,39 @@
     status: 'idle',
     counts: { pending: 0, assigned: 0, locked: 0 },
     lastUpdated: null,
+    meta: { configSha: null, snapshotAt: null },
+    diffCache: new Map(),
+  };
+  const adjudicationUI = {
+    initialized: false,
+    container: null,
+    metaLabel: null,
+    filters: {
+      status: null,
+      cell: null,
+      reason: null,
+      search: null,
+    },
+    tableBody: null,
+    tableWrapper: null,
+    emptyMessage: null,
+    pagination: {
+      container: null,
+      prev: null,
+      next: null,
+      info: null,
+    },
+    footer: {
+      config: null,
+      snapshot: null,
+    },
+    state: {
+      status: new Set(),
+      cell: 'all',
+      reasons: new Set(),
+      search: '',
+      page: 1,
+    },
   };
   const disagreementsUI = {
     overlay: null,
@@ -1449,14 +1482,20 @@
         if (!entry || typeof entry !== 'object') return null;
         const assetId = entry.asset_id || entry.assetId || entry.clip_id;
         if (!assetId) return null;
-        const status = typeof entry.status === 'string' ? entry.status : 'pending';
+        const status = typeof entry.status === 'string' ? entry.status.toLowerCase() : 'pending';
         const reasons = Array.isArray(entry.reasons)
           ? entry.reasons.filter((reason) => typeof reason === 'string')
           : [];
-        const cell = entry.cell || entry.cell_key || entry.cellKey || null;
+        const cellRaw = entry.cell || entry.cell_key || entry.cellKey || null;
+        const cell = normalizeCellKey(cellRaw);
         const queuedAt = typeof entry.queued_at === 'string' ? entry.queued_at : null;
         const lastSeenAt = typeof entry.last_seen_at === 'string' ? entry.last_seen_at : null;
         const assignee = typeof entry.assignee === 'string' ? entry.assignee : null;
+        const passAnnotators = Array.isArray(entry.pass_annotators)
+          ? entry.pass_annotators
+              .map((annotator) => (annotator != null ? String(annotator).trim() : ''))
+              .filter(Boolean)
+          : [];
         return {
           assetId,
           status,
@@ -1465,6 +1504,7 @@
           queuedAt,
           lastSeenAt,
           assignee,
+          passAnnotators,
         };
       })
       .filter(Boolean);
@@ -1480,6 +1520,1011 @@
       else if (normalized === 'locked') counts.locked += 1;
     });
     return counts;
+  }
+
+  const ADJUDICATION_PAGE_SIZE = 50;
+  const ADJUDICATION_STATUS_ORDER = ['pending', 'assigned', 'in_review', 'locked', 'resolved'];
+  const ADJUDICATION_STATUS_LABELS = {
+    pending: 'Pending',
+    assigned: 'Assigned',
+    in_review: 'In Review',
+    locked: 'Locked',
+    resolved: 'Resolved',
+  };
+  const ADJUDICATION_STATUS_CLASS_MAP = {
+    pending: 'qa-adjudication__status--pending',
+    assigned: 'qa-adjudication__status--assigned',
+    in_review: 'qa-adjudication__status--in_review',
+    locked: 'qa-adjudication__status--locked',
+    resolved: 'qa-adjudication__status--resolved',
+  };
+  const ADJUDICATION_REASON_LABELS = {
+    hasCS_disagreement: 'has-CS disagreement',
+    voiceTag_disagreement: 'Voice-tag disagreement',
+    low_F1_p1: 'Low F1 (pass 1)',
+    low_CuesInBounds_p1: 'Cues out of bounds (p1)',
+  };
+  const ADJUDICATION_QUERY_KEYS = {
+    status: 'aq_status',
+    cell: 'aq_cell',
+    reasons: 'aq_reason',
+    search: 'aq_search',
+    page: 'aq_page',
+  };
+  const ADJUDICATION_SESSION_KEY = 'ea_stage2_adjudication_opened';
+  const adjudicationSession = { opened: null };
+  const toastState = { counter: 0 };
+  let adjudicationSearchTimer = null;
+  let adjudicationErrorToast = null;
+  let reviewerIdCache = null;
+
+  function ensureToastContainer() {
+    if (typeof document === 'undefined') return null;
+    let container = document.getElementById('qaToastContainer');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'qaToastContainer';
+      container.className = 'qa-toast-container';
+      container.setAttribute('aria-live', 'polite');
+      container.setAttribute('aria-atomic', 'false');
+      (document.body || document.documentElement).appendChild(container);
+    }
+    return container;
+  }
+
+  function dismissToast(toast) {
+    if (!toast) return;
+    if (toast.dataset && toast.dataset.toastTimer) {
+      clearTimeout(Number(toast.dataset.toastTimer));
+    }
+    if (toast.parentNode) {
+      toast.parentNode.removeChild(toast);
+    }
+  }
+
+  function showToast(message, options = {}) {
+    const container = ensureToastContainer();
+    if (!container) return null;
+    const toast = document.createElement('div');
+    toast.className = 'qa-toast';
+    toast.dataset.toastId = `toast-${toastState.counter += 1}`;
+    if (options.variant === 'error') {
+      toast.classList.add('qa-toast--error');
+    }
+    toast.setAttribute('role', 'status');
+
+    const messageEl = document.createElement('p');
+    messageEl.className = 'qa-toast__message';
+    messageEl.textContent = message;
+    toast.appendChild(messageEl);
+
+    if (Array.isArray(options.actions) && options.actions.length) {
+      const actionsEl = document.createElement('div');
+      actionsEl.className = 'qa-toast__actions';
+      options.actions.forEach((action) => {
+        if (!action || !action.label) return;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'qa-toast__button';
+        button.textContent = action.label;
+        button.addEventListener('click', () => {
+          if (typeof action.onClick === 'function') {
+            action.onClick();
+          }
+          dismissToast(toast);
+        });
+        actionsEl.appendChild(button);
+      });
+      toast.appendChild(actionsEl);
+    }
+
+    const closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.className = 'qa-toast__close';
+    closeButton.setAttribute('aria-label', 'Dismiss notification');
+    closeButton.textContent = '×';
+    closeButton.addEventListener('click', () => dismissToast(toast));
+    toast.appendChild(closeButton);
+
+    container.appendChild(toast);
+
+    const duration = Number.isFinite(options.duration) ? Number(options.duration) : 6000;
+    if (!options.sticky && duration > 0) {
+      const timer = setTimeout(() => dismissToast(toast), duration);
+      toast.dataset.toastTimer = timer;
+    }
+
+    return toast;
+  }
+
+  function normalizeAdjudicationMeta(raw) {
+    if (!raw || typeof raw !== 'object') {
+      return { configSha: null, snapshotAt: null };
+    }
+    const configSha =
+      raw.config_sha ||
+      raw.configSha ||
+      (raw.config && (raw.config.sha || raw.config.version)) ||
+      null;
+    const snapshotAt =
+      raw.snapshot_at ||
+      raw.snapshotAt ||
+      raw.generated_at ||
+      raw.generatedAt ||
+      raw.last_updated ||
+      raw.lastUpdated ||
+      raw.as_of ||
+      null;
+    return { configSha: configSha || null, snapshotAt: snapshotAt || null };
+  }
+
+  function formatAdjudicationStatus(status) {
+    if (!status) return 'Unknown';
+    const key = String(status).toLowerCase();
+    return ADJUDICATION_STATUS_LABELS[key] || key.replace(/_/g, ' ');
+  }
+
+  function getAdjudicationStatusClass(status) {
+    if (!status) return ADJUDICATION_STATUS_CLASS_MAP.pending;
+    const key = String(status).toLowerCase();
+    return ADJUDICATION_STATUS_CLASS_MAP[key] || ADJUDICATION_STATUS_CLASS_MAP.pending;
+  }
+
+  function formatAdjudicationAge(timestamp) {
+    const parsed = parseTimestamp(timestamp);
+    if (!Number.isFinite(parsed)) return '—';
+    const diff = Date.now() - parsed;
+    if (!Number.isFinite(diff) || diff < 0) return '—';
+    const minute = 60 * 1000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+    if (diff >= day) {
+      const days = Math.max(1, Math.floor(diff / day));
+      return `${days} d`;
+    }
+    if (diff >= hour) {
+      const hours = Math.max(1, Math.floor(diff / hour));
+      return `${hours} h`;
+    }
+    const minutes = Math.max(1, Math.floor(diff / minute));
+    return `${minutes} m`;
+  }
+
+  function formatUtcTimestamp(timestamp) {
+    const parsed = parseTimestamp(timestamp);
+    if (!Number.isFinite(parsed)) return null;
+    const date = new Date(parsed);
+    const pad = (value) => (value < 10 ? `0${value}` : String(value));
+    return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(
+      date.getUTCHours()
+    )}:${pad(date.getUTCMinutes())} UTC`;
+  }
+
+  function formatReasonLabel(reason) {
+    if (!reason) return '—';
+    const key = String(reason);
+    if (ADJUDICATION_REASON_LABELS[key]) return ADJUDICATION_REASON_LABELS[key];
+    return key
+      .split(/[_-]/)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+  }
+
+  function ensureAdjudicationDiffCache() {
+    if (!(adjudicationState.diffCache instanceof Map)) {
+      adjudicationState.diffCache = new Map();
+    }
+    return adjudicationState.diffCache;
+  }
+
+  function clearAdjudicationDiffCache() {
+    const cache = ensureAdjudicationDiffCache();
+    cache.clear();
+  }
+
+  function getAdjudicationOpenedSet() {
+    if (adjudicationSession.opened instanceof Set) {
+      return adjudicationSession.opened;
+    }
+    const set = new Set();
+    try {
+      const raw = sessionStorage.getItem(ADJUDICATION_SESSION_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((item) => {
+            if (typeof item === 'string' && item) set.add(item);
+          });
+        } else if (parsed && typeof parsed === 'object') {
+          Object.keys(parsed).forEach((key) => set.add(key));
+        }
+      }
+    } catch {}
+    adjudicationSession.opened = set;
+    return set;
+  }
+
+  function persistAdjudicationOpenedSet() {
+    const set = getAdjudicationOpenedSet();
+    try {
+      sessionStorage.setItem(ADJUDICATION_SESSION_KEY, JSON.stringify(Array.from(set)));
+    } catch {}
+  }
+
+  function markAdjudicationAssetOpened(assetId) {
+    if (!assetId) return;
+    const set = getAdjudicationOpenedSet();
+    if (!set.has(assetId)) {
+      set.add(assetId);
+      persistAdjudicationOpenedSet();
+    }
+  }
+
+  function hasAdjudicationAssetOpened(assetId) {
+    if (!assetId) return false;
+    const set = getAdjudicationOpenedSet();
+    return set.has(assetId);
+  }
+
+  function normalizeDiffPreviewData(raw) {
+    if (!raw || typeof raw !== 'object') {
+      return { csDelta: null, vtDelta: null, rttmDelta: null };
+    }
+    const cs = toFinite(
+      raw.cs_delta ?? raw.csDelta ?? raw.codeswitch ?? raw.codeSwitch ?? raw.cs ?? raw.cs_mismatches
+    );
+    const vt = toFinite(
+      raw.vt_delta ?? raw.vtDelta ?? raw.voice_tag ?? raw.voiceTag ?? raw.voice ?? raw.voice_tag_mismatches
+    );
+    const rttm = toFinite(
+      raw.rttm_delta ?? raw.rttmDelta ?? raw.diarization ?? raw.turn_delta ?? raw.rttm ?? raw.rttm_mismatches
+    );
+    const sanitize = (value) => (Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0);
+    return {
+      csDelta: sanitize(cs),
+      vtDelta: sanitize(vt),
+      rttmDelta: sanitize(rttm),
+    };
+  }
+
+  function fetchAdjudicationDiffPreview(assetId) {
+    if (!assetId || typeof fetch !== 'function') {
+      return Promise.resolve(null);
+    }
+    const url = `/api/adjudication/diff_preview?asset_id=${encodeURIComponent(assetId)}`;
+    return fetch(url, { cache: 'no-store' })
+      .then((response) => {
+        if (!response.ok) throw new Error('Failed to load diff preview');
+        return response.json().catch(() => ({}));
+      })
+      .then((data) => normalizeDiffPreviewData(data))
+      .catch(() => {
+        throw new Error('diff_preview_failed');
+      });
+  }
+
+  function updateDiffBadgeElement(row, role, cacheEntry) {
+    if (!row) return;
+    const badge = row.querySelector(`[data-role="diff-${role}"] .qa-adjudication__diff-badge-value`);
+    if (!badge) return;
+    if (!cacheEntry) {
+      badge.textContent = '—';
+      return;
+    }
+    if (cacheEntry.status === 'loading') {
+      badge.textContent = '…';
+      return;
+    }
+    if (cacheEntry.status === 'error') {
+      badge.textContent = '!';
+      return;
+    }
+    const value = cacheEntry.data ? cacheEntry.data[`${role}Delta`] : null;
+    badge.textContent = Number.isFinite(value) ? String(value) : '0';
+  }
+
+  function updateRowDiffBadges(assetId) {
+    if (!adjudicationUI.tableBody) return;
+    const cache = ensureAdjudicationDiffCache();
+    const cacheEntry = cache.get(assetId);
+    const rows = Array.from(adjudicationUI.tableBody.querySelectorAll('tr[data-asset-id]')).filter(
+      (row) => row.dataset.assetId === assetId
+    );
+    rows.forEach((row) => {
+      updateDiffBadgeElement(row, 'cs', cacheEntry);
+      updateDiffBadgeElement(row, 'vt', cacheEntry);
+      updateDiffBadgeElement(row, 'rttm', cacheEntry);
+    });
+  }
+
+  function ensureDiffPreview(assetId) {
+    if (!assetId) return;
+    const cache = ensureAdjudicationDiffCache();
+    const existing = cache.get(assetId);
+    if (existing) {
+      if (existing.status === 'ready') {
+        updateRowDiffBadges(assetId);
+        return existing.promise || Promise.resolve(existing.data);
+      }
+      if (existing.status === 'loading') {
+        return existing.promise;
+      }
+    }
+    const entry = { status: 'loading', data: null, promise: null };
+    cache.set(assetId, entry);
+    updateRowDiffBadges(assetId);
+    const promise = fetchAdjudicationDiffPreview(assetId)
+      .then((data) => {
+        entry.status = 'ready';
+        entry.data = data;
+        updateRowDiffBadges(assetId);
+        return data;
+      })
+      .catch(() => {
+        entry.status = 'error';
+        entry.data = null;
+        updateRowDiffBadges(assetId);
+        return null;
+      });
+    entry.promise = promise;
+    return promise;
+  }
+
+  function handleQueueRowPreview(event) {
+    const target = event.target;
+    if (!target || typeof target.closest !== 'function') return;
+    const row = target.closest('tr[data-asset-id]');
+    if (!row) return;
+    ensureDiffPreview(row.dataset.assetId);
+  }
+
+  function getReviewerId() {
+    if (reviewerIdCache) return reviewerIdCache;
+    const reviewerKey = 'ea_stage2_reviewer_id';
+    try {
+      const existing = localStorage.getItem(reviewerKey);
+      if (existing) {
+        reviewerIdCache = existing;
+        return reviewerIdCache;
+      }
+    } catch {}
+    try {
+      const annotator = localStorage.getItem('ea_stage2_annotator_id');
+      if (annotator) {
+        localStorage.setItem(reviewerKey, annotator);
+        reviewerIdCache = annotator;
+        return reviewerIdCache;
+      }
+    } catch {}
+    reviewerIdCache = 'reviewer';
+    return reviewerIdCache;
+  }
+
+  function getAdjudicationEntry(assetId) {
+    if (!assetId) return null;
+    return (adjudicationState.entries || []).find((entry) => entry && entry.assetId === assetId) || null;
+  }
+
+  function findAdjudicationRow(assetId) {
+    if (!adjudicationUI.tableBody) return null;
+    const rows = adjudicationUI.tableBody.querySelectorAll('tr[data-asset-id]');
+    for (let i = 0; i < rows.length; i += 1) {
+      const row = rows[i];
+      if (row && row.dataset.assetId === assetId) {
+        return row;
+      }
+    }
+    return null;
+  }
+
+  function readAdjudicationFiltersFromQuery() {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search || '');
+    const statusRaw = params.get(ADJUDICATION_QUERY_KEYS.status);
+    const reasonsRaw = params.get(ADJUDICATION_QUERY_KEYS.reasons);
+    const cellRaw = params.get(ADJUDICATION_QUERY_KEYS.cell);
+    const searchRaw = params.get(ADJUDICATION_QUERY_KEYS.search);
+    const pageRaw = params.get(ADJUDICATION_QUERY_KEYS.page);
+
+    adjudicationUI.state.status = new Set();
+    adjudicationUI.state.reasons = new Set();
+    adjudicationUI.state.cell = cellRaw && cellRaw !== 'all' ? cellRaw : 'all';
+    adjudicationUI.state.search = searchRaw ? searchRaw.trim() : '';
+
+    if (statusRaw) {
+      statusRaw
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter((value) => value && ADJUDICATION_STATUS_ORDER.includes(value))
+        .forEach((value) => adjudicationUI.state.status.add(value));
+    }
+
+    if (reasonsRaw) {
+      reasonsRaw
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .forEach((value) => adjudicationUI.state.reasons.add(value));
+    }
+
+    const parsedPage = Number.parseInt(pageRaw, 10);
+    adjudicationUI.state.page = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
+  }
+
+  function updateAdjudicationQueryParams() {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search || '');
+    const statusValues = Array.from(adjudicationUI.state.status || []);
+    const reasonValues = Array.from(adjudicationUI.state.reasons || []);
+    const cellValue = adjudicationUI.state.cell && adjudicationUI.state.cell !== 'all'
+      ? adjudicationUI.state.cell
+      : null;
+    const searchValue = adjudicationUI.state.search ? adjudicationUI.state.search.trim() : '';
+    const pageValue = adjudicationUI.state.page > 1 ? String(adjudicationUI.state.page) : null;
+
+    if (statusValues.length) params.set(ADJUDICATION_QUERY_KEYS.status, statusValues.join(','));
+    else params.delete(ADJUDICATION_QUERY_KEYS.status);
+
+    if (reasonValues.length) params.set(ADJUDICATION_QUERY_KEYS.reasons, reasonValues.join(','));
+    else params.delete(ADJUDICATION_QUERY_KEYS.reasons);
+
+    if (cellValue) params.set(ADJUDICATION_QUERY_KEYS.cell, cellValue);
+    else params.delete(ADJUDICATION_QUERY_KEYS.cell);
+
+    if (searchValue) params.set(ADJUDICATION_QUERY_KEYS.search, searchValue);
+    else params.delete(ADJUDICATION_QUERY_KEYS.search);
+
+    if (pageValue) params.set(ADJUDICATION_QUERY_KEYS.page, pageValue);
+    else params.delete(ADJUDICATION_QUERY_KEYS.page);
+
+    const query = params.toString();
+    const hash = window.location.hash || '';
+    const nextUrl = `${window.location.pathname}${query ? `?${query}` : ''}${hash}`;
+    window.history.replaceState(null, '', nextUrl);
+  }
+
+  function syncAdjudicationFilterInputs() {
+    const { status, cell, reason, search } = adjudicationUI.filters;
+    if (status) {
+      Array.from(status.options || []).forEach((option) => {
+        option.selected = adjudicationUI.state.status.has(option.value);
+      });
+    }
+    if (cell) {
+      cell.value = adjudicationUI.state.cell && cell.querySelector(`option[value="${adjudicationUI.state.cell}"]`)
+        ? adjudicationUI.state.cell
+        : 'all';
+    }
+    if (reason) {
+      Array.from(reason.options || []).forEach((option) => {
+        option.selected = adjudicationUI.state.reasons.has(option.value);
+      });
+    }
+    if (search) {
+      search.value = adjudicationUI.state.search || '';
+    }
+  }
+
+  function updateAdjudicationFilterOptions() {
+    const entries = adjudicationState.entries || [];
+    const statusSelect = adjudicationUI.filters.status;
+    if (statusSelect) {
+      const counts = new Map();
+      entries.forEach((entry) => {
+        const status = entry.status || 'pending';
+        counts.set(status, (counts.get(status) || 0) + 1);
+      });
+      statusSelect.innerHTML = '';
+      ADJUDICATION_STATUS_ORDER.forEach((status) => {
+        const option = document.createElement('option');
+        option.value = status;
+        const count = counts.get(status) || 0;
+        option.textContent = count ? `${formatAdjudicationStatus(status)} (${count})` : formatAdjudicationStatus(status);
+        statusSelect.appendChild(option);
+      });
+    }
+
+    const cellSelect = adjudicationUI.filters.cell;
+    if (cellSelect) {
+      const cells = new Map();
+      entries.forEach((entry) => {
+        const key = entry.cell || 'unknown';
+        if (!cells.has(key)) {
+          cells.set(key, formatCellLabel(key));
+        }
+      });
+      const currentValue = adjudicationUI.state.cell;
+      if (currentValue && !cells.has(currentValue) && currentValue !== 'all') {
+        cells.set(currentValue, formatCellLabel(currentValue));
+      }
+      const sortedCells = Array.from(cells.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+      cellSelect.innerHTML = '';
+      const allOption = document.createElement('option');
+      allOption.value = 'all';
+      allOption.textContent = 'All cells';
+      cellSelect.appendChild(allOption);
+      sortedCells.forEach(([key, label]) => {
+        const option = document.createElement('option');
+        option.value = key;
+        option.textContent = label;
+        cellSelect.appendChild(option);
+      });
+    }
+
+    const reasonSelect = adjudicationUI.filters.reason;
+    if (reasonSelect) {
+      const reasonMap = new Map();
+      entries.forEach((entry) => {
+        (entry.reasons || []).forEach((reason) => {
+          if (!reasonMap.has(reason)) {
+            reasonMap.set(reason, formatReasonLabel(reason));
+          }
+        });
+      });
+      const currentReasons = Array.from(adjudicationUI.state.reasons);
+      currentReasons.forEach((reason) => {
+        if (!reasonMap.has(reason)) {
+          reasonMap.set(reason, formatReasonLabel(reason));
+        }
+      });
+      const sortedReasons = Array.from(reasonMap.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+      reasonSelect.innerHTML = '';
+      sortedReasons.forEach(([key, label]) => {
+        const option = document.createElement('option');
+        option.value = key;
+        option.textContent = label;
+        reasonSelect.appendChild(option);
+      });
+    }
+  }
+
+  function getFilteredAdjudicationEntries() {
+    const entries = adjudicationState.entries || [];
+    const statusFilter = adjudicationUI.state.status;
+    const cellFilter = adjudicationUI.state.cell;
+    const reasonFilter = adjudicationUI.state.reasons;
+    const searchTerm = adjudicationUI.state.search ? adjudicationUI.state.search.toLowerCase() : '';
+
+    return entries.filter((entry) => {
+      if (!entry) return false;
+      if (statusFilter && statusFilter.size && !statusFilter.has(entry.status)) return false;
+      if (cellFilter && cellFilter !== 'all' && entry.cell !== cellFilter) return false;
+      if (reasonFilter && reasonFilter.size) {
+        const reasons = Array.isArray(entry.reasons) ? entry.reasons : [];
+        const hasAny = Array.from(reasonFilter).some((reason) => reasons.includes(reason));
+        if (!hasAny) return false;
+      }
+      if (searchTerm) {
+        const asset = entry.assetId ? entry.assetId.toLowerCase() : '';
+        if (!asset.includes(searchTerm)) return false;
+      }
+      return true;
+    });
+  }
+
+  function setAdjudicationPage(page) {
+    const nextPage = Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1;
+    if (nextPage === adjudicationUI.state.page) return;
+    adjudicationUI.state.page = nextPage;
+    updateAdjudicationQueryParams();
+    renderAdjudicationQueue();
+  }
+
+  function updateAdjudicationFooter() {
+    if (!adjudicationUI.footer) return;
+    const meta = adjudicationState.meta || {};
+    const config = adjudicationUI.footer.config;
+    const snapshot = adjudicationUI.footer.snapshot;
+    if (config) {
+      config.textContent = `Config SHA: ${meta.configSha || '—'}`;
+    }
+    if (snapshot) {
+      const formatted = meta.snapshotAt ? formatUtcTimestamp(meta.snapshotAt) : null;
+      snapshot.textContent = `Snapshot: ${formatted || '—'}`;
+    }
+  }
+
+  function buildDiffBadge(role, label) {
+    const badge = document.createElement('span');
+    badge.className = 'qa-adjudication__diff-badge';
+    badge.dataset.role = `diff-${role}`;
+    const labelEl = document.createElement('span');
+    labelEl.className = 'qa-adjudication__diff-badge-label';
+    labelEl.textContent = label;
+    const valueEl = document.createElement('span');
+    valueEl.className = 'qa-adjudication__diff-badge-value';
+    valueEl.textContent = '—';
+    badge.appendChild(labelEl);
+    badge.appendChild(valueEl);
+    return badge;
+  }
+
+  function buildAdjudicationRow(entry) {
+    const row = document.createElement('tr');
+    row.dataset.assetId = entry.assetId;
+
+    const assetCell = document.createElement('td');
+    assetCell.className = 'qa-adjudication__asset';
+    assetCell.textContent = entry.assetId;
+    row.appendChild(assetCell);
+
+    const cellCell = document.createElement('td');
+    cellCell.textContent = formatCellLabel(entry.cell);
+    row.appendChild(cellCell);
+
+    const reasonCell = document.createElement('td');
+    const reasonWrap = document.createElement('div');
+    reasonWrap.className = 'qa-adjudication__reasons';
+    if (entry.reasons && entry.reasons.length) {
+      entry.reasons.forEach((reason) => {
+        const badge = document.createElement('span');
+        badge.className = 'qa-adjudication__reason';
+        badge.textContent = formatReasonLabel(reason);
+        reasonWrap.appendChild(badge);
+      });
+    } else {
+      const empty = document.createElement('span');
+      empty.textContent = '—';
+      reasonWrap.appendChild(empty);
+    }
+    reasonCell.appendChild(reasonWrap);
+    row.appendChild(reasonCell);
+
+    const passesCell = document.createElement('td');
+    passesCell.className = 'qa-adjudication__passes';
+    passesCell.textContent = entry.passAnnotators && entry.passAnnotators.length
+      ? entry.passAnnotators.join(' / ')
+      : '—';
+    row.appendChild(passesCell);
+
+    const ageCell = document.createElement('td');
+    ageCell.textContent = formatAdjudicationAge(entry.queuedAt);
+    row.appendChild(ageCell);
+
+    const statusCell = document.createElement('td');
+    const statusBadge = document.createElement('span');
+    statusBadge.className = `qa-adjudication__status ${getAdjudicationStatusClass(entry.status)}`;
+    statusBadge.textContent = formatAdjudicationStatus(entry.status);
+    statusCell.appendChild(statusBadge);
+    if (entry.assignee) {
+      const assignee = document.createElement('span');
+      assignee.className = 'qa-adjudication__assignee';
+      assignee.textContent = `Assigned to ${entry.assignee}`;
+      statusCell.appendChild(assignee);
+    }
+    row.appendChild(statusCell);
+
+    const diffCell = document.createElement('td');
+    const diffWrap = document.createElement('div');
+    diffWrap.className = 'qa-adjudication__diff-badges';
+    diffWrap.appendChild(buildDiffBadge('cs', 'CS Δ'));
+    diffWrap.appendChild(buildDiffBadge('vt', 'VT Δ'));
+    diffWrap.appendChild(buildDiffBadge('rttm', 'RTTM Δ'));
+    diffCell.appendChild(diffWrap);
+    row.appendChild(diffCell);
+
+    const actionsCell = document.createElement('td');
+    actionsCell.className = 'qa-adjudication__actions';
+    const assignButton = document.createElement('button');
+    assignButton.type = 'button';
+    assignButton.className = 'qa-adjudication__button qa-adjudication__button--primary';
+    assignButton.dataset.role = 'adjudication-action';
+    assignButton.dataset.action = 'assign';
+    assignButton.textContent = 'Assign to me';
+
+    const reviewerId = getReviewerId();
+    const normalizedStatus = entry.status || 'pending';
+    const lockedStatuses = new Set(['locked', 'resolved', 'in_review']);
+    const alreadyMine = entry.assignee && reviewerId && entry.assignee === reviewerId;
+    if (lockedStatuses.has(normalizedStatus) || alreadyMine) {
+      assignButton.disabled = true;
+    }
+
+    const openButton = document.createElement('button');
+    openButton.type = 'button';
+    openButton.className = 'qa-adjudication__button qa-adjudication__button--subtle';
+    openButton.dataset.role = 'adjudication-action';
+    openButton.dataset.action = 'open';
+    openButton.textContent = 'Open';
+
+    const promoteButton = document.createElement('button');
+    promoteButton.type = 'button';
+    promoteButton.className = 'qa-adjudication__button qa-adjudication__button--subtle';
+    promoteButton.dataset.role = 'adjudication-action';
+    promoteButton.dataset.action = 'promote';
+    promoteButton.textContent = 'Promote';
+    const canPromote = normalizedStatus === 'assigned' && hasAdjudicationAssetOpened(entry.assetId);
+    promoteButton.disabled = !canPromote;
+
+    actionsCell.appendChild(assignButton);
+    actionsCell.appendChild(openButton);
+    actionsCell.appendChild(promoteButton);
+    row.appendChild(actionsCell);
+
+    const cache = ensureAdjudicationDiffCache().get(entry.assetId);
+    updateDiffBadgeElement(row, 'cs', cache);
+    updateDiffBadgeElement(row, 'vt', cache);
+    updateDiffBadgeElement(row, 'rttm', cache);
+
+    return row;
+  }
+
+  function renderAdjudicationQueue() {
+    if (!adjudicationUI.initialized) return;
+    updateAdjudicationFilterOptions();
+    syncAdjudicationFilterInputs();
+    updateAdjudicationFooter();
+
+    const status = ensureAdjudicationStatus(adjudicationState);
+    const entries = getFilteredAdjudicationEntries();
+    const totalEntries = entries.length;
+    const totalPages = totalEntries > 0 ? Math.ceil(totalEntries / ADJUDICATION_PAGE_SIZE) : 1;
+    if (adjudicationUI.state.page > totalPages) {
+      adjudicationUI.state.page = totalPages;
+      updateAdjudicationQueryParams();
+    }
+    if (adjudicationUI.state.page < 1) adjudicationUI.state.page = 1;
+    const page = adjudicationUI.state.page;
+    const startIndex = (page - 1) * ADJUDICATION_PAGE_SIZE;
+    const pageEntries = entries.slice(startIndex, startIndex + ADJUDICATION_PAGE_SIZE);
+
+    if (adjudicationUI.tableWrapper) {
+      adjudicationUI.tableWrapper.setAttribute('aria-busy', status === 'loading' ? 'true' : 'false');
+    }
+
+    if (adjudicationUI.tableBody) {
+      adjudicationUI.tableBody.innerHTML = '';
+      pageEntries.forEach((entry) => {
+        adjudicationUI.tableBody.appendChild(buildAdjudicationRow(entry));
+      });
+    }
+
+    if (adjudicationUI.emptyMessage) {
+      if (pageEntries.length === 0) {
+        if (status === 'loading' && !(adjudicationState.entries || []).length) {
+          adjudicationUI.emptyMessage.textContent = 'Loading adjudication queue…';
+        } else if (status === 'error') {
+          adjudicationUI.emptyMessage.textContent = 'Unable to load adjudication queue.';
+        } else {
+          adjudicationUI.emptyMessage.textContent = 'No items match your filters.';
+        }
+        adjudicationUI.emptyMessage.classList.remove('hide');
+      } else {
+        adjudicationUI.emptyMessage.classList.add('hide');
+      }
+    }
+
+    if (adjudicationUI.pagination.container) {
+      if (totalEntries > 0) adjudicationUI.pagination.container.classList.remove('hide');
+      else adjudicationUI.pagination.container.classList.add('hide');
+    }
+
+    if (adjudicationUI.pagination.prev) {
+      adjudicationUI.pagination.prev.disabled = page <= 1;
+    }
+    if (adjudicationUI.pagination.next) {
+      adjudicationUI.pagination.next.disabled = page >= totalPages || totalEntries === 0;
+    }
+    if (adjudicationUI.pagination.info) {
+      if (totalEntries === 0) {
+        if (status === 'loading' && !(adjudicationState.entries || []).length) {
+          adjudicationUI.pagination.info.textContent = 'Loading…';
+        } else {
+          adjudicationUI.pagination.info.textContent = 'No results';
+        }
+      } else {
+        const startDisplay = startIndex + 1;
+        const endDisplay = startIndex + pageEntries.length;
+        adjudicationUI.pagination.info.textContent = `Showing ${startDisplay}–${endDisplay} of ${totalEntries}`;
+      }
+    }
+
+    if (adjudicationUI.metaLabel) {
+      if (status === 'loading' && !(adjudicationState.entries || []).length) {
+        adjudicationUI.metaLabel.textContent = 'Loading adjudication queue…';
+      } else if (status === 'error') {
+        adjudicationUI.metaLabel.textContent = 'Unable to load adjudication queue.';
+      } else {
+        const updated = adjudicationState.lastUpdated ? formatRelativeTimestamp(adjudicationState.lastUpdated) : '';
+        adjudicationUI.metaLabel.textContent = updated || '';
+      }
+    }
+  }
+
+  function handleStatusFilterChange() {
+    const select = adjudicationUI.filters.status;
+    if (!select) return;
+    adjudicationUI.state.status = new Set(Array.from(select.selectedOptions || []).map((option) => option.value));
+    adjudicationUI.state.page = 1;
+    updateAdjudicationQueryParams();
+    renderAdjudicationQueue();
+  }
+
+  function handleCellFilterChange() {
+    const select = adjudicationUI.filters.cell;
+    if (!select) return;
+    const value = select.value;
+    adjudicationUI.state.cell = value && value !== 'all' ? value : 'all';
+    adjudicationUI.state.page = 1;
+    updateAdjudicationQueryParams();
+    renderAdjudicationQueue();
+  }
+
+  function handleReasonFilterChange() {
+    const select = adjudicationUI.filters.reason;
+    if (!select) return;
+    adjudicationUI.state.reasons = new Set(Array.from(select.selectedOptions || []).map((option) => option.value));
+    adjudicationUI.state.page = 1;
+    updateAdjudicationQueryParams();
+    renderAdjudicationQueue();
+  }
+
+  function handleAdjudicationSearchInput() {
+    if (!adjudicationUI.filters.search) return;
+    const value = adjudicationUI.filters.search.value || '';
+    if (adjudicationSearchTimer) clearTimeout(adjudicationSearchTimer);
+    adjudicationSearchTimer = setTimeout(() => {
+      adjudicationUI.state.search = value.trim();
+      adjudicationUI.state.page = 1;
+      updateAdjudicationQueryParams();
+      renderAdjudicationQueue();
+    }, 200);
+  }
+
+  function handleQueueActionClick(event) {
+    const target = event.target;
+    if (!target || typeof target.closest !== 'function') return;
+    const button = target.closest('button[data-role="adjudication-action"]');
+    if (!button) return;
+    const row = button.closest('tr[data-asset-id]');
+    if (!row) return;
+    const assetId = row.dataset.assetId;
+    if (!assetId) return;
+    const action = button.dataset.action;
+    if (action === 'assign') {
+      handleAdjudicationAssign(assetId, button);
+    } else if (action === 'open') {
+      handleAdjudicationOpen(assetId, event);
+    } else if (action === 'promote') {
+      handleAdjudicationPromote(assetId, button);
+    }
+  }
+
+  function handleAdjudicationAssign(assetId, button) {
+    if (!assetId) return;
+    let targetButton = button;
+    if (!targetButton) {
+      const row = findAdjudicationRow(assetId);
+      if (row) {
+        targetButton = row.querySelector('button[data-action="assign"]');
+      }
+    }
+    if (!targetButton || targetButton.disabled) return;
+
+    const entry = getAdjudicationEntry(assetId);
+    if (!entry) return;
+
+    const reviewer = getReviewerId();
+    const originalText = targetButton.textContent;
+    targetButton.disabled = true;
+    targetButton.textContent = 'Assigning…';
+
+    fetch('/api/adjudication/assign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ asset_id: assetId, assignee: reviewer }),
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('assign_failed');
+        return response.json().catch(() => ({}));
+      })
+      .then((data) => {
+        const nextStatus = typeof data.status === 'string' ? data.status.toLowerCase() : 'assigned';
+        entry.status = nextStatus;
+        entry.assignee = data.assignee || reviewer;
+        entry.lastSeenAt = data.last_seen_at || new Date().toISOString();
+        adjudicationState.counts = computeAdjudicationCounts(adjudicationState.entries);
+        adjudicationState.lastUpdated = new Date().toISOString();
+        adjudicationState.status = 'ready';
+        if (adjudicationErrorToast) {
+          dismissToast(adjudicationErrorToast);
+          adjudicationErrorToast = null;
+        }
+        renderAdjudicationTile(adjudicationState);
+        renderAdjudicationQueue();
+        renderIRRTile(irrSummaryState, irrTrendState);
+        renderVoiceTagTile(irrSummaryState, irrTrendState);
+      })
+      .catch(() => {
+        targetButton.disabled = false;
+        targetButton.textContent = originalText;
+        if (adjudicationErrorToast) dismissToast(adjudicationErrorToast);
+        adjudicationErrorToast = showToast(`Unable to assign ${assetId}.`, {
+          variant: 'error',
+          actions: [
+            {
+              label: 'Retry',
+              onClick: () => handleAdjudicationAssign(assetId),
+            },
+          ],
+          duration: 0,
+        });
+      });
+  }
+
+  function handleAdjudicationOpen(assetId, event) {
+    if (!assetId) return;
+    markAdjudicationAssetOpened(assetId);
+    renderAdjudicationQueue();
+    const url = `/stage2/review.html?asset_id=${encodeURIComponent(assetId)}`;
+    if (event && (event.metaKey || event.ctrlKey)) {
+      window.open(url, '_blank', 'noopener');
+    } else {
+      window.location.href = url;
+    }
+  }
+
+  function handleAdjudicationPromote(assetId, button) {
+    if (!assetId) return;
+    if (button && button.disabled) return;
+    showToast('Promote flow will be available soon.', { duration: 4000 });
+  }
+
+  function initAdjudicationQueueUI() {
+    if (adjudicationUI.initialized || typeof document === 'undefined') return;
+    const container = document.getElementById('adjudication');
+    if (!container) return;
+    adjudicationUI.initialized = true;
+    adjudicationUI.container = container;
+    adjudicationUI.metaLabel = document.getElementById('qaAdjudicationMeta');
+    adjudicationUI.filters.status = document.getElementById('qaAdjudicationStatusFilter');
+    adjudicationUI.filters.cell = document.getElementById('qaAdjudicationCellFilter');
+    adjudicationUI.filters.reason = document.getElementById('qaAdjudicationReasonFilter');
+    adjudicationUI.filters.search = document.getElementById('qaAdjudicationSearch');
+    adjudicationUI.tableBody = document.getElementById('qaAdjudicationTableBody');
+    adjudicationUI.tableWrapper = document.getElementById('qaAdjudicationTableWrapper');
+    adjudicationUI.emptyMessage = document.getElementById('qaAdjudicationEmpty');
+    adjudicationUI.pagination.container = document.getElementById('qaAdjudicationPagination');
+    adjudicationUI.pagination.prev = document.getElementById('qaAdjudicationPrev');
+    adjudicationUI.pagination.next = document.getElementById('qaAdjudicationNext');
+    adjudicationUI.pagination.info = document.getElementById('qaAdjudicationPageInfo');
+    adjudicationUI.footer.config = document.getElementById('qaAdjudicationConfig');
+    adjudicationUI.footer.snapshot = document.getElementById('qaAdjudicationSnapshot');
+
+    readAdjudicationFiltersFromQuery();
+    updateAdjudicationFilterOptions();
+    syncAdjudicationFilterInputs();
+    updateAdjudicationFooter();
+
+    if (adjudicationUI.filters.status) {
+      adjudicationUI.filters.status.addEventListener('change', handleStatusFilterChange);
+    }
+    if (adjudicationUI.filters.cell) {
+      adjudicationUI.filters.cell.addEventListener('change', handleCellFilterChange);
+    }
+    if (adjudicationUI.filters.reason) {
+      adjudicationUI.filters.reason.addEventListener('change', handleReasonFilterChange);
+    }
+    if (adjudicationUI.filters.search) {
+      adjudicationUI.filters.search.addEventListener('input', handleAdjudicationSearchInput);
+    }
+    if (adjudicationUI.pagination.prev) {
+      adjudicationUI.pagination.prev.addEventListener('click', () => {
+        setAdjudicationPage(adjudicationUI.state.page - 1);
+      });
+    }
+    if (adjudicationUI.pagination.next) {
+      adjudicationUI.pagination.next.addEventListener('click', () => {
+        setAdjudicationPage(adjudicationUI.state.page + 1);
+      });
+    }
+    if (adjudicationUI.tableBody) {
+      adjudicationUI.tableBody.addEventListener('click', handleQueueActionClick);
+      adjudicationUI.tableBody.addEventListener('mouseover', handleQueueRowPreview);
+      adjudicationUI.tableBody.addEventListener('focusin', handleQueueRowPreview);
+    }
+
+    renderAdjudicationQueue();
   }
 
   function adjudicationHasOpenQueue() {
@@ -3951,11 +4996,68 @@
       .catch(() => null);
   }
 
+  function refreshAdjudicationQueue() {
+    adjudicationState.status = 'loading';
+    renderAdjudicationTile(adjudicationState);
+    renderAdjudicationQueue();
+    return fetchAdjudicationQueue()
+      .then((data) => {
+        let items = [];
+        let metaSource = {};
+        if (Array.isArray(data)) {
+          items = data;
+          metaSource = {};
+        } else if (data && typeof data === 'object') {
+          if (Array.isArray(data.items)) {
+            items = data.items;
+          } else if (Array.isArray(data.queue)) {
+            items = data.queue;
+          }
+          metaSource = data;
+        }
+        adjudicationState.entries = normalizeAdjudicationEntries(items);
+        adjudicationState.counts = computeAdjudicationCounts(adjudicationState.entries);
+        adjudicationState.meta = normalizeAdjudicationMeta(metaSource);
+        adjudicationState.status = 'ready';
+        adjudicationState.lastUpdated = new Date().toISOString();
+        clearAdjudicationDiffCache();
+        if (adjudicationErrorToast) {
+          dismissToast(adjudicationErrorToast);
+          adjudicationErrorToast = null;
+        }
+        renderAdjudicationTile(adjudicationState);
+        renderAdjudicationQueue();
+        renderIRRTile(irrSummaryState, irrTrendState);
+        renderVoiceTagTile(irrSummaryState, irrTrendState);
+      })
+      .catch(() => {
+        adjudicationState.status = 'error';
+        adjudicationState.counts = computeAdjudicationCounts(adjudicationState.entries);
+        adjudicationState.meta = { configSha: null, snapshotAt: null };
+        renderAdjudicationTile(adjudicationState);
+        renderAdjudicationQueue();
+        renderIRRTile(irrSummaryState, irrTrendState);
+        renderVoiceTagTile(irrSummaryState, irrTrendState);
+        if (adjudicationErrorToast) dismissToast(adjudicationErrorToast);
+        adjudicationErrorToast = showToast('Unable to load adjudication queue.', {
+          variant: 'error',
+          actions: [
+            {
+              label: 'Retry',
+              onClick: () => refreshAdjudicationQueue(),
+            },
+          ],
+          duration: 0,
+        });
+      });
+  }
+
   if (typeof window !== 'undefined') {
     window.addEventListener('DOMContentLoaded', () => {
       ensureDisagreementsPanel();
       disagreementsState.status = 'loading';
       adjudicationState.status = 'loading';
+      initAdjudicationQueueUI();
       adjudicationState.entries = [];
       adjudicationState.counts = { pending: 0, assigned: 0, locked: 0 };
       adjudicationState.lastUpdated = null;
@@ -3971,43 +5073,9 @@
       renderProvenanceTile(null);
       renderCoverageCompletenessTile(null);
       renderCoverageSnapshot(null);
+      renderAdjudicationQueue();
 
-      fetchAdjudicationQueue()
-        .then((data) => {
-          if (Array.isArray(data)) {
-            adjudicationState.entries = normalizeAdjudicationEntries(data);
-            adjudicationState.counts = computeAdjudicationCounts(adjudicationState.entries);
-            adjudicationState.status = 'ready';
-            adjudicationState.lastUpdated = new Date().toISOString();
-          } else if (data && Array.isArray(data.items)) {
-            adjudicationState.entries = normalizeAdjudicationEntries(data.items);
-            adjudicationState.counts = computeAdjudicationCounts(adjudicationState.entries);
-            adjudicationState.status = 'ready';
-            adjudicationState.lastUpdated = new Date().toISOString();
-          } else if (data == null) {
-            adjudicationState.entries = [];
-            adjudicationState.counts = { pending: 0, assigned: 0, locked: 0 };
-            adjudicationState.status = 'error';
-            adjudicationState.lastUpdated = null;
-          } else {
-            adjudicationState.entries = normalizeAdjudicationEntries([]);
-            adjudicationState.counts = { pending: 0, assigned: 0, locked: 0 };
-            adjudicationState.status = 'ready';
-            adjudicationState.lastUpdated = new Date().toISOString();
-          }
-          renderAdjudicationTile(adjudicationState);
-          renderIRRTile(irrSummaryState, irrTrendState);
-          renderVoiceTagTile(irrSummaryState, irrTrendState);
-        })
-        .catch(() => {
-          adjudicationState.entries = [];
-          adjudicationState.counts = { pending: 0, assigned: 0, locked: 0 };
-          adjudicationState.status = 'error';
-          adjudicationState.lastUpdated = null;
-          renderAdjudicationTile(adjudicationState);
-          renderIRRTile(irrSummaryState, irrTrendState);
-          renderVoiceTagTile(irrSummaryState, irrTrendState);
-        });
+      refreshAdjudicationQueue();
 
       fetchTrainingSummary()
         .then((summary) => {

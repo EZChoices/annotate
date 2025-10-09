@@ -53,6 +53,57 @@
     @media (max-width:600px){
       .qa-disagreements-panel{width:100%;border-left:none;border-top:1px solid var(--border)}
     }
+    .qa-adjudication{margin:2rem auto 3rem;max-width:1100px;padding:0 1rem}
+    .qa-adjudication__header{display:flex;flex-wrap:wrap;align-items:center;gap:.65rem 1.5rem;margin-bottom:1rem}
+    .qa-adjudication__title{margin:0;font-size:1.5rem}
+    .qa-adjudication__meta{margin-left:auto;font-size:.9rem;color:var(--muted)}
+    .qa-adjudication__filters{display:flex;flex-wrap:wrap;gap:1rem 1.5rem;margin-bottom:1rem}
+    .qa-adjudication__filter{display:flex;flex-direction:column;gap:.35rem;min-width:160px}
+    .qa-adjudication__filter label{font-size:.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+    .qa-adjudication__filter select,.qa-adjudication__filter input{padding:.5rem .65rem;border-radius:10px;border:1px solid var(--border);background:var(--card);font-size:.95rem;min-height:2.6rem}
+    .qa-adjudication__filter select[multiple]{min-height:5.3rem}
+    .qa-adjudication__table-wrapper{position:relative;border:1px solid var(--border);border-radius:16px;overflow:hidden;background:var(--card)}
+    .qa-adjudication__table{width:100%;border-collapse:collapse;font-size:.92rem}
+    .qa-adjudication__table thead{background:rgba(0,0,0,0.03);font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+    .qa-adjudication__table th,.qa-adjudication__table td{padding:.7rem .9rem;border-bottom:1px solid var(--border);vertical-align:top;text-align:left}
+    .qa-adjudication__table tbody tr:last-child td{border-bottom:none}
+    .qa-adjudication__asset{font-family:var(--mono, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);font-size:.95rem}
+    .qa-adjudication__reasons{display:flex;flex-wrap:wrap;gap:.35rem}
+    .qa-adjudication__reason{display:inline-flex;align-items:center;gap:.3rem;padding:.25rem .55rem;border-radius:999px;background:rgba(43,124,255,0.12);color:#1f4aa8;font-size:.75rem;font-weight:600}
+    .qa-adjudication__passes{font-size:.9rem;color:var(--muted)}
+    .qa-adjudication__status{display:inline-flex;align-items:center;padding:.3rem .65rem;border-radius:999px;font-size:.75rem;font-weight:600;text-transform:capitalize;color:#fff}
+    .qa-adjudication__status--pending{background:#f9a825;color:#3f2c00}
+    .qa-adjudication__status--assigned{background:#2b7cff}
+    .qa-adjudication__status--in_review{background:#7e3ff2}
+    .qa-adjudication__status--locked{background:#2e7d32}
+    .qa-adjudication__status--resolved{background:#455a64}
+    .qa-adjudication__assignee{display:block;margin-top:.3rem;font-size:.8rem;color:var(--muted)}
+    .qa-adjudication__diff-badges{display:flex;flex-wrap:wrap;gap:.3rem}
+    .qa-adjudication__diff-badge{display:inline-flex;align-items:center;gap:.25rem;padding:.25rem .5rem;border-radius:8px;background:rgba(0,0,0,0.05);font-size:.75rem;font-weight:600;color:var(--muted)}
+    .qa-adjudication__diff-badge-label{font-weight:600;color:inherit}
+    .qa-adjudication__diff-badge-value{font-variant-numeric:tabular-nums;color:#1f2937}
+    .qa-adjudication__actions{display:flex;flex-wrap:wrap;gap:.4rem}
+    .qa-adjudication__button{display:inline-flex;align-items:center;justify-content:center;padding:.4rem .75rem;border-radius:10px;border:1px solid transparent;background:var(--card);font-size:.8rem;font-weight:600;cursor:pointer;transition:background .15s ease,border-color .15s ease,color .15s ease}
+    .qa-adjudication__button--primary{background:#2b7cff;border-color:#1f64d6;color:#fff}
+    .qa-adjudication__button--subtle{border-color:var(--border);color:var(--muted)}
+    .qa-adjudication__button:disabled{opacity:.55;cursor:not-allowed}
+    .qa-adjudication__pagination{display:flex;align-items:center;justify-content:space-between;margin-top:1rem;font-size:.85rem;color:var(--muted)}
+    .qa-adjudication__pager{display:flex;gap:.5rem}
+    .qa-adjudication__pager button{padding:.4rem .75rem;border-radius:8px;border:1px solid var(--border);background:var(--card);font-size:.8rem;font-weight:600;cursor:pointer}
+    .qa-adjudication__pager button:disabled{opacity:.5;cursor:not-allowed}
+    .qa-adjudication__empty{margin:0;padding:1.2rem;font-size:.95rem;color:var(--muted);text-align:center}
+    .qa-adjudication__footer{margin-top:1.25rem;padding:.9rem 1rem;border:1px solid var(--border);border-radius:12px;background:rgba(0,0,0,0.02);display:flex;flex-wrap:wrap;gap:.65rem;font-size:.8rem;color:var(--muted)}
+    .qa-toast-container{position:fixed;bottom:1.5rem;right:1.5rem;display:flex;flex-direction:column;gap:.75rem;z-index:120}
+    .qa-toast{min-width:240px;max-width:320px;padding:.85rem 1rem;border-radius:12px;box-shadow:0 12px 28px rgba(15,23,42,0.25);background:#1f2937;color:#fff;display:flex;flex-direction:column;gap:.6rem}
+    .qa-toast__message{margin:0;font-size:.9rem;line-height:1.35}
+    .qa-toast__actions{display:flex;gap:.5rem;flex-wrap:wrap}
+    .qa-toast__button{padding:.35rem .65rem;border-radius:8px;border:1px solid rgba(255,255,255,0.25);background:rgba(255,255,255,0.08);color:#fff;font-size:.75rem;font-weight:600;cursor:pointer}
+    .qa-toast__close{align-self:flex-end;background:none;border:none;color:rgba(255,255,255,0.75);font-size:1rem;cursor:pointer}
+    .qa-toast--error{background:#b91c1c}
+    @media (max-width:720px){
+      .qa-adjudication{padding:0 .5rem}
+      .qa-toast-container{left:1rem;right:1rem;bottom:1rem;align-items:flex-end}
+    }
   </style>
 </head>
 <body>
@@ -108,6 +159,59 @@
         </thead>
         <tbody id="qaReportClips"></tbody>
       </table>
+      <section class="qa-adjudication" id="adjudication" aria-labelledby="qaAdjudicationTitle">
+        <div class="qa-adjudication__header">
+          <h3 class="qa-adjudication__title" id="qaAdjudicationTitle">Adjudication Queue</h3>
+          <span class="qa-adjudication__meta" id="qaAdjudicationMeta" role="status" aria-live="polite"></span>
+        </div>
+        <div class="qa-adjudication__filters" aria-label="Adjudication filters">
+          <div class="qa-adjudication__filter">
+            <label for="qaAdjudicationStatusFilter">Status</label>
+            <select id="qaAdjudicationStatusFilter" multiple aria-label="Filter adjudication queue by status"></select>
+          </div>
+          <div class="qa-adjudication__filter">
+            <label for="qaAdjudicationCellFilter">Cell</label>
+            <select id="qaAdjudicationCellFilter" aria-label="Filter adjudication queue by cell"></select>
+          </div>
+          <div class="qa-adjudication__filter">
+            <label for="qaAdjudicationReasonFilter">Reason</label>
+            <select id="qaAdjudicationReasonFilter" multiple aria-label="Filter adjudication queue by reason"></select>
+          </div>
+          <div class="qa-adjudication__filter qa-adjudication__filter--search">
+            <label for="qaAdjudicationSearch">Asset search</label>
+            <input type="search" id="qaAdjudicationSearch" placeholder="Search asset ID" aria-label="Search adjudication queue by asset ID">
+          </div>
+        </div>
+        <div class="qa-adjudication__table-wrapper" id="qaAdjudicationTableWrapper">
+          <table class="qa-adjudication__table" aria-describedby="qaAdjudicationTitle">
+            <thead>
+              <tr>
+                <th scope="col">Asset</th>
+                <th scope="col">Cell</th>
+                <th scope="col">Reasons</th>
+                <th scope="col">Passes</th>
+                <th scope="col">Age</th>
+                <th scope="col">Status</th>
+                <th scope="col">CS Δ / VT Δ / RTTM Δ</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="qaAdjudicationTableBody"></tbody>
+          </table>
+          <p class="qa-adjudication__empty hide" id="qaAdjudicationEmpty">No items match your filters.</p>
+        </div>
+        <div class="qa-adjudication__pagination" id="qaAdjudicationPagination">
+          <div class="qa-adjudication__pager">
+            <button type="button" id="qaAdjudicationPrev" aria-label="Previous page">Previous</button>
+            <button type="button" id="qaAdjudicationNext" aria-label="Next page">Next</button>
+          </div>
+          <span id="qaAdjudicationPageInfo">Page 1</span>
+        </div>
+        <div class="qa-adjudication__footer" id="qaAdjudicationFooter">
+          <span id="qaAdjudicationConfig">Config SHA: —</span>
+          <span id="qaAdjudicationSnapshot">Snapshot: —</span>
+        </div>
+      </section>
     </section>
   </div>
 
@@ -149,6 +253,8 @@
   <script src="/public/config.js"></script>
   <script src="/stage2/qa_metrics.js"></script>
   <script src="/stage2/qa-dashboard.js"></script>
+
+  <div class="qa-toast-container" id="qaToastContainer" aria-live="polite" aria-atomic="false"></div>
 
   <!-- Quick links bar -->
   <script>
