@@ -1176,7 +1176,23 @@ async function main() {
   const clipDirs = listSubdirs(sourceDir).filter(isAssetId);
   for (const assetId of clipDirs) {
     const mergedDir = path.join(sourceDir, assetId, 'merged');
-    const clipSource = fs.existsSync(mergedDir) ? mergedDir : path.join(sourceDir, assetId);
+    const usingMerged = fs.existsSync(mergedDir);
+    const clipSource = usingMerged ? mergedDir : path.join(sourceDir, assetId);
+    const itemMetaPath = path.join(sourceDir, assetId, 'item_meta.json');
+    const itemMeta = readJsonFileSafe(itemMetaPath) || {};
+    const adjudicationStatusRaw =
+      itemMeta && itemMeta.adjudication && typeof itemMeta.adjudication.status === 'string'
+        ? itemMeta.adjudication.status
+        : null;
+    const reviewStatus = adjudicationStatusRaw
+      ? String(adjudicationStatusRaw).toLowerCase()
+      : typeof itemMeta.review_status === 'string'
+      ? itemMeta.review_status.toLowerCase()
+      : typeof itemMeta.reviewStatus === 'string'
+      ? itemMeta.reviewStatus.toLowerCase()
+      : usingMerged
+      ? 'locked'
+      : null;
     const qaPath = path.join(clipSource, 'qa_result.json');
     if (!fs.existsSync(qaPath)) {
       logEntries.push(`SKIPPED ${assetId} reason=missing_qa_result`);
@@ -1249,6 +1265,7 @@ async function main() {
       split,
       qaMetrics,
       rightsList,
+      reviewStatus,
     });
   }
 
@@ -1343,6 +1360,10 @@ async function main() {
       files,
       rights: clip.rightsList,
     };
+
+    if (clip.reviewStatus) {
+      record.review_status = clip.reviewStatus;
+    }
 
     const provenanceEntry = provenanceByClip[clip.assetId] || {};
     const provenanceForRecord = {};
