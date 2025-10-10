@@ -559,6 +559,7 @@ const ReviewPage = {
       mergedOverlay: document.getElementById('mergedOverlay'),
       mergedCueList: document.getElementById('mergedCueList'),
       mergedValidation: document.getElementById('mergedValidation'),
+      copyAllPass2: document.getElementById('copyAllPass2'),
       voiceTagSelect: document.getElementById('voiceTagSelect'),
       mergedCsTrack: document.getElementById('mergedCsTrack'),
       modalRoot: document.getElementById('modalRoot'),
@@ -593,6 +594,7 @@ const ReviewPage = {
     if (this.elements.voiceTagSelect) {
       this.elements.voiceTagSelect.disabled = true;
     }
+    this.updateCopyAllPass2Button();
     this.updatePromoteButton();
     this.state.adjudicatorId = getReviewerId();
     this.bindEvents();
@@ -626,6 +628,9 @@ const ReviewPage = {
     });
     this.elements.zoomIn?.addEventListener('click', () => this.setZoom(this.state.zoom * 0.75));
     this.elements.zoomOut?.addEventListener('click', () => this.setZoom(this.state.zoom * 1.25));
+    this.elements.copyAllPass2?.addEventListener('click', () => {
+      this.handleBulkCopyAllFromPass(2);
+    });
     this.elements.diffTabs?.forEach((tab) => {
       tab.addEventListener('click', () => {
         const type = tab.dataset.tab;
@@ -1137,6 +1142,7 @@ const ReviewPage = {
         this.hideOverlay();
         this.markReviewOpened();
         this.checkForLocalDraft();
+        this.updateCopyAllPass2Button();
         this.updatePromoteButton();
       })
       .catch((err) => {
@@ -1298,6 +1304,7 @@ const ReviewPage = {
     this.normalizeMergedCues();
     this.normalizeMergedSpans();
     this.validateMergedState();
+    this.updateCopyAllPass2Button();
   },
 
   toggleEditing() {
@@ -1337,6 +1344,7 @@ const ReviewPage = {
     if (next) {
       this.renderMergedEditor();
     }
+    this.updateCopyAllPass2Button();
     this.updatePromoteButton();
   },
 
@@ -1355,6 +1363,7 @@ const ReviewPage = {
     this.renderMergedValidation();
     this.renderMergedCues();
     this.renderMergedCodeSwitch();
+    this.updateCopyAllPass2Button();
     if (this.elements.voiceTagSelect) {
       const index = this.state.review.selectedCue;
       const cue = this.state.review.merged?.transcriptCues?.[index] || null;
@@ -1724,6 +1733,22 @@ const ReviewPage = {
     });
   },
 
+  updateCopyAllPass2Button() {
+    const button = this.elements.copyAllPass2;
+    if (!button) return;
+    const editing = Boolean(this.state.review?.editingEnabled);
+    const spans = this.state.passes?.[2]?.codeSwitchSpans || [];
+    const hasSpans = Array.isArray(spans) && spans.length > 0;
+    button.disabled = !editing || !hasSpans;
+    if (!editing) {
+      button.title = 'Enable edit mode to copy code switch spans.';
+    } else if (!hasSpans) {
+      button.title = 'Pass 2 has no code switch spans to copy.';
+    } else {
+      button.title = 'Copy all code switch spans from Pass 2.';
+    }
+  },
+
   updateMergedCueText(index, text) {
     if (!this.state.review.merged?.transcriptCues) return;
     const cue = this.state.review.merged.transcriptCues[index];
@@ -1846,14 +1871,18 @@ const ReviewPage = {
       ],
     });
     if (choice === 'all') {
-      this.copyAllCodeSwitchSpans(passNumber);
+      await this.copyAllCodeSwitchSpans(passNumber);
     } else if (choice === 'single') {
       await this.copySingleCodeSwitchSpan(passNumber, span);
     }
   },
 
-  copyAllCodeSwitchSpans(passNumber) {
+  async copyAllCodeSwitchSpans(passNumber) {
     if (!this.state.review.editingEnabled) return;
+    if (passNumber === 2) {
+      await this.handleBulkCopyAllFromPass(passNumber);
+      return;
+    }
     this.ensureMergedInitialized();
     const spans = (this.state.passes[passNumber]?.codeSwitchSpans || []).map((span) => ({
       start: Number(span.start) || 0,
@@ -1866,6 +1895,199 @@ const ReviewPage = {
     this.state.review.lastDraftSavedAt = null;
     this.renderMergedCodeSwitch();
     this.renderMergedValidation();
+    this.updateCopyAllPass2Button();
+  },
+
+  async handleBulkCopyAllFromPass(passNumber) {
+    this.ensureMergedInitialized();
+    const pass = this.state.passes[passNumber];
+    if (!pass || !Array.isArray(pass.codeSwitchSpans) || !pass.codeSwitchSpans.length) {
+      this.showToast('No code switch spans available to copy from Pass 2.', { variant: 'info', duration: 3000 });
+      return;
+    }
+    const dryRun = this.performBulkCopyDryRun(passNumber);
+    if (!dryRun || !dryRun.operations.length) {
+      this.showToast('No code switch spans available to copy from Pass 2.', { variant: 'info', duration: 3000 });
+      return;
+    }
+    const summaryText = this.formatBulkCopySummary(dryRun);
+    const confirmation = await this.showChoiceModal({
+      title: 'Copy Pass 2 code switch spans',
+      body: `${summaryText}. Apply these changes?`,
+      actions: [
+        { label: 'Cancel', value: 'cancel' },
+        { label: 'Apply changes', value: 'confirm', primary: true },
+      ],
+    });
+    if (confirmation !== 'confirm') {
+      return;
+    }
+    const updatedSpans = await this.applyBulkCopyOperations(dryRun);
+    if (!updatedSpans) {
+      return;
+    }
+    const merged = this.state.review.merged;
+    if (!merged) return;
+    merged.codeSwitchSpans = updatedSpans;
+    this.normalizeMergedSpans();
+    this.validateMergedState();
+    this.state.review.lastDraftSavedAt = null;
+    this.renderMergedCodeSwitch();
+    this.renderMergedValidation();
+    this.computeDiffs();
+    this.renderDiffs();
+    this.updateCopyAllPass2Button();
+    this.showToast('Copied code switch spans from Pass 2.', { variant: 'success', duration: 2500 });
+  },
+
+  performBulkCopyDryRun(passNumber) {
+    const merged = this.state.review.merged;
+    const pass = this.state.passes[passNumber];
+    if (!merged || !pass) return null;
+    const spans = Array.isArray(pass.codeSwitchSpans) ? pass.codeSwitchSpans : [];
+    const operations = [];
+    const counts = {
+      inserts: 0,
+      replacements: 0,
+      conflicts: 0,
+      reasons: { overlap: 0, 'too-short': 0 },
+    };
+    let working = this.normalizeSpanList(merged.codeSwitchSpans);
+    spans.forEach((rawSpan, index) => {
+      let candidate = this.cleanSpan(rawSpan);
+      if (passNumber === 2) {
+        candidate = this.cleanSpan(this.snapSpanToSilence(candidate));
+      }
+      const duration = candidate.end - candidate.start;
+      const overlaps = this.getSpanOverlaps(candidate, working);
+      let type = 'insert';
+      let reason = null;
+      if (duration < 0.4 - 1e-6) {
+        type = 'conflict';
+        reason = 'too-short';
+      } else if (!overlaps.length) {
+        type = 'insert';
+      } else {
+        const fullyOverlapsAll = overlaps.every(
+          (existing) => candidate.start <= existing.start && candidate.end >= existing.end,
+        );
+        if (fullyOverlapsAll) {
+          type = 'replace';
+        } else {
+          type = 'conflict';
+          reason = 'overlap';
+        }
+      }
+      operations.push({
+        index,
+        passNumber,
+        type,
+        reason,
+        candidate,
+        source: this.cleanSpan(rawSpan),
+      });
+      if (type === 'insert') {
+        counts.inserts += 1;
+        working.push({ ...candidate });
+        working = this.normalizeSpanList(working);
+      } else if (type === 'replace') {
+        counts.replacements += 1;
+        working = working.filter((existing) => existing.end <= candidate.start || existing.start >= candidate.end);
+        working.push({ ...candidate });
+        working = this.normalizeSpanList(working);
+      } else if (type === 'conflict') {
+        counts.conflicts += 1;
+        if (reason) {
+          counts.reasons[reason] = (counts.reasons[reason] || 0) + 1;
+        }
+      }
+    });
+    return { operations, counts, total: spans.length };
+  },
+
+  formatCount(count, singular, plural = null) {
+    const label = count === 1 ? singular : plural || `${singular}s`;
+    return `${count} ${label}`;
+  },
+
+  formatBulkCopySummary(result) {
+    if (!result) return '';
+    const { counts } = result;
+    const parts = [];
+    parts.push(this.formatCount(counts.inserts, 'insert'));
+    parts.push(this.formatCount(counts.replacements, 'replacement'));
+    if (counts.conflicts) {
+      const reasonParts = [];
+      if (counts.reasons.overlap) {
+        reasonParts.push(this.formatCount(counts.reasons.overlap, 'overlap', 'overlaps'));
+      }
+      if (counts.reasons['too-short']) {
+        reasonParts.push(this.formatCount(counts.reasons['too-short'], 'too short', 'too short'));
+      }
+      parts.push(`${this.formatCount(counts.conflicts, 'conflict')} (${reasonParts.join(', ')})`);
+    } else {
+      parts.push('No conflicts');
+    }
+    return parts.join(', ');
+  },
+
+  async applyBulkCopyOperations(dryRun) {
+    const merged = this.state.review.merged;
+    if (!merged || !dryRun) return null;
+    let working = this.normalizeSpanList(merged.codeSwitchSpans);
+    const decisions = {};
+    for (const op of dryRun.operations) {
+      const candidate = this.cleanSpan(op.candidate);
+      if (op.type === 'insert') {
+        const spanToInsert = this.expandSpanToMinimum(candidate);
+        working.push(spanToInsert);
+        working = this.normalizeSpanList(working);
+        continue;
+      }
+      if (op.type === 'replace') {
+        const spanToInsert = this.expandSpanToMinimum(candidate);
+        let overlaps = this.getSpanOverlaps(spanToInsert, working);
+        working = working.filter((existing) => !overlaps.includes(existing));
+        working.push(spanToInsert);
+        working = this.normalizeSpanList(working);
+        continue;
+      }
+      if (op.type !== 'conflict') {
+        continue;
+      }
+      const reasonKey = op.reason || 'overlap';
+      let action = decisions[reasonKey] || null;
+      if (!action) {
+        const decision = await this.showBulkConflictModal(op, reasonKey);
+        if (!decision || !decision.value) {
+          return null;
+        }
+        action = decision.value;
+        if (decision.applyToAll) {
+          decisions[reasonKey] = action;
+        }
+      }
+      if (action === 'keep') {
+        continue;
+      }
+      let targetSpan = candidate;
+      if (action === 'merge') {
+        const overlaps = this.getSpanOverlaps(candidate, working);
+        let unionStart = candidate.start;
+        let unionEnd = candidate.end;
+        overlaps.forEach((existing) => {
+          unionStart = Math.min(unionStart, existing.start);
+          unionEnd = Math.max(unionEnd, existing.end);
+        });
+        targetSpan = { ...candidate, start: unionStart, end: unionEnd };
+      }
+      targetSpan = this.expandSpanToMinimum(targetSpan);
+      const overlaps = this.getSpanOverlaps(targetSpan, working);
+      working = working.filter((existing) => !overlaps.includes(existing));
+      working.push(targetSpan);
+      working = this.normalizeSpanList(working);
+    }
+    return working;
   },
 
   async copySingleCodeSwitchSpan(passNumber, span) {
@@ -1912,6 +2134,32 @@ const ReviewPage = {
       snapped.end = snapped.start + Math.max(0.1, span.end - span.start);
     }
     return snapped;
+  },
+
+  expandSpanToMinimum(span, minDuration = 0.4) {
+    const duration = span.end - span.start;
+    if (duration >= minDuration) {
+      return this.cleanSpan(span);
+    }
+    const mid = (span.start + span.end) / 2;
+    let start = mid - minDuration / 2;
+    let end = mid + minDuration / 2;
+    if (start < 0) {
+      end += -start;
+      start = 0;
+    }
+    if (Number.isFinite(this.state.clipDuration) && end > this.state.clipDuration) {
+      const diff = end - this.state.clipDuration;
+      end = this.state.clipDuration;
+      start = Math.max(0, start - diff);
+    }
+    return this.cleanSpan({ ...span, start, end });
+  },
+
+  getSpanOverlaps(target, spans) {
+    if (!target) return [];
+    const list = Array.isArray(spans) ? spans : [];
+    return list.filter((existing) => existing.end > target.start && existing.start < target.end);
   },
 
   snapTimeToBoundary(value, boundaries, tolerance = 0.12) {
@@ -2010,6 +2258,38 @@ const ReviewPage = {
     return candidate;
   },
 
+  cleanSpan(span) {
+    if (!span) {
+      return { start: 0, end: 0, lang: 'other' };
+    }
+    const start = Number(span.start) || 0;
+    const end = Number(span.end) || 0;
+    return {
+      start: Number(start.toFixed(3)),
+      end: Number(end.toFixed(3)),
+      lang: normalizeMergedLanguage(span),
+    };
+  },
+
+  normalizeSpanList(spans) {
+    const list = Array.isArray(spans) ? spans : [];
+    const cleaned = list
+      .map((span) => this.cleanSpan(span))
+      .filter((span) => span.end > span.start);
+    cleaned.sort((a, b) => (a.start - b.start) || (a.end - b.end));
+    const result = [];
+    cleaned.forEach((span) => {
+      const last = result[result.length - 1];
+      if (last && span.start <= last.end) {
+        last.end = Math.max(last.end, span.end);
+        last.lang = span.lang;
+      } else {
+        result.push({ ...span });
+      }
+    });
+    return result;
+  },
+
   normalizeMergedCues() {
     const merged = this.state.review.merged;
     if (!merged) return;
@@ -2025,24 +2305,7 @@ const ReviewPage = {
   normalizeMergedSpans() {
     const merged = this.state.review.merged;
     if (!merged) return;
-    const spans = merged.codeSwitchSpans || [];
-    spans.sort((a, b) => (a.start - b.start) || (a.end - b.end));
-    const result = [];
-    spans.forEach((span) => {
-      const clean = {
-        start: Number((Number(span.start) || 0).toFixed(3)),
-        end: Number((Number(span.end) || 0).toFixed(3)),
-        lang: normalizeMergedLanguage(span),
-      };
-      const last = result[result.length - 1];
-      if (last && clean.start <= last.end) {
-        last.end = Math.max(last.end, clean.end);
-        last.lang = clean.lang;
-      } else {
-        result.push(clean);
-      }
-    });
-    merged.codeSwitchSpans = result;
+    merged.codeSwitchSpans = this.normalizeSpanList(merged.codeSwitchSpans);
   },
 
   updateMergedAfterCueChange() {
@@ -2200,6 +2463,106 @@ const ReviewPage = {
         }
         button.textContent = action.label || 'Select';
         button.addEventListener('click', () => cleanup(action.value));
+        actionsEl.appendChild(button);
+      });
+    });
+  },
+
+  showBulkConflictModal(conflict, reasonKey) {
+    return new Promise((resolve) => {
+      const root = this.elements.modalRoot;
+      if (!root) {
+        resolve(null);
+        return;
+      }
+      const candidate = this.cleanSpan(conflict?.candidate);
+      root.innerHTML = '';
+      root.hidden = false;
+      const content = document.createElement('div');
+      content.className = 'review-modal__content';
+      const heading = document.createElement('h2');
+      heading.className = 'review-modal__title';
+      heading.textContent = 'Resolve conflict';
+      const body = document.createElement('div');
+      body.className = 'review-modal__body';
+      const spanInfo = document.createElement('p');
+      const duration = Math.max(0, candidate.end - candidate.start).toFixed(3);
+      spanInfo.textContent = `Pass ${conflict.passNumber || 2} span ${conflict.index + 1}: ${formatTimecode(
+        candidate.start,
+      )} → ${formatTimecode(candidate.end)} (${duration}s).`;
+      const reasonText =
+        reasonKey === 'too-short'
+          ? 'After snapping to silence, this span is shorter than the required 0.4s minimum.'
+          : 'This span overlaps existing merged spans without fully replacing them.';
+      const reasonParagraph = document.createElement('p');
+      reasonParagraph.textContent = reasonText;
+      const guidance = document.createElement('p');
+      guidance.textContent =
+        'Choose how to proceed. “Replace” removes overlapping merged spans, while “Merge” unions them. Both options enforce the 0.4s minimum duration.';
+      body.appendChild(spanInfo);
+      body.appendChild(reasonParagraph);
+      body.appendChild(guidance);
+      const checkboxLabel = document.createElement('label');
+      checkboxLabel.style.display = 'flex';
+      checkboxLabel.style.alignItems = 'center';
+      checkboxLabel.style.gap = '8px';
+      checkboxLabel.style.marginTop = '12px';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      const labelText =
+        reasonKey === 'too-short' ? 'Apply to all too-short conflicts' : 'Apply to all overlap conflicts';
+      const checkboxText = document.createElement('span');
+      checkboxText.textContent = labelText;
+      checkboxLabel.appendChild(checkbox);
+      checkboxLabel.appendChild(checkboxText);
+      body.appendChild(checkboxLabel);
+      const actionsEl = document.createElement('div');
+      actionsEl.className = 'review-modal__actions';
+      const actions = [
+        { label: 'Keep existing', value: 'keep' },
+        { label: 'Replace', value: 'replace', primary: true },
+        { label: 'Merge (union)', value: 'merge' },
+      ];
+      content.appendChild(heading);
+      content.appendChild(body);
+      content.appendChild(actionsEl);
+      root.appendChild(content);
+      const cleanup = (value) => {
+        root.hidden = true;
+        root.innerHTML = '';
+        document.removeEventListener('keydown', onKeyDown);
+        this.state.modal.cleanup = null;
+        resolve(value);
+      };
+      this.state.modal.cleanup = cleanup;
+      const onKeyDown = (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          cleanup(null);
+        }
+      };
+      document.addEventListener('keydown', onKeyDown);
+      root.addEventListener(
+        'click',
+        (event) => {
+          if (event.target === root) {
+            cleanup(null);
+          }
+        },
+        { once: true },
+      );
+      actions.forEach((action) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'review-modal__button';
+        if (action.primary) {
+          button.style.background = 'rgba(56, 189, 248, 0.35)';
+          button.style.borderColor = 'rgba(56, 189, 248, 0.45)';
+        }
+        button.textContent = action.label;
+        button.addEventListener('click', () =>
+          cleanup({ value: action.value, applyToAll: checkbox.checked }),
+        );
         actionsEl.appendChild(button);
       });
     });
