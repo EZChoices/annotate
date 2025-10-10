@@ -1323,9 +1323,9 @@
     [QA_TILE_VOICE_TAG_ID]: '/stage2/qa-dashboard.html#voice-tag-irr',
     [QA_TILE_DOUBLE_PASS_ID]: '/stage2/qa-dashboard.html#double-pass',
     [QA_TILE_DISAGREEMENTS_ID]: '#',
-    [QA_TILE_CODE_SWITCH_ID]: '/stage2/review.html?f1_lt=0.85',
-    [QA_TILE_DIARIZATION_ID]: '/stage2/review.html?mae_gt=0.5',
-    [QA_TILE_TRANSLATION_ID]: '/stage2/review.html?translation_lt=0.95',
+    [QA_TILE_CODE_SWITCH_ID]: '/stage2/review?f1_lt=0.85',
+    [QA_TILE_DIARIZATION_ID]: '/stage2/review?mae_gt=0.5',
+    [QA_TILE_TRANSLATION_ID]: '/stage2/review?translation_lt=0.95',
     [QA_TILE_COVERAGE_ID]: '/stage2/qa-dashboard.html?coverage=low#coverageSummary',
   };
 
@@ -2456,7 +2456,7 @@
     if (!assetId) return;
     markAdjudicationAssetOpened(assetId);
     renderAdjudicationQueue();
-    const url = `/stage2/review.html?asset_id=${encodeURIComponent(assetId)}`;
+    const url = `/stage2/review?asset_id=${encodeURIComponent(assetId)}`;
     if (event && (event.metaKey || event.ctrlKey)) {
       window.open(url, '_blank', 'noopener');
     } else {
@@ -4348,7 +4348,7 @@
   }
 
   function buildReviewUrl(entry) {
-    if (!entry) return '/stage2/review.html';
+    if (!entry) return '/stage2/review';
     const params = new URLSearchParams();
     if (entry.assetId) params.set('asset', entry.assetId);
     if (entry.cellKey) params.set('cell', entry.cellKey);
@@ -4371,7 +4371,7 @@
     if (passes.length) params.set('passes', passes.join(','));
     params.set('mode', 'side-by-side');
     params.set('focus', 'hasCS');
-    return `/stage2/review.html?${params.toString()}`;
+    return `/stage2/review?${params.toString()}`;
   }
 
   function ensureDisagreementsPanel() {
