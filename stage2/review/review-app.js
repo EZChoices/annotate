@@ -13,6 +13,7 @@ const CS_COLORS = {
   fra: { label: 'FR', color: '#c084fc', background: 'rgba(192, 132, 252, 0.28)' },
   other: { label: 'Other', color: '#34d399', background: 'rgba(52, 211, 153, 0.28)' },
 };
+const MERGED_LANGUAGE_SET = new Set(['eng', 'fra', 'other']);
 
 function formatTimecode(seconds) {
   if (!Number.isFinite(seconds)) return '00:00.000';
@@ -103,6 +104,32 @@ function fetchJson(url) {
     if (!res.ok) return null;
     return res.json();
   });
+}
+
+function getReviewerId() {
+  if (typeof window === 'undefined') {
+    return 'reviewer';
+  }
+  const key = 'ea_stage2_reviewer_id';
+  try {
+    const existing = window.localStorage?.getItem(key);
+    if (existing) {
+      return existing;
+    }
+  } catch {}
+  try {
+    const annotator = window.localStorage?.getItem('ea_stage2_annotator_id');
+    if (annotator) {
+      window.localStorage?.setItem(key, annotator);
+      return annotator;
+    }
+  } catch {}
+  return 'reviewer';
+}
+
+function normalizeMergedLanguage(span) {
+  const key = toLanguageKey(span);
+  return MERGED_LANGUAGE_SET.has(key) ? key : 'other';
 }
 
 const ReviewDraftStore = {
@@ -471,6 +498,7 @@ const ReviewPage = {
     itemMeta: null,
     cell: null,
     status: null,
+    adjudicatorId: null,
     passes: {
       1: createPassState(),
       2: createPassState(),
@@ -486,6 +514,11 @@ const ReviewPage = {
     clipDuration: null,
     zoom: 1,
     canPromote: false,
+    promote: {
+      busy: false,
+      locked: false,
+      disabledReason: 'Enable edit to promote.',
+    },
     playback: {
       playing: false,
       offset: 0,
@@ -505,6 +538,7 @@ const ReviewPage = {
   },
   virtualizers: {},
   elements: {},
+  toasts: new Set(),
 
   init() {
     this.elements = {
@@ -521,12 +555,14 @@ const ReviewPage = {
       rewindButton: document.getElementById('controlRewind'),
       timecode: document.getElementById('controlTime'),
       toggleEdit: document.getElementById('toggleEdit'),
+      promoteButton: document.getElementById('promoteMerged'),
       mergedOverlay: document.getElementById('mergedOverlay'),
       mergedCueList: document.getElementById('mergedCueList'),
       mergedValidation: document.getElementById('mergedValidation'),
       voiceTagSelect: document.getElementById('voiceTagSelect'),
       mergedCsTrack: document.getElementById('mergedCsTrack'),
       modalRoot: document.getElementById('modalRoot'),
+      toastContainer: document.getElementById('reviewToasts'),
       zoomIn: document.getElementById('zoomIn'),
       zoomOut: document.getElementById('zoomOut'),
       audios: {
@@ -557,6 +593,8 @@ const ReviewPage = {
     if (this.elements.voiceTagSelect) {
       this.elements.voiceTagSelect.disabled = true;
     }
+    this.updatePromoteButton();
+    this.state.adjudicatorId = getReviewerId();
     this.bindEvents();
     this.bootstrap();
   },
@@ -571,6 +609,9 @@ const ReviewPage = {
     });
     this.elements.toggleEdit?.addEventListener('click', () => {
       this.toggleEditing();
+    });
+    this.elements.promoteButton?.addEventListener('click', () => {
+      this.handlePromoteClick();
     });
     this.elements.voiceTagSelect?.addEventListener('change', (event) => {
       this.handleVoiceTagChange(event.target.value || '');
@@ -944,7 +985,7 @@ const ReviewPage = {
       ? merged.codeSwitchSpans.map((span) => ({
           start: Number(span.start) || 0,
           end: Number(span.end) || 0,
-          lang: toLanguageKey(span),
+          lang: normalizeMergedLanguage(span),
         }))
       : [];
     return { transcriptCues: cues, codeSwitchSpans: spans };
@@ -987,7 +1028,7 @@ const ReviewPage = {
         ? record.merged.codeSwitchSpans.map((span) => ({
             start: Number(span.start) || 0,
             end: Number(span.end) || 0,
-            lang: toLanguageKey(span),
+            lang: normalizeMergedLanguage(span),
           }))
         : [],
     };
@@ -1046,7 +1087,25 @@ const ReviewPage = {
         this.state.itemMeta = itemMeta || null;
         this.state.cell = getCell(itemMeta) || '—';
         this.state.status = getStatus(itemMeta);
-        this.state.canPromote = true;
+        const statusKey = typeof this.state.status === 'string' ? this.state.status.toLowerCase() : '';
+        const adjudicationStatus =
+          typeof itemMeta?.adjudication?.status === 'string'
+            ? itemMeta.adjudication.status.toLowerCase()
+            : '';
+        const statusEligible = statusKey === 'assigned' || statusKey === 'in_review';
+        const adjudicationEligible = adjudicationStatus !== 'locked' && adjudicationStatus !== 'resolved';
+        this.state.canPromote = statusEligible && adjudicationEligible;
+        if (!statusEligible) {
+          this.state.promote.locked = true;
+          this.state.promote.disabledReason = 'Asset status is not promotable.';
+        } else if (!adjudicationEligible) {
+          this.state.promote.locked = true;
+          this.state.promote.disabledReason = 'Adjudication already resolved.';
+        } else {
+          this.state.promote.locked = false;
+          this.state.promote.disabledReason = 'Enable edit to promote.';
+        }
+        this.updatePromoteButton();
         this.state.passes[1] = {
           ...createPassState(),
           ...pass1,
@@ -1078,10 +1137,15 @@ const ReviewPage = {
         this.hideOverlay();
         this.markReviewOpened();
         this.checkForLocalDraft();
+        this.updatePromoteButton();
       })
       .catch((err) => {
         console.error('Review bootstrap failed', err);
         this.setMessage('Failed to load review data.');
+        this.state.canPromote = false;
+        this.state.promote.locked = true;
+        this.state.promote.disabledReason = 'Unable to load review data.';
+        this.updatePromoteButton();
       });
   },
 
@@ -1224,7 +1288,7 @@ const ReviewPage = {
     const codeSwitchSpans = (pass1.codeSwitchSpans || []).map((span) => ({
       start: Number(span.start) || 0,
       end: Number(span.end) || 0,
-      lang: toLanguageKey(span),
+      lang: normalizeMergedLanguage(span),
     }));
     this.state.review.merged = {
       transcriptCues,
@@ -1273,6 +1337,7 @@ const ReviewPage = {
     if (next) {
       this.renderMergedEditor();
     }
+    this.updatePromoteButton();
   },
 
   setMergedOverlayVisible(visible) {
@@ -1319,6 +1384,244 @@ const ReviewPage = {
       el.classList.add('has-errors');
       el.textContent = errors.join(' | ');
     }
+    this.updatePromoteButton();
+  },
+
+  updatePromoteButton() {
+    const button = this.elements.promoteButton;
+    if (!button) return;
+    const promoteState = this.state.promote || {};
+    const busy = Boolean(promoteState.busy);
+    const locked = Boolean(promoteState.locked);
+    const errors = this.state.review.validationErrors || [];
+    const editing = Boolean(this.state.review.editingEnabled);
+    let disabled = false;
+    let reason = '';
+    if (!this.state.canPromote || locked) {
+      disabled = true;
+      reason = promoteState.disabledReason || 'Promotion unavailable for this asset.';
+    } else if (!editing) {
+      disabled = true;
+      reason = 'Enable editing before promoting.';
+    } else if (errors.length) {
+      disabled = true;
+      reason = 'Resolve validation issues before promoting.';
+    }
+    if (busy) {
+      disabled = true;
+    }
+    button.disabled = disabled;
+    if (busy) {
+      button.innerHTML =
+        '<span class="review-button__spinner" aria-hidden="true"></span><span class="review-button__label">Promoting…</span>';
+      button.setAttribute('aria-busy', 'true');
+    } else {
+      button.innerHTML = '<span class="review-button__label">Promote merged</span>';
+      button.removeAttribute('aria-busy');
+    }
+    if (disabled && reason) {
+      button.title = reason;
+    } else {
+      button.removeAttribute('title');
+    }
+  },
+
+  setPromoteBusy(busy) {
+    this.state.promote.busy = Boolean(busy);
+    this.updatePromoteButton();
+  },
+
+  lockPromote(reason) {
+    this.state.promote.locked = true;
+    if (reason) {
+      this.state.promote.disabledReason = reason;
+    }
+    this.state.canPromote = false;
+    this.updatePromoteButton();
+  },
+
+  async handlePromoteClick() {
+    if (this.state.promote.busy || !this.state.assetId) return;
+    if (!this.state.review.editingEnabled) {
+      this.showToast('Enable editing before promoting the merged layer.', { variant: 'error' });
+      return;
+    }
+    this.ensureMergedInitialized();
+    const errors = this.validateMergedState();
+    this.renderMergedValidation();
+    if (errors.length) {
+      await this.showValidationModal(errors);
+      return;
+    }
+    if (!this.state.canPromote || this.state.promote.locked) {
+      if (this.state.promote.disabledReason) {
+        this.showToast(this.state.promote.disabledReason, { variant: 'error', duration: 6000 });
+      }
+      return;
+    }
+    this.setPromoteBusy(true);
+    const payload = {
+      asset_id: this.state.assetId,
+      adjudicator_id: this.state.adjudicatorId || getReviewerId(),
+    };
+    let response;
+    try {
+      response = await fetch('/api/adjudication/promote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } catch (err) {
+      console.error('Promote request failed', err);
+      this.setPromoteBusy(false);
+      this.showToast('Unable to promote merged layer. Check your connection and try again.', {
+        variant: 'error',
+        duration: 6000,
+      });
+      return;
+    }
+    if (!response.ok) {
+      let detail = '';
+      try {
+        const data = await response.json();
+        detail = data?.detail || data?.message || '';
+      } catch {
+        try {
+          detail = await response.text();
+        } catch {}
+      }
+      if (!detail) {
+        detail = response.status === 409 ? 'This asset is no longer promotable.' : 'Unable to promote merged layer.';
+      }
+      if (response.status === 409 || response.status === 404) {
+        this.lockPromote(detail);
+      } else if (detail) {
+        this.state.promote.disabledReason = detail;
+        this.updatePromoteButton();
+      }
+      this.setPromoteBusy(false);
+      this.showToast(detail, { variant: 'error', duration: 6000 });
+      return;
+    }
+    await response.json().catch(() => ({}));
+    this.setPromoteBusy(false);
+    this.lockPromote('This asset has been promoted.');
+    this.showToast('Merged layer promoted successfully.', { variant: 'success', duration: 2000 });
+    try {
+      window.sessionStorage?.setItem(`hasOpenedReview:${this.state.assetId}`, 'true');
+    } catch {}
+    window.setTimeout(() => {
+      window.location.href = '/stage2/qa-dashboard.html?status=locked';
+    }, 600);
+  },
+
+  showValidationModal(errors) {
+    const list = Array.isArray(errors) ? errors : [];
+    if (!list.length) return Promise.resolve();
+    const root = this.elements.modalRoot;
+    if (!root) {
+      window.alert(list.join('\n'));
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      root.innerHTML = '';
+      root.hidden = false;
+      const content = document.createElement('div');
+      content.className = 'review-modal__content';
+      const title = document.createElement('h2');
+      title.className = 'review-modal__title';
+      title.textContent = 'Resolve validation issues';
+      const body = document.createElement('div');
+      body.className = 'review-modal__body';
+      const listEl = document.createElement('ul');
+      listEl.style.paddingLeft = '20px';
+      listEl.style.margin = '0';
+      list.forEach((message) => {
+        const item = document.createElement('li');
+        item.textContent = message;
+        listEl.appendChild(item);
+      });
+      body.appendChild(listEl);
+      const actions = document.createElement('div');
+      actions.className = 'review-modal__actions';
+      const closeButton = document.createElement('button');
+      closeButton.type = 'button';
+      closeButton.className = 'review-modal__button';
+      closeButton.textContent = 'Close';
+      actions.appendChild(closeButton);
+      content.appendChild(title);
+      content.appendChild(body);
+      content.appendChild(actions);
+      root.appendChild(content);
+
+      const cleanup = () => {
+        root.hidden = true;
+        root.innerHTML = '';
+        document.removeEventListener('keydown', onKeyDown);
+        this.state.modal.cleanup = null;
+        resolve();
+      };
+      this.state.modal.cleanup = cleanup;
+
+      const onKeyDown = (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          cleanup();
+        }
+      };
+      document.addEventListener('keydown', onKeyDown);
+      root.addEventListener(
+        'click',
+        (event) => {
+          if (event.target === root) {
+            cleanup();
+          }
+        },
+        { once: true },
+      );
+      closeButton.addEventListener('click', cleanup);
+    });
+  },
+
+  dismissToast(toast) {
+    if (!toast) return;
+    const timer = toast.dataset ? Number(toast.dataset.timer || 0) : 0;
+    if (timer) window.clearTimeout(timer);
+    toast.remove();
+    this.toasts.delete(toast);
+  },
+
+  showToast(message, options = {}) {
+    const container = this.elements.toastContainer;
+    if (!container || !message) return null;
+    const variant = options.variant || 'info';
+    const duration = Number.isFinite(options.duration) ? Number(options.duration) : 4000;
+    const toast = document.createElement('div');
+    toast.className = 'review-toast';
+    if (variant === 'success') toast.classList.add('review-toast--success');
+    else if (variant === 'error') toast.classList.add('review-toast--error');
+    const icon = document.createElement('span');
+    icon.className = 'review-toast__icon';
+    icon.textContent = variant === 'success' ? '✓' : variant === 'error' ? '⚠️' : 'ℹ️';
+    const body = document.createElement('div');
+    body.className = 'review-toast__message';
+    body.textContent = message;
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'review-toast__close';
+    close.setAttribute('aria-label', 'Dismiss notification');
+    close.textContent = '×';
+    close.addEventListener('click', () => this.dismissToast(toast));
+    toast.appendChild(icon);
+    toast.appendChild(body);
+    toast.appendChild(close);
+    container.appendChild(toast);
+    this.toasts.add(toast);
+    if (duration > 0) {
+      const timer = window.setTimeout(() => this.dismissToast(toast), duration);
+      toast.dataset.timer = String(timer);
+    }
+    return toast;
   },
 
   renderMergedCues() {
@@ -1412,7 +1715,7 @@ const ReviewPage = {
       block.style.bottom = '0';
       block.style.left = `${startRatio * 100}%`;
       block.style.width = `${Math.max(0.5, (endRatio - startRatio) * 100)}%`;
-      const key = toLanguageKey(span);
+      const key = normalizeMergedLanguage(span);
       const spec = CS_COLORS[key] || CS_COLORS.other;
       block.style.background = spec.background;
       block.style.color = spec.color || '#f8fafc';
@@ -1555,7 +1858,7 @@ const ReviewPage = {
     const spans = (this.state.passes[passNumber]?.codeSwitchSpans || []).map((span) => ({
       start: Number(span.start) || 0,
       end: Number(span.end) || 0,
-      lang: toLanguageKey(span),
+      lang: normalizeMergedLanguage(span),
     }));
     this.state.review.merged.codeSwitchSpans = spans;
     this.normalizeMergedSpans();
@@ -1571,7 +1874,7 @@ const ReviewPage = {
     let candidate = {
       start: Number(span.start) || 0,
       end: Number(span.end) || 0,
-      lang: toLanguageKey(span),
+      lang: normalizeMergedLanguage(span),
     };
     if (passNumber === 2) {
       candidate = this.snapSpanToSilence(candidate);
@@ -1589,7 +1892,7 @@ const ReviewPage = {
     merged.codeSwitchSpans.push({
       start: Number(span.start) || 0,
       end: Number(span.end) || 0,
-      lang: toLanguageKey(span),
+      lang: normalizeMergedLanguage(span),
     });
     this.normalizeMergedSpans();
     this.validateMergedState();
@@ -1729,7 +2032,7 @@ const ReviewPage = {
       const clean = {
         start: Number((Number(span.start) || 0).toFixed(3)),
         end: Number((Number(span.end) || 0).toFixed(3)),
-        lang: toLanguageKey(span),
+        lang: normalizeMergedLanguage(span),
       };
       const last = result[result.length - 1];
       if (last && clean.start <= last.end) {
@@ -1795,6 +2098,11 @@ const ReviewPage = {
       }
       if (spanPrevEnd != null && start < spanPrevEnd - 1e-3) {
         errors.push(`Code switch span ${index + 1} overlaps previous span.`);
+      }
+      const langKey = typeof span.lang === 'string' ? span.lang.toLowerCase() : '';
+      if (!MERGED_LANGUAGE_SET.has(langKey)) {
+        const label = span.lang || langKey || 'unknown';
+        errors.push(`Code switch span ${index + 1} has unsupported language "${label}".`);
       }
       spanPrevEnd = end;
     });
