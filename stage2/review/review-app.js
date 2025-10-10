@@ -4,6 +4,9 @@ const DRIFT_RESYNC_INTERVAL_MS = 3000;
 const VOICE_TAG_TOLERANCE = 0.12;
 const DIAR_BOUNDARY_TOLERANCE = 0.25;
 const CUE_ROW_HEIGHT = 88;
+const REVIEW_DRAFT_DB = 'stage2ReviewDrafts';
+const REVIEW_DRAFT_STORE = 'drafts';
+const REVIEW_DRAFT_VERSION = 1;
 const CS_COLORS = {
   ara: { label: 'AR', color: '#f97316', background: 'rgba(249, 115, 22, 0.28)' },
   eng: { label: 'EN', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.28)' },
@@ -102,6 +105,91 @@ function fetchJson(url) {
   });
 }
 
+const ReviewDraftStore = {
+  dbPromise: null,
+
+  async open() {
+    if (typeof window === 'undefined' || !window.indexedDB) {
+      return null;
+    }
+    if (this.dbPromise) {
+      return this.dbPromise;
+    }
+    this.dbPromise = new Promise((resolve) => {
+      const request = window.indexedDB.open(REVIEW_DRAFT_DB, REVIEW_DRAFT_VERSION);
+      request.onerror = () => {
+        console.warn('ReviewDraftStore: failed to open IndexedDB', request.error);
+        resolve(null);
+      };
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(REVIEW_DRAFT_STORE)) {
+          db.createObjectStore(REVIEW_DRAFT_STORE, { keyPath: 'assetId' });
+        }
+      };
+      request.onsuccess = () => {
+        const db = request.result;
+        db.onversionchange = () => {
+          db.close();
+          console.info('ReviewDraftStore: database version changed, closing connection');
+        };
+        resolve(db);
+      };
+    });
+    return this.dbPromise;
+  },
+
+  async get(assetId) {
+    if (!assetId) return null;
+    const db = await this.open();
+    if (!db) return null;
+    return new Promise((resolve) => {
+      const tx = db.transaction(REVIEW_DRAFT_STORE, 'readonly');
+      const store = tx.objectStore(REVIEW_DRAFT_STORE);
+      const request = store.get(assetId);
+      request.onerror = () => {
+        console.warn('ReviewDraftStore: failed to read draft', request.error);
+        resolve(null);
+      };
+      request.onsuccess = () => {
+        resolve(request.result || null);
+      };
+    });
+  },
+
+  async set(assetId, payload) {
+    if (!assetId) return false;
+    const db = await this.open();
+    if (!db) return false;
+    return new Promise((resolve) => {
+      const tx = db.transaction(REVIEW_DRAFT_STORE, 'readwrite');
+      const store = tx.objectStore(REVIEW_DRAFT_STORE);
+      const request = store.put({ assetId, ...payload });
+      request.onerror = () => {
+        console.warn('ReviewDraftStore: failed to save draft', request.error);
+        resolve(false);
+      };
+      request.onsuccess = () => resolve(true);
+    });
+  },
+
+  async delete(assetId) {
+    if (!assetId) return false;
+    const db = await this.open();
+    if (!db) return false;
+    return new Promise((resolve) => {
+      const tx = db.transaction(REVIEW_DRAFT_STORE, 'readwrite');
+      const store = tx.objectStore(REVIEW_DRAFT_STORE);
+      const request = store.delete(assetId);
+      request.onerror = () => {
+        console.warn('ReviewDraftStore: failed to delete draft', request.error);
+        resolve(false);
+      };
+      request.onsuccess = () => resolve(true);
+    });
+  },
+};
+
 function toLanguageKey(span) {
   if (!span) return 'other';
   const lang = typeof span.lang === 'string' ? span.lang.toLowerCase() : span.language || span.label;
@@ -111,6 +199,21 @@ function toLanguageKey(span) {
   if (/fra|fr/.test(lang)) return 'fra';
   if (/ara|ar/.test(lang)) return 'ara';
   return 'other';
+}
+
+function normalizeSpeakerId(value) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  const numeric = /^s?(\d{1,3})$/i.exec(text);
+  if (numeric) {
+    return `S${Number(numeric[1])}`;
+  }
+  const embedded = /(\d{1,3})/.exec(text);
+  if (embedded) {
+    return `S${Number(embedded[1])}`;
+  }
+  return text.toUpperCase();
 }
 
 function computeIoU(a, b) {
@@ -375,7 +478,10 @@ const ReviewPage = {
     diffs: { cs: [], vt: [], rttm: [] },
     diffTimeline: [],
     activeTab: 'cs',
-    activeDiff: null,
+    selection: {
+      diff: null,
+      span: null,
+    },
     highlightedCues: { 1: -1, 2: -1 },
     clipDuration: null,
     zoom: 1,
@@ -385,11 +491,16 @@ const ReviewPage = {
       offset: 0,
       lastSync: 0,
     },
+    modal: {
+      cleanup: null,
+    },
     review: {
       editingEnabled: false,
       merged: null,
       selectedCue: -1,
       validationErrors: [],
+      localDraft: false,
+      lastDraftSavedAt: null,
     },
   },
   virtualizers: {},
@@ -490,12 +601,47 @@ const ReviewPage = {
       this.selectDiff(type, index);
     });
     document.addEventListener('keydown', (event) => {
-      if (event.key === '[') {
+      const isSave = event.key && event.key.toLowerCase() === 's' && (event.ctrlKey || event.metaKey);
+      if (isSave) {
         event.preventDefault();
-        this.stepDiff(-1);
-      } else if (event.key === ']') {
+        this.handleDraftSaveShortcut();
+        return;
+      }
+
+      if (this.isEditableTarget(event.target)) {
+        return;
+      }
+
+      if (event.key === '[' || event.key === ']') {
         event.preventDefault();
-        this.stepDiff(1);
+        this.handleDiffHotkey(event.key === '[' ? -1 : 1);
+        return;
+      }
+
+      if (
+        (event.key === '1' || event.key === '2') &&
+        !event.shiftKey &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey
+      ) {
+        const passNumber = Number(event.key);
+        if (PASS_NUMS.includes(passNumber)) {
+          event.preventDefault();
+          this.handleCopyHotkey(passNumber);
+        }
+        return;
+      }
+
+      if ((event.key === 'v' || event.key === 'V') && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        this.handleVoiceTagHotkey();
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        this.handleEscapeHotkey();
       }
     });
     PASS_NUMS.forEach((passNumber) => {
@@ -523,6 +669,362 @@ const ReviewPage = {
         });
       }
     });
+  },
+
+  isEditableTarget(target) {
+    if (!target || !target.tagName) return false;
+    const tag = target.tagName.toUpperCase();
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    return Boolean(target.isContentEditable);
+  },
+
+  pauseAndSync() {
+    if (this.state.playback.playing) {
+      this.pause();
+      this.syncRight(true);
+    }
+  },
+
+  handleDiffHotkey(step) {
+    this.pauseAndSync();
+    this.stepDiff(step);
+  },
+
+  async handleCopyHotkey(passNumber) {
+    if (!this.state.review.editingEnabled) return;
+    this.ensureMergedInitialized();
+    const pass = this.state.passes[passNumber];
+    if (!pass) return;
+    const spanSelection = this.state.selection.span;
+    if (spanSelection && spanSelection.passNumber === passNumber && Number.isFinite(spanSelection.index)) {
+      const span = pass.codeSwitchSpans?.[spanSelection.index];
+      if (span) {
+        const time = ((Number(span.start) || 0) + (Number(span.end) || 0)) / 2 || Number(span.start) || 0;
+        this.pauseAndSync();
+        this.seek(Math.max(0, time));
+        await this.copySingleCodeSwitchSpan(passNumber, span);
+        return;
+      }
+    }
+    const cueIndex = this.state.highlightedCues?.[passNumber];
+    if (!Number.isFinite(cueIndex) || cueIndex < 0) return;
+    const cue = pass.transcriptCues?.[cueIndex];
+    if (!cue) return;
+    const mid = ((Number(cue.start) || 0) + (Number(cue.end) || 0)) / 2;
+    this.pauseAndSync();
+    this.seek(Math.max(0, mid));
+    this.copyCueToMerged(passNumber, cueIndex);
+  },
+
+  async handleVoiceTagHotkey() {
+    if (!this.state.review.editingEnabled) return;
+    this.ensureMergedInitialized();
+    const merged = this.state.review.merged;
+    if (!merged || !Array.isArray(merged.transcriptCues) || !merged.transcriptCues.length) return;
+    let index = this.state.review.selectedCue;
+    const audio = this.elements.audios[1];
+    const currentTime = audio ? audio.currentTime || 0 : 0;
+    if (!Number.isFinite(index) || index < 0) {
+      index = findCueIndexAtTime(merged.transcriptCues, currentTime);
+    }
+    if (!Number.isFinite(index) || index < 0) {
+      index = 0;
+    }
+    const cue = merged.transcriptCues[index];
+    if (!cue) return;
+    this.pauseAndSync();
+    this.seek(Math.max(0, Number(cue.start) || 0));
+    this.state.review.selectedCue = index;
+    this.renderMergedCues();
+    const currentTag = this.extractVoiceTagValue(cue.text || '');
+    const selection = await this.promptVoiceTagSelection(currentTag);
+    if (selection === null) {
+      return;
+    }
+    this.handleVoiceTagChange(selection);
+  },
+
+  handleEscapeHotkey() {
+    this.clearSelection();
+    this.dismissActiveModal();
+  },
+
+  async handleDraftSaveShortcut() {
+    const saved = await this.saveLocalDraft();
+    if (saved && this.elements.message) {
+      this.setMessage('Local draft saved to this browser.');
+    }
+  },
+
+  dismissActiveModal() {
+    if (typeof this.state.modal?.cleanup === 'function') {
+      const cleanup = this.state.modal.cleanup;
+      this.state.modal.cleanup = null;
+      cleanup(null);
+    }
+  },
+
+  clearSelection() {
+    if (this.state.selection.diff) {
+      this.state.selection.diff = null;
+      this.renderDiffs();
+    }
+    if (this.state.selection.span) {
+      this.state.selection.span = null;
+      PASS_NUMS.forEach((passNumber) => this.renderTracks(passNumber));
+    }
+  },
+
+  setSpanSelection(passNumber, index) {
+    if (!PASS_NUMS.includes(passNumber)) return;
+    if (!Number.isFinite(index) || index < 0) {
+      this.state.selection.span = null;
+    } else {
+      const current = this.state.selection.span;
+      if (current && current.passNumber === passNumber && current.index === index) {
+        this.state.selection.span = null;
+      } else {
+        this.state.selection.span = { passNumber, index };
+      }
+    }
+    PASS_NUMS.forEach((num) => this.renderTracks(num));
+  },
+
+  getVoiceTagOptions() {
+    const set = new Set();
+    PASS_NUMS.forEach((passNumber) => {
+      (this.state.passes[passNumber]?.diarizationSegments || []).forEach((segment) => {
+        const normalized = normalizeSpeakerId(segment?.speaker);
+        if (normalized) set.add(normalized);
+      });
+    });
+    (this.state.review.merged?.transcriptCues || []).forEach((cue) => {
+      const tag = this.extractVoiceTagValue(cue.text || '');
+      if (tag) set.add(tag);
+    });
+    if (!set.size) {
+      for (let i = 1; i <= 8; i += 1) {
+        set.add(`S${i}`);
+      }
+    }
+    return Array.from(set).sort((a, b) => {
+      const matchA = /^S(\d+)$/.exec(a);
+      const matchB = /^S(\d+)$/.exec(b);
+      if (matchA && matchB) {
+        return Number(matchA[1]) - Number(matchB[1]);
+      }
+      if (matchA) return -1;
+      if (matchB) return 1;
+      return a.localeCompare(b);
+    });
+  },
+
+  promptVoiceTagSelection(currentValue) {
+    return new Promise((resolve) => {
+      const root = this.elements.modalRoot;
+      if (!root) {
+        resolve(currentValue || '');
+        return;
+      }
+      root.innerHTML = '';
+      root.hidden = false;
+      const content = document.createElement('div');
+      content.className = 'review-modal__content';
+      const heading = document.createElement('h2');
+      heading.className = 'review-modal__title';
+      heading.textContent = 'Select speaker tag';
+      const body = document.createElement('div');
+      body.className = 'review-modal__body';
+      const label = document.createElement('label');
+      label.style.display = 'flex';
+      label.style.flexDirection = 'column';
+      label.style.gap = '8px';
+      label.textContent = 'Speaker';
+      const select = document.createElement('select');
+      select.style.padding = '8px';
+      select.style.fontSize = '14px';
+      const noneOption = document.createElement('option');
+      noneOption.value = '';
+      noneOption.textContent = 'None';
+      select.appendChild(noneOption);
+      this.getVoiceTagOptions().forEach((optionValue) => {
+        const opt = document.createElement('option');
+        opt.value = optionValue;
+        opt.textContent = optionValue;
+        select.appendChild(opt);
+      });
+      select.value = currentValue || '';
+      label.appendChild(select);
+      body.appendChild(label);
+      const actions = document.createElement('div');
+      actions.className = 'review-modal__actions';
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'review-modal__button';
+      cancel.textContent = 'Cancel';
+      const apply = document.createElement('button');
+      apply.type = 'button';
+      apply.className = 'review-modal__button';
+      apply.style.background = 'rgba(56, 189, 248, 0.35)';
+      apply.style.borderColor = 'rgba(56, 189, 248, 0.45)';
+      apply.textContent = 'Apply';
+      actions.appendChild(cancel);
+      actions.appendChild(apply);
+      content.appendChild(heading);
+      content.appendChild(body);
+      content.appendChild(actions);
+      root.appendChild(content);
+
+      const cleanup = (value) => {
+        root.hidden = true;
+        root.innerHTML = '';
+        document.removeEventListener('keydown', onKeyDown);
+        this.state.modal.cleanup = null;
+        resolve(value);
+      };
+      this.state.modal.cleanup = cleanup;
+
+      const onKeyDown = (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          cleanup(null);
+        } else if (event.key === 'Enter') {
+          event.preventDefault();
+          cleanup(select.value || '');
+        }
+      };
+      document.addEventListener('keydown', onKeyDown);
+      root.addEventListener(
+        'click',
+        (event) => {
+          if (event.target === root) {
+            cleanup(null);
+          }
+        },
+        { once: true },
+      );
+
+      cancel.addEventListener('click', () => cleanup(null));
+      apply.addEventListener('click', () => cleanup(select.value || ''));
+      window.setTimeout(() => select.focus(), 0);
+    });
+  },
+
+  async saveLocalDraft() {
+    if (!this.state.assetId) return false;
+    this.ensureMergedInitialized();
+    const errors = this.validateMergedState();
+    this.renderMergedValidation();
+    if (errors.length) {
+      return false;
+    }
+    const payload = {
+      merged: this.serializeMergedState(),
+      updatedAt: Date.now(),
+    };
+    const ok = await ReviewDraftStore.set(this.state.assetId, payload);
+    if (ok) {
+      this.state.review.localDraft = true;
+      this.state.review.lastDraftSavedAt = payload.updatedAt;
+      this.renderMergedValidation();
+    }
+    return ok;
+  },
+
+  serializeMergedState() {
+    const merged = this.state.review.merged || { transcriptCues: [], codeSwitchSpans: [] };
+    const cues = Array.isArray(merged.transcriptCues)
+      ? merged.transcriptCues.map((cue) => ({
+          start: Number(cue.start) || 0,
+          end: Number(cue.end) || 0,
+          text: cue.text || '',
+        }))
+      : [];
+    const spans = Array.isArray(merged.codeSwitchSpans)
+      ? merged.codeSwitchSpans.map((span) => ({
+          start: Number(span.start) || 0,
+          end: Number(span.end) || 0,
+          lang: toLanguageKey(span),
+        }))
+      : [];
+    return { transcriptCues: cues, codeSwitchSpans: spans };
+  },
+
+  async checkForLocalDraft() {
+    if (!this.state.assetId) return;
+    const existing = await ReviewDraftStore.get(this.state.assetId);
+    if (!existing || !existing.merged) return;
+    const choice = await this.showChoiceModal({
+      title: 'Restore local draft?',
+      body: 'We found a saved draft for this asset on this browser. Restore it?',
+      actions: [
+        { label: 'Restore draft', value: 'restore', primary: true },
+        { label: 'Discard draft', value: 'discard' },
+        { label: 'Cancel', value: 'cancel' },
+      ],
+    });
+    if (choice === 'restore') {
+      this.applyMergedDraft(existing);
+    } else if (choice === 'discard') {
+      await ReviewDraftStore.delete(this.state.assetId);
+      this.state.review.localDraft = false;
+      this.state.review.lastDraftSavedAt = null;
+      this.renderMergedValidation();
+    }
+  },
+
+  applyMergedDraft(record) {
+    if (!record || !record.merged) return;
+    const merged = {
+      transcriptCues: Array.isArray(record.merged.transcriptCues)
+        ? record.merged.transcriptCues.map((cue) => ({
+            start: Number(cue.start) || 0,
+            end: Number(cue.end) || 0,
+            text: cue.text || '',
+          }))
+        : [],
+      codeSwitchSpans: Array.isArray(record.merged.codeSwitchSpans)
+        ? record.merged.codeSwitchSpans.map((span) => ({
+            start: Number(span.start) || 0,
+            end: Number(span.end) || 0,
+            lang: toLanguageKey(span),
+          }))
+        : [],
+    };
+    this.state.review.merged = merged;
+    this.state.review.selectedCue = merged.transcriptCues.length ? 0 : -1;
+    this.state.review.localDraft = true;
+    this.state.review.lastDraftSavedAt = record.updatedAt || Date.now();
+    this.setEditingEnabled(true);
+    this.normalizeMergedCues();
+    this.normalizeMergedSpans();
+    this.validateMergedState();
+    this.renderMergedEditor();
+  },
+
+  markReviewOpened() {
+    if (!this.state.assetId) return;
+    if (typeof window === 'undefined' || !window.sessionStorage) return;
+    try {
+      window.sessionStorage.setItem(`hasOpenedReview:${this.state.assetId}`, 'true');
+    } catch {}
+  },
+
+  formatDraftTimestamp(timestamp) {
+    if (!timestamp) return '';
+    try {
+      const date = new Date(timestamp);
+      if (Number.isNaN(date.getTime())) return '';
+      return date.toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+    } catch {
+      return '';
+    }
   },
 
   bootstrap() {
@@ -574,6 +1076,8 @@ const ReviewPage = {
         this.updateHighlights(0);
         this.setMessage('');
         this.hideOverlay();
+        this.markReviewOpened();
+        this.checkForLocalDraft();
       })
       .catch((err) => {
         console.error('Review bootstrap failed', err);
@@ -729,14 +1233,30 @@ const ReviewPage = {
     this.state.review.selectedCue = transcriptCues.length ? 0 : -1;
     this.normalizeMergedCues();
     this.normalizeMergedSpans();
-    this.validateMergedCues();
+    this.validateMergedState();
   },
 
   toggleEditing() {
-    const next = !this.state.review.editingEnabled;
+    this.setEditingEnabled(!this.state.review.editingEnabled);
+  },
+
+  setEditingEnabled(enabled) {
+    const next = Boolean(enabled);
+    const prev = this.state.review.editingEnabled;
+    if (prev === next) {
+      if (next) {
+        this.ensureMergedInitialized();
+        this.renderMergedEditor();
+      } else {
+        this.setMergedOverlayVisible(false);
+      }
+      return;
+    }
     this.state.review.editingEnabled = next;
     if (next) {
       this.ensureMergedInitialized();
+    } else {
+      this.state.selection.span = null;
     }
     if (this.elements.toggleEdit) {
       this.elements.toggleEdit.textContent = next ? 'Disable Edit' : 'Enable Edit';
@@ -785,7 +1305,16 @@ const ReviewPage = {
     const errors = this.state.review.validationErrors || [];
     if (!errors.length) {
       el.classList.remove('has-errors');
-      el.textContent = 'All cues valid.';
+      const messages = ['All cues valid.'];
+      if (this.state.review.localDraft) {
+        const timestamp = this.formatDraftTimestamp(this.state.review.lastDraftSavedAt);
+        if (timestamp) {
+          messages.push(`Draft saved at ${timestamp}.`);
+        } else {
+          messages.push('Local draft pending save.');
+        }
+      }
+      el.textContent = messages.join(' ');
     } else {
       el.classList.add('has-errors');
       el.textContent = errors.join(' | ');
@@ -897,7 +1426,7 @@ const ReviewPage = {
     const cue = this.state.review.merged.transcriptCues[index];
     if (!cue) return;
     cue.text = text;
-    this.validateMergedCues();
+    this.validateMergedState();
     this.renderMergedValidation();
   },
 
@@ -1030,7 +1559,10 @@ const ReviewPage = {
     }));
     this.state.review.merged.codeSwitchSpans = spans;
     this.normalizeMergedSpans();
+    this.validateMergedState();
+    this.state.review.lastDraftSavedAt = null;
     this.renderMergedCodeSwitch();
+    this.renderMergedValidation();
   },
 
   async copySingleCodeSwitchSpan(passNumber, span) {
@@ -1060,7 +1592,10 @@ const ReviewPage = {
       lang: toLanguageKey(span),
     });
     this.normalizeMergedSpans();
+    this.validateMergedState();
+    this.state.review.lastDraftSavedAt = null;
     this.renderMergedCodeSwitch();
+    this.renderMergedValidation();
   },
 
   snapSpanToSilence(span) {
@@ -1209,18 +1744,19 @@ const ReviewPage = {
 
   updateMergedAfterCueChange() {
     this.normalizeMergedCues();
-    this.validateMergedCues();
+    this.validateMergedState();
+    this.state.review.lastDraftSavedAt = null;
     this.renderMergedEditor();
   },
 
-  validateMergedCues() {
+  validateMergedState() {
     const merged = this.state.review.merged;
     if (!merged) {
       this.state.review.validationErrors = [];
       return [];
     }
-    const cues = merged.transcriptCues || [];
     const errors = [];
+    const cues = Array.isArray(merged.transcriptCues) ? merged.transcriptCues : [];
     let prevEnd = null;
     cues.forEach((cue, index) => {
       const start = Number(cue.start) || 0;
@@ -1243,6 +1779,26 @@ const ReviewPage = {
       }
       prevEnd = end;
     });
+
+    const spans = Array.isArray(merged.codeSwitchSpans) ? [...merged.codeSwitchSpans] : [];
+    spans.sort((a, b) => (a.start - b.start) || (a.end - b.end));
+    let spanPrevEnd = null;
+    spans.forEach((span, index) => {
+      const start = Number(span.start) || 0;
+      const end = Number(span.end) || 0;
+      const duration = end - start;
+      if (end <= start) {
+        errors.push(`Code switch span ${index + 1} has invalid timing.`);
+      }
+      if (duration < 0.4) {
+        errors.push(`Code switch span ${index + 1} is shorter than 0.4s.`);
+      }
+      if (spanPrevEnd != null && start < spanPrevEnd - 1e-3) {
+        errors.push(`Code switch span ${index + 1} overlaps previous span.`);
+      }
+      spanPrevEnd = end;
+    });
+
     this.state.review.validationErrors = errors;
     return errors;
   },
@@ -1271,6 +1827,11 @@ const ReviewPage = {
       cue.text = `<v ${value}> ${cleaned.trimStart()}`.trim();
     }
     this.renderMergedCues();
+    if (this.elements.voiceTagSelect) {
+      this.elements.voiceTagSelect.value = value || '';
+    }
+    this.state.review.lastDraftSavedAt = null;
+    this.renderMergedValidation();
   },
 
   showChoiceModal({ title, body, actions } = {}) {
@@ -1300,8 +1861,10 @@ const ReviewPage = {
         root.hidden = true;
         root.innerHTML = '';
         document.removeEventListener('keydown', onKeyDown);
+        this.state.modal.cleanup = null;
         resolve(value);
       };
+      this.state.modal.cleanup = cleanup;
       const onKeyDown = (event) => {
         if (event.key === 'Escape') {
           event.preventDefault();
@@ -1346,11 +1909,12 @@ const ReviewPage = {
     const merged = [];
     DIFF_TABS.forEach((type) => {
       (diffs[type] || []).forEach((diff, index) => {
-        merged.push({ ...diff, type, index });
+        merged.push({ ...diff, type, index, t: diff.time });
       });
     });
     merged.sort((a, b) => a.time - b.time);
     this.state.diffTimeline = merged;
+    this.state.selection.diff = null;
   },
 
   renderDiffs() {
@@ -1365,17 +1929,19 @@ const ReviewPage = {
       empty.textContent = 'No differences';
       list.appendChild(empty);
     }
+    const active = this.state.selection.diff;
     diffs.forEach((diff, index) => {
       const item = document.createElement('li');
       item.className = 'diff-item';
-      if (this.state.activeDiff && this.state.activeDiff.type === type && this.state.activeDiff.index === index) {
+      if (active && active.type === type && active.index === index) {
         item.classList.add('is-active');
       }
       item.dataset.index = index;
       item.dataset.type = type;
       const time = document.createElement('span');
       time.className = 'diff-item__time';
-      time.textContent = formatTimecode(diff.time);
+      const diffTime = Number.isFinite(diff.time) ? diff.time : diff.t;
+      time.textContent = formatTimecode(diffTime);
       const label = document.createElement('span');
       label.className = 'diff-item__label';
       label.textContent = diff.label || 'Difference';
@@ -1399,17 +1965,19 @@ const ReviewPage = {
     const diff = diffs[index];
     if (!diff) return;
     this.state.activeTab = type;
-    this.state.activeDiff = { type, index };
-    this.seek(diff.time);
+    this.state.selection.diff = { type, index };
+    const targetTime = Number.isFinite(diff.time) ? diff.time : diff.t;
+    if (Number.isFinite(targetTime)) {
+      this.seek(targetTime);
+    }
     this.renderDiffs();
   },
 
   stepDiff(step) {
     if (!this.state.diffTimeline.length) return;
-    const currentIndex = this.state.activeDiff
-      ? this.state.diffTimeline.findIndex(
-          (entry) => entry.type === this.state.activeDiff.type && entry.index === this.state.activeDiff.index,
-        )
+    const active = this.state.selection.diff;
+    const currentIndex = active
+      ? this.state.diffTimeline.findIndex((entry) => entry.type === active.type && entry.index === active.index)
       : -1;
     let next = currentIndex + step;
     const total = this.state.diffTimeline.length;
@@ -1418,9 +1986,12 @@ const ReviewPage = {
     const target = this.state.diffTimeline[next];
     if (!target) return;
     this.state.activeTab = target.type;
-    this.state.activeDiff = { type: target.type, index: target.index };
+    this.state.selection.diff = { type: target.type, index: target.index };
     this.renderDiffs();
-    this.seek(target.time);
+    const time = Number.isFinite(target.time) ? target.time : target.t;
+    if (Number.isFinite(time)) {
+      this.seek(time);
+    }
   },
 
   seek(time) {
@@ -1487,7 +2058,7 @@ const ReviewPage = {
       const isEditing = !!this.state.review?.editingEnabled;
       csTrack.innerHTML = '';
       csTrack.classList.toggle('is-interactive', isEditing);
-      (pass.codeSwitchSpans || []).forEach((span) => {
+      (pass.codeSwitchSpans || []).forEach((span, spanIndex) => {
         const startRatio = Math.max(0, Math.min(1, span.start / duration));
         const endRatio = Math.max(0, Math.min(1, span.end / duration));
         const width = Math.max(0.5, (endRatio - startRatio) * 100);
@@ -1502,6 +2073,13 @@ const ReviewPage = {
         block.style.bottom = '0';
         block.style.background = spec.background;
         block.title = spec.label || key.toUpperCase();
+        if (
+          this.state.selection.span &&
+          this.state.selection.span.passNumber === passNumber &&
+          this.state.selection.span.index === spanIndex
+        ) {
+          block.classList.add('is-selected');
+        }
         if (isEditing) {
           const label = document.createElement('div');
           label.textContent = spec.label || key.toUpperCase();
@@ -1520,6 +2098,10 @@ const ReviewPage = {
             this.handleSpanCopyMenu(passNumber, span);
           });
           block.appendChild(copyBtn);
+          block.addEventListener('click', (event) => {
+            event.preventDefault();
+            this.setSpanSelection(passNumber, spanIndex);
+          });
         }
         csTrack.appendChild(block);
       });
