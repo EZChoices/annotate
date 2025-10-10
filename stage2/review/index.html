@@ -27,6 +27,7 @@
           </div>
         </div>
         <div class="review-header__actions">
+          <button id="toggleEdit" class="review-button">Enable Edit</button>
           <button id="reviewAssign" class="review-button" hidden>Assign to me</button>
           <div id="reviewAssignment" class="review-assignment"></div>
         </div>
@@ -96,6 +97,38 @@
           <p id="reviewMessage">Fetching passes…</p>
         </div>
       </section>
+
+      <section id="mergedOverlay" class="merged-overlay" hidden>
+        <div class="merged-overlay__panel">
+          <header class="merged-overlay__header">
+            <h2>Merged Review</h2>
+            <div class="merged-overlay__actions">
+              <label class="voice-tag-picker">
+                <span>Voice tag</span>
+                <select id="voiceTagSelect">
+                  <option value="">None</option>
+                  <option value="S1">S1</option>
+                  <option value="S2">S2</option>
+                  <option value="S3">S3</option>
+                  <option value="S4">S4</option>
+                  <option value="S5">S5</option>
+                  <option value="S6">S6</option>
+                  <option value="S7">S7</option>
+                  <option value="S8">S8</option>
+                </select>
+              </label>
+            </div>
+          </header>
+          <div id="mergedValidation" class="merged-validation" aria-live="polite"></div>
+          <div id="mergedCueList" class="merged-cue-list"></div>
+          <div class="merged-overlay__cs">
+            <h3>Code Switch Spans</h3>
+            <div id="mergedCsTrack" class="merged-cs-track"></div>
+          </div>
+        </div>
+      </section>
+
+      <div id="modalRoot" class="review-modal" hidden></div>
     </div>
 
     <script src="/public/vtt.js"></script>
