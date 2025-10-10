@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stage 2 Review</title>
+    <link rel="stylesheet" href="/stage2/review/style.css" />
+  </head>
+  <body>
+    <div id="reviewRoot" class="review-app">
+      <header class="review-header">
+        <nav class="review-header__nav">
+          <a id="reviewBack" class="review-back" href="/stage2/qa-dashboard.html">← Back to Queue</a>
+        </nav>
+        <div class="review-header__meta">
+          <div class="review-meta__row">
+            <span class="review-meta__label">Asset</span>
+            <span id="reviewAssetId" class="review-meta__value">—</span>
+          </div>
+          <div class="review-meta__row">
+            <span class="review-meta__label">Cell</span>
+            <span id="reviewCell" class="review-meta__value">—</span>
+          </div>
+          <div class="review-meta__row">
+            <span class="review-meta__label">Status</span>
+            <span id="reviewStatus" class="review-meta__value">—</span>
+          </div>
+        </div>
+        <div class="review-header__actions">
+          <button id="reviewAssign" class="review-button" hidden>Assign to me</button>
+          <div id="reviewAssignment" class="review-assignment"></div>
+        </div>
+      </header>
+
+      <section class="review-transport">
+        <div class="transport-controls">
+          <button id="controlRewind" class="review-button">⟲ 3s</button>
+          <button id="controlPlay" class="review-button">Play</button>
+          <span id="controlTime" class="transport-time">00:00.000</span>
+        </div>
+        <div class="transport-zoom">
+          <button id="zoomOut" class="review-button">−</button>
+          <button id="zoomIn" class="review-button">+</button>
+        </div>
+      </section>
+
+      <main class="review-layout">
+        <section class="review-pane" data-pass="1">
+          <header class="pane-header">
+            <h2>Pass 1</h2>
+            <span id="pass1Annotator" class="pane-header__meta"></span>
+          </header>
+          <div class="pane-body">
+            <div class="waveform-wrapper">
+              <canvas id="waveform1" class="waveform"></canvas>
+              <div id="csTrack1" class="cs-track"></div>
+              <div id="diarTrack1" class="diar-track"></div>
+            </div>
+            <div class="cue-list" id="cueList1"></div>
+            <audio id="audio1" class="review-audio" preload="auto"></audio>
+          </div>
+        </section>
+        <section class="review-pane" data-pass="2">
+          <header class="pane-header">
+            <h2>Pass 2</h2>
+            <span id="pass2Annotator" class="pane-header__meta"></span>
+          </header>
+          <div class="pane-body">
+            <div class="waveform-wrapper">
+              <canvas id="waveform2" class="waveform"></canvas>
+              <div id="csTrack2" class="cs-track"></div>
+              <div id="diarTrack2" class="diar-track"></div>
+            </div>
+            <div class="cue-list" id="cueList2"></div>
+            <audio id="audio2" class="review-audio" preload="auto"></audio>
+          </div>
+        </section>
+        <aside class="review-rail">
+          <header class="rail-header">
+            <h3>Differences</h3>
+            <div class="rail-tabs" role="tablist">
+              <button class="rail-tab is-active" data-tab="cs">CS Δ</button>
+              <button class="rail-tab" data-tab="vt">VT Δ</button>
+              <button class="rail-tab" data-tab="rttm">RTTM Δ</button>
+            </div>
+          </header>
+          <div class="rail-body">
+            <ul id="diffList" class="diff-list" data-active="cs"></ul>
+          </div>
+        </aside>
+      </main>
+
+      <section id="reviewEmpty" class="review-empty">
+        <div class="review-empty__content">
+          <h1>Loading</h1>
+          <p id="reviewMessage">Fetching passes…</p>
+        </div>
+      </section>
+    </div>
+
+    <script src="/public/vtt.js"></script>
+    <script type="module" src="/stage2/review/review-app.js"></script>
+  </body>
+</html>

@@ -10,6 +10,8 @@
     { "src": "/api/(.*)", "dest": "/api/$1.py" },
     { "src": "^/stage2$", "dest": "/stage2/index.html" },
     { "src": "^/stage2/$", "dest": "/stage2/index.html" },
+    { "src": "^/stage2/review$", "dest": "/stage2/review/index.html" },
+    { "src": "^/stage2/review/$", "dest": "/stage2/review/index.html" },
     { "src": "^/stage2/(.*)$", "dest": "/stage2/$1" },
     { "src": "^/meta-v2$", "dest": "/meta-v2/index.html" },
     { "src": "^/meta-v2/$", "dest": "/meta-v2/index.html" },

@@ -8,6 +8,9 @@ const STATIC_ASSETS = [
   '/stage2',
   '/stage2/index.html',
   '/stage2/qa-dashboard.html',
+  '/stage2/review/index.html',
+  '/stage2/review/style.css',
+  '/stage2/review/review-app.js',
   '/public/styles.css',
   '/public/idb.js',
   '/stage2/app.js'
