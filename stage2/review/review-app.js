@@ -4,6 +4,14 @@ const DRIFT_RESYNC_INTERVAL_MS = 3000;
 const VOICE_TAG_TOLERANCE = 0.12;
 const DIAR_BOUNDARY_TOLERANCE = 0.25;
 const CUE_ROW_HEIGHT = 88;
+const CUE_VIRTUAL_OVERSCAN = 6;
+const MERGED_CUE_ESTIMATED_HEIGHT = 184;
+const MERGED_CUE_MIN_HEIGHT = 112;
+const MERGED_CUE_OVERSCAN_PX = 800;
+const DIFF_PLAYBACK_INTERVAL = {
+  playback: 60,
+  scrub: 120,
+};
 const REVIEW_DRAFT_DB = 'stage2ReviewDrafts';
 const REVIEW_DRAFT_STORE = 'drafts';
 const REVIEW_DRAFT_VERSION = 1;
@@ -524,6 +532,14 @@ const ReviewPage = {
       offset: 0,
       lastSync: 0,
     },
+    diffPlayback: {
+      active: null,
+      rafId: null,
+      timeoutId: null,
+      pendingTime: null,
+      pendingMode: 'playback',
+      lastRender: 0,
+    },
     modal: {
       cleanup: null,
     },
@@ -537,6 +553,7 @@ const ReviewPage = {
     },
   },
   virtualizers: {},
+  mergedVirtualizer: null,
   elements: {},
   toasts: new Set(),
 
@@ -625,6 +642,7 @@ const ReviewPage = {
       this.syncRight(true);
       this.updateTimecode(audio.currentTime || 0);
       this.updateHighlights(audio.currentTime || 0);
+      this.requestDiffPlaybackUpdate(audio.currentTime || 0, 'scrub');
     });
     this.elements.zoomIn?.addEventListener('click', () => this.setZoom(this.state.zoom * 0.75));
     this.elements.zoomOut?.addEventListener('click', () => this.setZoom(this.state.zoom * 1.25));
@@ -706,12 +724,14 @@ const ReviewPage = {
           this.updateTimecode(time);
           this.syncRight();
           this.updateHighlights(time);
+          this.requestDiffPlaybackUpdate(time, 'playback');
         });
         audio.addEventListener('play', () => this.handleMasterPlay());
         audio.addEventListener('pause', () => this.handleMasterPause());
         audio.addEventListener('seeked', () => {
           this.syncRight(true);
           this.updateHighlights(audio.currentTime || 0);
+          this.requestDiffPlaybackUpdate(audio.currentTime || 0, 'scrub');
         });
       }
     });
@@ -1180,98 +1200,149 @@ const ReviewPage = {
   prepareVirtualizers() {
     PASS_NUMS.forEach((passNumber) => {
       const cues = this.state.passes[passNumber].transcriptCues || [];
-      this.virtualizers[passNumber] = this.createVirtualizer(passNumber, cues);
+      const existing = this.virtualizers[passNumber];
+      if (existing?.destroy) {
+        existing.destroy();
+      }
+      this.virtualizers[passNumber] = this.createPassVirtualizer(passNumber, () =>
+        this.state.passes[passNumber].transcriptCues || [],
+      );
     });
   },
 
-  createVirtualizer(passNumber, cues) {
+  createPassVirtualizer(passNumber, getItems) {
     const container = this.elements.cueLists[passNumber];
     if (!container) return null;
     container.innerHTML = '';
+    const scroller = document.createElement('div');
+    scroller.className = 'cue-list__scroller';
     const spacer = document.createElement('div');
     spacer.className = 'cue-list__spacer';
-    spacer.style.height = `${Math.max(1, cues.length * CUE_ROW_HEIGHT)}px`;
     const viewport = document.createElement('div');
     viewport.className = 'cue-list__viewport';
-    container.appendChild(spacer);
-    container.appendChild(viewport);
+    viewport.style.display = 'flex';
+    viewport.style.flexDirection = 'column';
+    scroller.appendChild(spacer);
+    scroller.appendChild(viewport);
+    container.appendChild(scroller);
+
     const state = {
-      cues,
-      container,
-      viewport,
-      spacer,
+      raf: null,
+      dirty: true,
       start: 0,
       end: 0,
-      raf: null,
+      items: [],
+      rows: new Map(),
     };
-    const render = () => {
-      state.raf = null;
-      const scrollTop = container.scrollTop || 0;
-      const height = container.clientHeight || 1;
-      const start = Math.max(0, Math.floor(scrollTop / CUE_ROW_HEIGHT) - 4);
-      const end = Math.min(cues.length, Math.ceil((scrollTop + height) / CUE_ROW_HEIGHT) + 4);
-      if (start === state.start && end === state.end && !state.dirty) {
-        return;
-      }
-      state.start = start;
-      state.end = end;
-      state.dirty = false;
-      viewport.style.transform = `translateY(${start * CUE_ROW_HEIGHT}px)`;
-      viewport.innerHTML = '';
-      for (let i = start; i < end; i += 1) {
-        const cue = cues[i];
-        if (!cue) continue;
-        const row = document.createElement('div');
+
+    const getCue = (index) => state.items[index];
+
+    const renderRow = (index, cue, existing) => {
+      if (!cue) return null;
+      let row = existing || null;
+      if (!row) {
+        row = document.createElement('div');
         row.className = 'cue-row';
-        if (this.state.highlightedCues[passNumber] === i) {
-          row.classList.add('is-highlighted');
-        }
+        row.dataset.index = String(index);
         const time = document.createElement('div');
         time.className = 'cue-time';
-        time.textContent = `${formatTimecode(cue.start)} → ${formatTimecode(cue.end)}`;
         const text = document.createElement('div');
         text.className = 'cue-text';
         const transcript = document.createElement('div');
-        transcript.textContent = cue.text || '';
+        transcript.className = 'cue-text__transcript';
         text.appendChild(transcript);
-        const translationText = this.getTranslationText(passNumber, cue);
-        if (translationText) {
-          const translation = document.createElement('div');
-          translation.className = 'cue-text__translation';
-          translation.textContent = translationText;
-          text.appendChild(translation);
-        }
+        const translation = document.createElement('div');
+        translation.className = 'cue-text__translation';
+        text.appendChild(translation);
+        const actions = document.createElement('div');
+        actions.className = 'cue-actions';
+        const copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.className = 'cue-copy-button';
+        copyBtn.textContent = 'Copy';
+        copyBtn.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const idx = Number(row?.dataset.index);
+          if (Number.isFinite(idx)) {
+            this.copyCueToMerged(passNumber, idx);
+          }
+        });
+        actions.appendChild(copyBtn);
         row.appendChild(time);
         row.appendChild(text);
-        if (this.state.review?.editingEnabled) {
-          const actions = document.createElement('div');
-          actions.className = 'cue-actions';
-          const copyBtn = document.createElement('button');
-          copyBtn.type = 'button';
-          copyBtn.className = 'cue-copy-button';
-          copyBtn.textContent = 'Copy';
-          copyBtn.addEventListener('click', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            this.copyCueToMerged(passNumber, i);
-          });
-          actions.appendChild(copyBtn);
-          row.appendChild(actions);
-        }
-        viewport.appendChild(row);
+        row.appendChild(actions);
+        row._refs = { time, transcript, translation, actions };
       }
+      row.dataset.index = String(index);
+      const refs = row._refs;
+      if (refs) {
+        refs.time.textContent = `${formatTimecode(cue.start)} → ${formatTimecode(cue.end)}`;
+        refs.transcript.textContent = cue.text || '';
+        const translationText = this.getTranslationText(passNumber, cue);
+        refs.translation.textContent = translationText || '';
+        refs.translation.style.display = translationText ? 'block' : 'none';
+        refs.actions.style.display = this.state.review?.editingEnabled ? 'flex' : 'none';
+      }
+      row.classList.toggle('is-highlighted', this.state.highlightedCues[passNumber] === index);
+      return row;
     };
+
+    const render = () => {
+      state.raf = null;
+      state.items = getItems() || [];
+      const count = state.items.length;
+      spacer.style.height = `${Math.max(1, count * CUE_ROW_HEIGHT)}px`;
+      const scrollTop = container.scrollTop || 0;
+      const height = container.clientHeight || 1;
+      const start = Math.max(0, Math.floor(scrollTop / CUE_ROW_HEIGHT) - CUE_VIRTUAL_OVERSCAN);
+      const end = Math.min(
+        count,
+        Math.ceil((scrollTop + height) / CUE_ROW_HEIGHT) + CUE_VIRTUAL_OVERSCAN,
+      );
+      if (!state.dirty && start === state.start && end === state.end) {
+        return;
+      }
+      state.start = start;
+      state.end = Math.min(count, Math.max(start + 1, end));
+      state.dirty = false;
+      viewport.style.transform = `translateY(${start * CUE_ROW_HEIGHT}px)`;
+      const prev = state.rows;
+      const next = new Map();
+      const fragment = document.createDocumentFragment();
+      for (let index = start; index < state.end; index += 1) {
+        const cue = getCue(index);
+        if (!cue) continue;
+        let row = prev.get(index) || null;
+        if (row) {
+          prev.delete(index);
+        }
+        row = renderRow(index, cue, row);
+        if (!row) continue;
+        fragment.appendChild(row);
+        next.set(index, row);
+      }
+      prev.forEach((row) => {
+        row.remove();
+      });
+      viewport.replaceChildren(fragment);
+      state.rows = next;
+    };
+
     const schedule = () => {
       if (state.raf != null) return;
       state.raf = window.requestAnimationFrame(render);
     };
+
     container.addEventListener('scroll', schedule);
     schedule();
+
     return {
-      ...state,
-      schedule,
-      render,
       setDirty: () => {
+        state.dirty = true;
+        schedule();
+      },
+      sync: () => {
         state.dirty = true;
         schedule();
       },
@@ -1279,6 +1350,325 @@ const ReviewPage = {
         if (!Number.isFinite(index) || index < 0) return;
         const top = index * CUE_ROW_HEIGHT - (container.clientHeight || 0) / 2;
         container.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+      },
+      destroy: () => {
+        if (state.raf != null) {
+          window.cancelAnimationFrame(state.raf);
+        }
+        container.removeEventListener('scroll', schedule);
+        state.rows.forEach((row) => row.remove());
+        state.rows.clear();
+      },
+    };
+  },
+
+  createMergedVirtualizer(getItems) {
+    const container = this.elements.mergedCueList;
+    if (!container) return null;
+    container.innerHTML = '';
+    container.classList.add('merged-cue-list--virtualized');
+    const scroller = document.createElement('div');
+    scroller.className = 'merged-cue-list__scroller';
+    const spacer = document.createElement('div');
+    spacer.className = 'merged-cue-list__spacer';
+    const viewport = document.createElement('div');
+    viewport.className = 'merged-cue-list__viewport';
+    scroller.appendChild(spacer);
+    scroller.appendChild(viewport);
+    container.appendChild(scroller);
+
+    const resizeObserver =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver((entries) => {
+            entries.forEach((entry) => {
+              const index = Number(entry.target.dataset.index);
+              if (!Number.isFinite(index)) return;
+              const height = entry.contentRect?.height;
+              if (Number.isFinite(height) && height > 0) {
+                updateHeight(index, height);
+              }
+            });
+          })
+        : null;
+
+    const state = {
+      raf: null,
+      dirty: true,
+      start: 0,
+      end: 0,
+      items: [],
+      count: 0,
+      rows: new Map(),
+      heights: [],
+      offsets: [],
+      totalHeight: 1,
+    };
+
+    const refreshItems = () => {
+      state.items = getItems() || [];
+      const nextCount = state.items.length;
+      if (nextCount !== state.count) {
+        const nextHeights = new Array(nextCount);
+        for (let i = 0; i < nextCount; i += 1) {
+          nextHeights[i] = state.heights[i] || MERGED_CUE_ESTIMATED_HEIGHT;
+        }
+        state.heights = nextHeights;
+        state.count = nextCount;
+        rebuildOffsets();
+      } else if (!state.offsets.length && nextCount > 0) {
+        rebuildOffsets();
+      }
+    };
+
+    const rebuildOffsets = () => {
+      const { count } = state;
+      state.offsets = new Array(count);
+      let total = 0;
+      for (let i = 0; i < count; i += 1) {
+        const height = Math.max(MERGED_CUE_MIN_HEIGHT, state.heights[i] || MERGED_CUE_ESTIMATED_HEIGHT);
+        state.heights[i] = height;
+        state.offsets[i] = total;
+        total += height;
+      }
+      state.totalHeight = total;
+      spacer.style.height = `${Math.max(1, total)}px`;
+    };
+
+    const updateHeight = (index, measured) => {
+      if (!Number.isFinite(index) || index < 0 || index >= state.count) return;
+      const height = Math.max(MERGED_CUE_MIN_HEIGHT, measured);
+      const current = state.heights[index] || MERGED_CUE_ESTIMATED_HEIGHT;
+      if (Math.abs(height - current) < 1) {
+        return;
+      }
+      const delta = height - current;
+      state.heights[index] = height;
+      for (let i = index + 1; i < state.offsets.length; i += 1) {
+        state.offsets[i] += delta;
+      }
+      state.totalHeight += delta;
+      spacer.style.height = `${Math.max(1, state.totalHeight)}px`;
+      state.dirty = true;
+      schedule();
+    };
+
+    const findStartIndex = (value) => {
+      let low = 0;
+      let high = state.count;
+      while (low < high) {
+        const mid = (low + high) >> 1;
+        const end = (state.offsets[mid] || 0) + (state.heights[mid] || MERGED_CUE_ESTIMATED_HEIGHT);
+        if (end <= value) {
+          low = mid + 1;
+        } else {
+          high = mid;
+        }
+      }
+      return low;
+    };
+
+    const findEndIndex = (value) => {
+      let low = 0;
+      let high = state.count;
+      while (low < high) {
+        const mid = (low + high) >> 1;
+        if ((state.offsets[mid] || 0) < value) {
+          low = mid + 1;
+        } else {
+          high = mid;
+        }
+      }
+      return low;
+    };
+
+    const renderRow = (index, cue, existing) => {
+      if (!cue) return null;
+      let row = existing || null;
+      if (!row) {
+        row = document.createElement('div');
+        row.className = 'merged-cue';
+        row.dataset.index = String(index);
+        const meta = document.createElement('div');
+        meta.className = 'merged-cue__meta';
+        const timing = document.createElement('div');
+        const duration = document.createElement('div');
+        const controls = document.createElement('div');
+        controls.className = 'merged-cue__controls';
+        const makeButton = (label, action) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'merged-cue__button';
+          button.textContent = label;
+          button.dataset.action = action;
+          button.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const idx = Number(row?.dataset.index);
+            if (Number.isFinite(idx)) {
+              this.handleMergedCueAction(action, idx);
+            }
+          });
+          return button;
+        };
+        controls.appendChild(makeButton('Split', 'split'));
+        controls.appendChild(makeButton('Merge ←', 'merge-prev'));
+        controls.appendChild(makeButton('Merge →', 'merge-next'));
+        controls.appendChild(makeButton('Start −0.2s', 'nudge-start--0.2'));
+        controls.appendChild(makeButton('Start +0.2s', 'nudge-start-0.2'));
+        controls.appendChild(makeButton('End −0.2s', 'nudge-end--0.2'));
+        controls.appendChild(makeButton('End +0.2s', 'nudge-end-0.2'));
+        meta.appendChild(timing);
+        meta.appendChild(duration);
+        meta.appendChild(controls);
+        const textarea = document.createElement('textarea');
+        textarea.className = 'merged-cue__textarea';
+        textarea.addEventListener('input', (event) => {
+          const idx = Number(row?.dataset.index);
+          if (!Number.isFinite(idx)) return;
+          this.updateMergedCueText(idx, event.target.value);
+        });
+        textarea.addEventListener('focus', () => {
+          const idx = Number(row?.dataset.index);
+          if (Number.isFinite(idx)) {
+            this.selectMergedCue(idx);
+          }
+        });
+        row.addEventListener('click', (event) => {
+          if (event.target.closest('button') || event.target.closest('textarea')) {
+            return;
+          }
+          const idx = Number(row?.dataset.index);
+          if (Number.isFinite(idx)) {
+            this.selectMergedCue(idx);
+          }
+        });
+        row.appendChild(meta);
+        row.appendChild(textarea);
+        row._refs = { timing, duration, textarea };
+      }
+      row.dataset.index = String(index);
+      row.classList.toggle('is-selected', this.state.review.selectedCue === index);
+      const refs = row._refs;
+      if (refs) {
+        const start = Number(cue.start) || 0;
+        const end = Number(cue.end) || 0;
+        refs.timing.textContent = `${formatTimecode(start)} → ${formatTimecode(end)}`;
+        const duration = Math.max(0, end - start);
+        refs.duration.textContent = `Duration: ${duration.toFixed(3)}s`;
+        if (document.activeElement !== refs.textarea || Number(row.dataset.index) !== index) {
+          if (refs.textarea.value !== (cue.text || '')) {
+            refs.textarea.value = cue.text || '';
+          }
+        }
+        refs.textarea.disabled = !this.state.review?.editingEnabled;
+      }
+      return row;
+    };
+
+    const render = () => {
+      state.raf = null;
+      refreshItems();
+      if (!state.count) {
+        viewport.replaceChildren();
+        spacer.style.height = '1px';
+        state.rows.forEach((row) => {
+          if (resizeObserver && row._observing) {
+            resizeObserver.unobserve(row);
+            row._observing = false;
+          }
+          row.remove();
+        });
+        state.rows.clear();
+        return;
+      }
+      const scrollTop = container.scrollTop || 0;
+      const clientHeight = container.clientHeight || 1;
+      const startPx = Math.max(0, scrollTop - MERGED_CUE_OVERSCAN_PX);
+      const endPx = scrollTop + clientHeight + MERGED_CUE_OVERSCAN_PX;
+      const start = Math.min(state.count - 1, findStartIndex(startPx));
+      let end = Math.max(start + 1, findEndIndex(endPx));
+      end = Math.min(state.count, end);
+      if (!state.dirty && start === state.start && end === state.end) {
+        return;
+      }
+      state.start = start;
+      state.end = end;
+      state.dirty = false;
+      viewport.style.transform = `translateY(${state.offsets[start] || 0}px)`;
+      const prev = state.rows;
+      const next = new Map();
+      const fragment = document.createDocumentFragment();
+      for (let index = start; index < end; index += 1) {
+        const cue = state.items[index];
+        if (!cue) continue;
+        let row = prev.get(index) || null;
+        if (row) {
+          prev.delete(index);
+        }
+        row = renderRow(index, cue, row);
+        if (!row) continue;
+        fragment.appendChild(row);
+        next.set(index, row);
+        if (resizeObserver && !row._observing) {
+          resizeObserver.observe(row);
+          row._observing = true;
+        }
+        const measured = row.getBoundingClientRect?.().height;
+        if (Number.isFinite(measured) && measured > 0) {
+          updateHeight(index, measured);
+        }
+      }
+      prev.forEach((row) => {
+        if (resizeObserver && row._observing) {
+          resizeObserver.unobserve(row);
+          row._observing = false;
+        }
+        row.remove();
+      });
+      state.rows = next;
+      viewport.replaceChildren(fragment);
+    };
+
+    const schedule = () => {
+      if (state.raf != null) return;
+      state.raf = window.requestAnimationFrame(render);
+    };
+
+    container.addEventListener('scroll', schedule);
+    schedule();
+
+    return {
+      setDirty: () => {
+        state.dirty = true;
+        schedule();
+      },
+      sync: () => {
+        refreshItems();
+        rebuildOffsets();
+        state.dirty = true;
+        schedule();
+      },
+      scrollToIndex: (index) => {
+        refreshItems();
+        if (!Number.isFinite(index) || index < 0 || index >= state.count) return;
+        const target = state.offsets[index] || 0;
+        const top = target - (container.clientHeight || 0) / 2;
+        container.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+      },
+      destroy: () => {
+        if (state.raf != null) {
+          window.cancelAnimationFrame(state.raf);
+        }
+        container.removeEventListener('scroll', schedule);
+        if (resizeObserver) {
+          state.rows.forEach((row) => {
+            if (row._observing) {
+              resizeObserver.unobserve(row);
+            }
+          });
+        }
+        state.rows.forEach((row) => row.remove());
+        state.rows.clear();
       },
     };
   },
@@ -1636,66 +2026,58 @@ const ReviewPage = {
   renderMergedCues() {
     const container = this.elements.mergedCueList;
     if (!container) return;
-    container.innerHTML = '';
     const merged = this.state.review.merged;
-    if (!merged || !Array.isArray(merged.transcriptCues) || !merged.transcriptCues.length) {
+    const cues = Array.isArray(merged?.transcriptCues) ? merged.transcriptCues : [];
+    if (!cues.length) {
+      if (this.mergedVirtualizer?.destroy) {
+        this.mergedVirtualizer.destroy();
+      }
+      this.mergedVirtualizer = null;
+      container.classList.remove('merged-cue-list--virtualized');
+      container.innerHTML = '';
       const empty = document.createElement('div');
       empty.style.color = 'var(--review-muted)';
       empty.textContent = 'No cues available in merged layer.';
       container.appendChild(empty);
       return;
     }
-    const makeButton = (label, handler) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'merged-cue__button';
-      button.textContent = label;
-      button.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        handler();
-      });
-      return button;
-    };
-    merged.transcriptCues.forEach((cue, index) => {
-      const row = document.createElement('div');
-      row.className = 'merged-cue';
-      if (this.state.review.selectedCue === index) {
-        row.classList.add('is-selected');
-      }
-      row.addEventListener('click', () => {
-        this.selectMergedCue(index);
-      });
-      const meta = document.createElement('div');
-      meta.className = 'merged-cue__meta';
-      const timing = document.createElement('div');
-      timing.textContent = `${formatTimecode(cue.start)} → ${formatTimecode(cue.end)}`;
-      const duration = document.createElement('div');
-      const dur = Number(cue.end) - Number(cue.start);
-      duration.textContent = `Duration: ${dur.toFixed(3)}s`;
-      meta.appendChild(timing);
-      meta.appendChild(duration);
-      const controls = document.createElement('div');
-      controls.className = 'merged-cue__controls';
-      controls.appendChild(makeButton('Split', () => this.splitMergedCue(index)));
-      controls.appendChild(makeButton('Merge ←', () => this.mergeMergedCue(index, 'prev')));
-      controls.appendChild(makeButton('Merge →', () => this.mergeMergedCue(index, 'next')));
-      controls.appendChild(makeButton('Start −0.2s', () => this.nudgeMergedCue(index, 'start', -0.2)));
-      controls.appendChild(makeButton('Start +0.2s', () => this.nudgeMergedCue(index, 'start', 0.2)));
-      controls.appendChild(makeButton('End −0.2s', () => this.nudgeMergedCue(index, 'end', -0.2)));
-      controls.appendChild(makeButton('End +0.2s', () => this.nudgeMergedCue(index, 'end', 0.2)));
-      meta.appendChild(controls);
-      const text = document.createElement('textarea');
-      text.className = 'merged-cue__textarea';
-      text.value = cue.text || '';
-      text.addEventListener('input', (event) => {
-        this.updateMergedCueText(index, event.target.value);
-      });
-      text.addEventListener('focus', () => this.selectMergedCue(index));
-      row.appendChild(meta);
-      row.appendChild(text);
-      container.appendChild(row);
-    });
+    if (!this.mergedVirtualizer) {
+      this.mergedVirtualizer = this.createMergedVirtualizer(() =>
+        this.state.review.merged?.transcriptCues || [],
+      );
+    } else {
+      this.mergedVirtualizer.sync();
+    }
+    this.mergedVirtualizer.setDirty();
+  },
+
+  handleMergedCueAction(action, index) {
+    if (!Number.isFinite(index) || index < 0) return;
+    switch (action) {
+      case 'split':
+        this.splitMergedCue(index);
+        break;
+      case 'merge-prev':
+        this.mergeMergedCue(index, 'prev');
+        break;
+      case 'merge-next':
+        this.mergeMergedCue(index, 'next');
+        break;
+      case 'nudge-start--0.2':
+        this.nudgeMergedCue(index, 'start', -0.2);
+        break;
+      case 'nudge-start-0.2':
+        this.nudgeMergedCue(index, 'start', 0.2);
+        break;
+      case 'nudge-end--0.2':
+        this.nudgeMergedCue(index, 'end', -0.2);
+        break;
+      case 'nudge-end-0.2':
+        this.nudgeMergedCue(index, 'end', 0.2);
+        break;
+      default:
+        break;
+    }
   },
 
   renderMergedCodeSwitch() {
@@ -1756,12 +2138,22 @@ const ReviewPage = {
     cue.text = text;
     this.validateMergedState();
     this.renderMergedValidation();
+    if (this.mergedVirtualizer) {
+      if (typeof window !== 'undefined' && window.requestAnimationFrame) {
+        window.requestAnimationFrame(() => this.mergedVirtualizer?.setDirty());
+      } else {
+        this.mergedVirtualizer.setDirty();
+      }
+    }
   },
 
   selectMergedCue(index) {
     if (!this.state.review.merged) return;
     this.state.review.selectedCue = index;
     this.renderMergedEditor();
+    if (this.mergedVirtualizer && Number.isFinite(index) && index >= 0) {
+      this.mergedVirtualizer.scrollToIndex(index);
+    }
   },
 
   splitMergedCue(index) {
@@ -2586,6 +2978,9 @@ const ReviewPage = {
     merged.sort((a, b) => a.time - b.time);
     this.state.diffTimeline = merged;
     this.state.selection.diff = null;
+    const audio = this.elements.audios?.[1];
+    const currentTime = audio ? audio.currentTime || 0 : 0;
+    this.requestDiffPlaybackUpdate(currentTime, 'scrub');
   },
 
   renderDiffs() {
@@ -2622,6 +3017,112 @@ const ReviewPage = {
     });
     this.elements.diffTabs?.forEach((tab) => {
       tab.classList.toggle('is-active', tab.dataset.tab === type);
+    });
+    this.updateDiffListPlaybackHighlight();
+  },
+
+  requestDiffPlaybackUpdate(time, mode = 'playback') {
+    const playback = this.state.diffPlayback;
+    if (!playback) return;
+    const sanitized = Number.isFinite(time) ? time : 0;
+    playback.pendingTime = sanitized;
+    playback.pendingMode = mode === 'scrub' ? 'scrub' : 'playback';
+
+    const schedule = () => {
+      playback.rafId = window.requestAnimationFrame(() => {
+        playback.rafId = null;
+        const now = performance.now();
+        const minInterval = DIFF_PLAYBACK_INTERVAL[playback.pendingMode] || DIFF_PLAYBACK_INTERVAL.playback;
+        const sinceLast = now - (playback.lastRender || 0);
+        if (sinceLast < minInterval) {
+          const delay = Math.max(0, minInterval - sinceLast);
+          playback.timeoutId = window.setTimeout(() => {
+            playback.timeoutId = null;
+            schedule();
+          }, delay);
+          return;
+        }
+        if (playback.timeoutId != null) {
+          window.clearTimeout(playback.timeoutId);
+          playback.timeoutId = null;
+        }
+        playback.lastRender = now;
+        const target = playback.pendingTime ?? sanitized;
+        playback.pendingTime = null;
+        this.applyDiffPlaybackState(target);
+      });
+    };
+
+    if (playback.timeoutId != null) {
+      window.clearTimeout(playback.timeoutId);
+      playback.timeoutId = null;
+    }
+    if (playback.rafId != null) {
+      return;
+    }
+    schedule();
+  },
+
+  applyDiffPlaybackState(time) {
+    const timeline = this.state.diffTimeline || [];
+    if (!timeline.length) {
+      if (this.state.diffPlayback.active) {
+        this.state.diffPlayback.active = null;
+        this.updateDiffListPlaybackHighlight();
+      }
+      return;
+    }
+    const normalized = Number.isFinite(time) ? time : 0;
+    const getTime = (entry) => {
+      const value = Number.isFinite(entry.time) ? entry.time : Number(entry.t);
+      return Number.isFinite(value) ? value : 0;
+    };
+    let beforeIndex = -1;
+    for (let i = 0; i < timeline.length; i += 1) {
+      if (getTime(timeline[i]) <= normalized) {
+        beforeIndex = i;
+      } else {
+        break;
+      }
+    }
+    let candidateIndex = beforeIndex;
+    if (candidateIndex < 0) {
+      candidateIndex = 0;
+    } else if (candidateIndex < timeline.length - 1) {
+      const beforeTime = getTime(timeline[candidateIndex]);
+      const afterTime = getTime(timeline[candidateIndex + 1]);
+      if (Math.abs(afterTime - normalized) < Math.abs(normalized - beforeTime)) {
+        candidateIndex += 1;
+      }
+    }
+    if (candidateIndex >= timeline.length) {
+      candidateIndex = timeline.length - 1;
+    }
+    const candidate = timeline[candidateIndex] || null;
+    const nextActive = candidate ? { type: candidate.type, index: candidate.index } : null;
+    const prevActive = this.state.diffPlayback.active;
+    const changed = !prevActive
+      ? !!nextActive
+      : !nextActive || prevActive.type !== nextActive.type || prevActive.index !== nextActive.index;
+    this.state.diffPlayback.active = nextActive;
+    if (changed) {
+      this.updateDiffListPlaybackHighlight();
+    }
+  },
+
+  updateDiffListPlaybackHighlight() {
+    const list = this.elements.diffList;
+    if (!list) return;
+    const playback = this.state.diffPlayback.active;
+    list.querySelectorAll('.diff-item').forEach((item) => {
+      const type = item.dataset.type;
+      const index = Number(item.dataset.index);
+      if (!type || !Number.isFinite(index)) {
+        item.classList.remove('is-playing');
+        return;
+      }
+      const isActive = playback && playback.type === type && playback.index === index;
+      item.classList.toggle('is-playing', Boolean(isActive));
     });
   },
 
@@ -2672,6 +3173,7 @@ const ReviewPage = {
     this.syncRight(true);
     this.updateTimecode(audio.currentTime || 0);
     this.updateHighlights(audio.currentTime || 0);
+    this.requestDiffPlaybackUpdate(audio.currentTime || 0, 'scrub');
     PASS_NUMS.forEach((passNumber) => {
       const virt = this.virtualizers[passNumber];
       const cues = this.state.passes[passNumber].transcriptCues || [];
@@ -2680,6 +3182,13 @@ const ReviewPage = {
         virt.scrollToIndex(index);
       }
     });
+    if (this.mergedVirtualizer) {
+      const merged = this.state.review.merged?.transcriptCues || [];
+      const index = findCueIndexAtTime(merged, time);
+      if (index >= 0) {
+        this.mergedVirtualizer.scrollToIndex(index);
+      }
+    }
   },
 
   updateTimecode(time) {
@@ -2717,6 +3226,10 @@ const ReviewPage = {
     // Placeholder: update waveforms if available
     this.renderTracks(1);
     this.renderTracks(2);
+    const audio = this.elements.audios[1];
+    if (audio) {
+      this.requestDiffPlaybackUpdate(audio.currentTime || 0, 'scrub');
+    }
   },
 
   renderTracks(passNumber) {
