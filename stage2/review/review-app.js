@@ -385,6 +385,12 @@ const ReviewPage = {
       offset: 0,
       lastSync: 0,
     },
+    review: {
+      editingEnabled: false,
+      merged: null,
+      selectedCue: -1,
+      validationErrors: [],
+    },
   },
   virtualizers: {},
   elements: {},
@@ -403,6 +409,13 @@ const ReviewPage = {
       playButton: document.getElementById('controlPlay'),
       rewindButton: document.getElementById('controlRewind'),
       timecode: document.getElementById('controlTime'),
+      toggleEdit: document.getElementById('toggleEdit'),
+      mergedOverlay: document.getElementById('mergedOverlay'),
+      mergedCueList: document.getElementById('mergedCueList'),
+      mergedValidation: document.getElementById('mergedValidation'),
+      voiceTagSelect: document.getElementById('voiceTagSelect'),
+      mergedCsTrack: document.getElementById('mergedCsTrack'),
+      modalRoot: document.getElementById('modalRoot'),
       zoomIn: document.getElementById('zoomIn'),
       zoomOut: document.getElementById('zoomOut'),
       audios: {
@@ -430,6 +443,9 @@ const ReviewPage = {
         2: document.getElementById('pass2Annotator'),
       },
     };
+    if (this.elements.voiceTagSelect) {
+      this.elements.voiceTagSelect.disabled = true;
+    }
     this.bindEvents();
     this.bootstrap();
   },
@@ -441,6 +457,12 @@ const ReviewPage = {
       } else {
         this.play();
       }
+    });
+    this.elements.toggleEdit?.addEventListener('click', () => {
+      this.toggleEditing();
+    });
+    this.elements.voiceTagSelect?.addEventListener('change', (event) => {
+      this.handleVoiceTagChange(event.target.value || '');
     });
     this.elements.rewindButton?.addEventListener('click', () => {
       const audio = this.elements.audios[1];
@@ -647,6 +669,21 @@ const ReviewPage = {
         }
         row.appendChild(time);
         row.appendChild(text);
+        if (this.state.review?.editingEnabled) {
+          const actions = document.createElement('div');
+          actions.className = 'cue-actions';
+          const copyBtn = document.createElement('button');
+          copyBtn.type = 'button';
+          copyBtn.className = 'cue-copy-button';
+          copyBtn.textContent = 'Copy';
+          copyBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.copyCueToMerged(passNumber, i);
+          });
+          actions.appendChild(copyBtn);
+          row.appendChild(actions);
+        }
         viewport.appendChild(row);
       }
     };
@@ -670,6 +707,631 @@ const ReviewPage = {
         container.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
       },
     };
+  },
+
+  ensureMergedInitialized() {
+    if (this.state.review.merged) return;
+    const pass1 = this.state.passes[1];
+    const transcriptCues = (pass1.transcriptCues || []).map((cue) => ({
+      start: Number(cue.start) || 0,
+      end: Number(cue.end) || 0,
+      text: cue.text || '',
+    }));
+    const codeSwitchSpans = (pass1.codeSwitchSpans || []).map((span) => ({
+      start: Number(span.start) || 0,
+      end: Number(span.end) || 0,
+      lang: toLanguageKey(span),
+    }));
+    this.state.review.merged = {
+      transcriptCues,
+      codeSwitchSpans,
+    };
+    this.state.review.selectedCue = transcriptCues.length ? 0 : -1;
+    this.normalizeMergedCues();
+    this.normalizeMergedSpans();
+    this.validateMergedCues();
+  },
+
+  toggleEditing() {
+    const next = !this.state.review.editingEnabled;
+    this.state.review.editingEnabled = next;
+    if (next) {
+      this.ensureMergedInitialized();
+    }
+    if (this.elements.toggleEdit) {
+      this.elements.toggleEdit.textContent = next ? 'Disable Edit' : 'Enable Edit';
+    }
+    if (this.elements.voiceTagSelect) {
+      this.elements.voiceTagSelect.disabled = !next;
+    }
+    this.setMergedOverlayVisible(next);
+    PASS_NUMS.forEach((passNumber) => {
+      const virt = this.virtualizers[passNumber];
+      if (virt) virt.setDirty();
+      this.renderTracks(passNumber);
+    });
+    if (next) {
+      this.renderMergedEditor();
+    }
+  },
+
+  setMergedOverlayVisible(visible) {
+    if (this.elements.mergedOverlay) {
+      this.elements.mergedOverlay.hidden = !visible;
+    }
+  },
+
+  renderMergedEditor() {
+    if (!this.state.review.editingEnabled) {
+      this.setMergedOverlayVisible(false);
+      return;
+    }
+    this.setMergedOverlayVisible(true);
+    this.renderMergedValidation();
+    this.renderMergedCues();
+    this.renderMergedCodeSwitch();
+    if (this.elements.voiceTagSelect) {
+      const index = this.state.review.selectedCue;
+      const cue = this.state.review.merged?.transcriptCues?.[index] || null;
+      const tag = cue ? this.extractVoiceTagValue(cue.text || '') : '';
+      this.elements.voiceTagSelect.value = tag || '';
+      this.elements.voiceTagSelect.disabled = !cue;
+    }
+  },
+
+  renderMergedValidation() {
+    const el = this.elements.mergedValidation;
+    if (!el) return;
+    const errors = this.state.review.validationErrors || [];
+    if (!errors.length) {
+      el.classList.remove('has-errors');
+      el.textContent = 'All cues valid.';
+    } else {
+      el.classList.add('has-errors');
+      el.textContent = errors.join(' | ');
+    }
+  },
+
+  renderMergedCues() {
+    const container = this.elements.mergedCueList;
+    if (!container) return;
+    container.innerHTML = '';
+    const merged = this.state.review.merged;
+    if (!merged || !Array.isArray(merged.transcriptCues) || !merged.transcriptCues.length) {
+      const empty = document.createElement('div');
+      empty.style.color = 'var(--review-muted)';
+      empty.textContent = 'No cues available in merged layer.';
+      container.appendChild(empty);
+      return;
+    }
+    const makeButton = (label, handler) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'merged-cue__button';
+      button.textContent = label;
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        handler();
+      });
+      return button;
+    };
+    merged.transcriptCues.forEach((cue, index) => {
+      const row = document.createElement('div');
+      row.className = 'merged-cue';
+      if (this.state.review.selectedCue === index) {
+        row.classList.add('is-selected');
+      }
+      row.addEventListener('click', () => {
+        this.selectMergedCue(index);
+      });
+      const meta = document.createElement('div');
+      meta.className = 'merged-cue__meta';
+      const timing = document.createElement('div');
+      timing.textContent = `${formatTimecode(cue.start)} → ${formatTimecode(cue.end)}`;
+      const duration = document.createElement('div');
+      const dur = Number(cue.end) - Number(cue.start);
+      duration.textContent = `Duration: ${dur.toFixed(3)}s`;
+      meta.appendChild(timing);
+      meta.appendChild(duration);
+      const controls = document.createElement('div');
+      controls.className = 'merged-cue__controls';
+      controls.appendChild(makeButton('Split', () => this.splitMergedCue(index)));
+      controls.appendChild(makeButton('Merge ←', () => this.mergeMergedCue(index, 'prev')));
+      controls.appendChild(makeButton('Merge →', () => this.mergeMergedCue(index, 'next')));
+      controls.appendChild(makeButton('Start −0.2s', () => this.nudgeMergedCue(index, 'start', -0.2)));
+      controls.appendChild(makeButton('Start +0.2s', () => this.nudgeMergedCue(index, 'start', 0.2)));
+      controls.appendChild(makeButton('End −0.2s', () => this.nudgeMergedCue(index, 'end', -0.2)));
+      controls.appendChild(makeButton('End +0.2s', () => this.nudgeMergedCue(index, 'end', 0.2)));
+      meta.appendChild(controls);
+      const text = document.createElement('textarea');
+      text.className = 'merged-cue__textarea';
+      text.value = cue.text || '';
+      text.addEventListener('input', (event) => {
+        this.updateMergedCueText(index, event.target.value);
+      });
+      text.addEventListener('focus', () => this.selectMergedCue(index));
+      row.appendChild(meta);
+      row.appendChild(text);
+      container.appendChild(row);
+    });
+  },
+
+  renderMergedCodeSwitch() {
+    const track = this.elements.mergedCsTrack;
+    if (!track) return;
+    track.innerHTML = '';
+    const merged = this.state.review.merged;
+    if (!merged) return;
+    const spans = merged.codeSwitchSpans || [];
+    const duration = this.state.clipDuration;
+    if (!spans.length || !Number.isFinite(duration) || duration <= 0) {
+      const empty = document.createElement('div');
+      empty.style.color = 'var(--review-muted)';
+      empty.style.padding = '12px';
+      empty.textContent = 'No code switch spans in merged layer.';
+      track.appendChild(empty);
+      return;
+    }
+    spans.forEach((span) => {
+      const block = document.createElement('div');
+      block.className = 'cs-block';
+      const startRatio = Math.max(0, Math.min(1, span.start / duration));
+      const endRatio = Math.max(0, Math.min(1, span.end / duration));
+      block.style.position = 'absolute';
+      block.style.top = '0';
+      block.style.bottom = '0';
+      block.style.left = `${startRatio * 100}%`;
+      block.style.width = `${Math.max(0.5, (endRatio - startRatio) * 100)}%`;
+      const key = toLanguageKey(span);
+      const spec = CS_COLORS[key] || CS_COLORS.other;
+      block.style.background = spec.background;
+      block.style.color = spec.color || '#f8fafc';
+      block.textContent = spec.label || key.toUpperCase();
+      track.appendChild(block);
+    });
+  },
+
+  updateMergedCueText(index, text) {
+    if (!this.state.review.merged?.transcriptCues) return;
+    const cue = this.state.review.merged.transcriptCues[index];
+    if (!cue) return;
+    cue.text = text;
+    this.validateMergedCues();
+    this.renderMergedValidation();
+  },
+
+  selectMergedCue(index) {
+    if (!this.state.review.merged) return;
+    this.state.review.selectedCue = index;
+    this.renderMergedEditor();
+  },
+
+  splitMergedCue(index) {
+    const merged = this.state.review.merged;
+    if (!merged) return;
+    const cues = merged.transcriptCues || [];
+    const cue = cues[index];
+    if (!cue) return;
+    const midpoint = (Number(cue.start) + Number(cue.end)) / 2;
+    const response = window.prompt('Split cue at time (seconds):', midpoint.toFixed(3));
+    const value = Number(response);
+    if (!Number.isFinite(value)) return;
+    const splitTime = Math.max(cue.start + 0.05, Math.min(cue.end - 0.05, value));
+    if (!(splitTime > cue.start && splitTime < cue.end)) return;
+    const adjusted = Number(splitTime.toFixed(3));
+    const first = { ...cue, end: adjusted };
+    const second = { ...cue, start: adjusted };
+    cues.splice(index, 1, first, second);
+    this.state.review.selectedCue = index;
+    this.updateMergedAfterCueChange();
+  },
+
+  mergeMergedCue(index, direction) {
+    const merged = this.state.review.merged;
+    if (!merged) return;
+    const cues = merged.transcriptCues || [];
+    const cue = cues[index];
+    if (!cue) return;
+    const neighborIndex = direction === 'prev' ? index - 1 : index + 1;
+    const neighbor = cues[neighborIndex];
+    if (!neighbor) return;
+    const primaryIndex = direction === 'prev' ? neighborIndex : index;
+    const primary = cues[primaryIndex];
+    const secondary = direction === 'prev' ? cue : neighbor;
+    primary.start = Math.min(primary.start, secondary.start);
+    primary.end = Math.max(primary.end, secondary.end);
+    const textA = primary.text || '';
+    const textB = secondary.text || '';
+    primary.text = [textA, textB].filter(Boolean).join('\n').trim();
+    cues.splice(direction === 'prev' ? index : neighborIndex, 1);
+    this.state.review.selectedCue = primaryIndex;
+    this.updateMergedAfterCueChange();
+  },
+
+  nudgeMergedCue(index, edge, delta) {
+    const merged = this.state.review.merged;
+    if (!merged) return;
+    const cues = merged.transcriptCues || [];
+    const cue = cues[index];
+    if (!cue) return;
+    const next = { start: cue.start, end: cue.end };
+    if (edge === 'start') {
+      const prevEnd = index > 0 ? cues[index - 1].end : 0;
+      const minStart = prevEnd != null ? prevEnd + 0.01 : 0;
+      const maxStart = next.end - 0.1;
+      next.start = Math.max(minStart, Math.min(maxStart, next.start + delta));
+    } else {
+      const nextStart = index < cues.length - 1 ? cues[index + 1].start : Number.isFinite(this.state.clipDuration) ? this.state.clipDuration : next.end + delta;
+      const maxEnd = nextStart != null ? nextStart - 0.01 : next.end + delta;
+      const minEnd = next.start + 0.1;
+      next.end = Math.max(minEnd, Math.min(maxEnd, next.end + delta));
+    }
+    cue.start = Number(next.start.toFixed(3));
+    cue.end = Number(next.end.toFixed(3));
+    if (cue.end <= cue.start) {
+      cue.end = cue.start + 0.1;
+    }
+    this.state.review.selectedCue = index;
+    this.updateMergedAfterCueChange();
+  },
+
+  copyCueToMerged(passNumber, cueIndex) {
+    if (!this.state.review.editingEnabled) return;
+    this.ensureMergedInitialized();
+    const source = this.state.passes[passNumber]?.transcriptCues?.[cueIndex];
+    if (!source) return;
+    const merged = this.state.review.merged;
+    const cues = merged.transcriptCues;
+    const candidate = {
+      start: Number(source.start) || 0,
+      end: Number(source.end) || 0,
+      text: source.text || '',
+    };
+    const mid = (candidate.start + candidate.end) / 2;
+    const targetIndex = findCueIndexAtTime(cues, mid);
+    if (targetIndex >= 0) {
+      cues.splice(targetIndex, 1, candidate);
+      this.state.review.selectedCue = targetIndex;
+    } else {
+      cues.push(candidate);
+      this.normalizeMergedCues();
+      const idx = findCueIndexAtTime(cues, mid);
+      this.state.review.selectedCue = idx >= 0 ? idx : cues.length - 1;
+    }
+    this.updateMergedAfterCueChange();
+  },
+
+  async handleSpanCopyMenu(passNumber, span) {
+    if (!this.state.review.editingEnabled) return;
+    const choice = await this.showChoiceModal({
+      title: 'Copy code switch span',
+      body: 'Choose how to copy this span into the merged layer.',
+      actions: [
+        { label: 'Copy span only', value: 'single', primary: true },
+        { label: 'Copy entire pass', value: 'all' },
+        { label: 'Cancel', value: 'cancel' },
+      ],
+    });
+    if (choice === 'all') {
+      this.copyAllCodeSwitchSpans(passNumber);
+    } else if (choice === 'single') {
+      await this.copySingleCodeSwitchSpan(passNumber, span);
+    }
+  },
+
+  copyAllCodeSwitchSpans(passNumber) {
+    if (!this.state.review.editingEnabled) return;
+    this.ensureMergedInitialized();
+    const spans = (this.state.passes[passNumber]?.codeSwitchSpans || []).map((span) => ({
+      start: Number(span.start) || 0,
+      end: Number(span.end) || 0,
+      lang: toLanguageKey(span),
+    }));
+    this.state.review.merged.codeSwitchSpans = spans;
+    this.normalizeMergedSpans();
+    this.renderMergedCodeSwitch();
+  },
+
+  async copySingleCodeSwitchSpan(passNumber, span) {
+    if (!span) return;
+    this.ensureMergedInitialized();
+    let candidate = {
+      start: Number(span.start) || 0,
+      end: Number(span.end) || 0,
+      lang: toLanguageKey(span),
+    };
+    if (passNumber === 2) {
+      candidate = this.snapSpanToSilence(candidate);
+    }
+    const ensured = await this.ensureSpanMinimumDuration(candidate);
+    if (!ensured) return;
+    const resolved = await this.resolveSpanConflicts(ensured);
+    if (!resolved) return;
+    this.insertMergedSpan(resolved);
+  },
+
+  insertMergedSpan(span) {
+    const merged = this.state.review.merged;
+    if (!merged) return;
+    merged.codeSwitchSpans.push({
+      start: Number(span.start) || 0,
+      end: Number(span.end) || 0,
+      lang: toLanguageKey(span),
+    });
+    this.normalizeMergedSpans();
+    this.renderMergedCodeSwitch();
+  },
+
+  snapSpanToSilence(span) {
+    const boundaries = this.getSilenceBoundaries();
+    const snapped = { ...span };
+    const startSnap = this.snapTimeToBoundary(span.start, boundaries);
+    const endSnap = this.snapTimeToBoundary(span.end, boundaries);
+    if (startSnap != null) snapped.start = startSnap;
+    if (endSnap != null) snapped.end = endSnap;
+    if (snapped.end <= snapped.start) {
+      snapped.end = snapped.start + Math.max(0.1, span.end - span.start);
+    }
+    return snapped;
+  },
+
+  snapTimeToBoundary(value, boundaries, tolerance = 0.12) {
+    let best = null;
+    boundaries.forEach((boundary) => {
+      const delta = Math.abs(boundary - value);
+      if (delta <= tolerance && (!best || delta < best.delta)) {
+        best = { value: boundary, delta };
+      }
+    });
+    return best ? Number(best.value.toFixed(3)) : value;
+  },
+
+  getSilenceBoundaries() {
+    const set = new Set();
+    PASS_NUMS.forEach((passNumber) => {
+      (this.state.passes[passNumber]?.transcriptCues || []).forEach((cue) => {
+        set.add(Number(cue.start) || 0);
+        set.add(Number(cue.end) || 0);
+      });
+    });
+    (this.state.review.merged?.transcriptCues || []).forEach((cue) => {
+      set.add(Number(cue.start) || 0);
+      set.add(Number(cue.end) || 0);
+    });
+    const arr = Array.from(set).filter((value) => Number.isFinite(value));
+    arr.sort((a, b) => a - b);
+    return arr;
+  },
+
+  async ensureSpanMinimumDuration(span) {
+    const duration = span.end - span.start;
+    if (duration >= 0.4) {
+      return span;
+    }
+    const choice = await this.showChoiceModal({
+      title: 'Span too short',
+      body: `The copied span would be ${duration.toFixed(3)}s. Expand to the minimum 0.4s?`,
+      actions: [
+        { label: 'Expand to 0.4s', value: 'expand', primary: true },
+        { label: 'Cancel', value: 'cancel' },
+      ],
+    });
+    if (choice === 'expand') {
+      const mid = (span.start + span.end) / 2;
+      const half = 0.2;
+      let start = mid - half;
+      let end = mid + half;
+      if (start < 0) {
+        end += -start;
+        start = 0;
+      }
+      if (Number.isFinite(this.state.clipDuration) && end > this.state.clipDuration) {
+        const diff = end - this.state.clipDuration;
+        end = this.state.clipDuration;
+        start = Math.max(0, start - diff);
+      }
+      return { ...span, start: Number(start.toFixed(3)), end: Number(end.toFixed(3)) };
+    }
+    if (choice === 'cancel') {
+      return null;
+    }
+    return span;
+  },
+
+  async resolveSpanConflicts(candidate) {
+    const merged = this.state.review.merged;
+    if (!merged) return candidate;
+    const spans = merged.codeSwitchSpans || [];
+    const overlaps = spans.filter((existing) => existing.end > candidate.start && existing.start < candidate.end);
+    if (!overlaps.length) {
+      return candidate;
+    }
+    const choice = await this.showChoiceModal({
+      title: 'Overlap detected',
+      body: 'The copied span overlaps existing merged spans. Choose how to resolve the conflict.',
+      actions: [
+        { label: 'Keep existing', value: 'keep' },
+        { label: 'Replace', value: 'replace', primary: true },
+        { label: 'Merge (union)', value: 'merge' },
+      ],
+    });
+    if (choice === 'keep' || !choice) {
+      return null;
+    }
+    if (choice === 'replace') {
+      merged.codeSwitchSpans = spans.filter((existing) => !overlaps.includes(existing));
+      return candidate;
+    }
+    if (choice === 'merge') {
+      const unionStart = Math.min(candidate.start, ...overlaps.map((span) => span.start));
+      const unionEnd = Math.max(candidate.end, ...overlaps.map((span) => span.end));
+      merged.codeSwitchSpans = spans.filter((existing) => !overlaps.includes(existing));
+      return { ...candidate, start: unionStart, end: unionEnd };
+    }
+    return candidate;
+  },
+
+  normalizeMergedCues() {
+    const merged = this.state.review.merged;
+    if (!merged) return;
+    const cues = merged.transcriptCues || [];
+    cues.sort((a, b) => (a.start - b.start) || (a.end - b.end));
+    cues.forEach((cue) => {
+      cue.start = Number((Number(cue.start) || 0).toFixed(3));
+      cue.end = Number((Number(cue.end) || 0).toFixed(3));
+      cue.text = cue.text || '';
+    });
+  },
+
+  normalizeMergedSpans() {
+    const merged = this.state.review.merged;
+    if (!merged) return;
+    const spans = merged.codeSwitchSpans || [];
+    spans.sort((a, b) => (a.start - b.start) || (a.end - b.end));
+    const result = [];
+    spans.forEach((span) => {
+      const clean = {
+        start: Number((Number(span.start) || 0).toFixed(3)),
+        end: Number((Number(span.end) || 0).toFixed(3)),
+        lang: toLanguageKey(span),
+      };
+      const last = result[result.length - 1];
+      if (last && clean.start <= last.end) {
+        last.end = Math.max(last.end, clean.end);
+        last.lang = clean.lang;
+      } else {
+        result.push(clean);
+      }
+    });
+    merged.codeSwitchSpans = result;
+  },
+
+  updateMergedAfterCueChange() {
+    this.normalizeMergedCues();
+    this.validateMergedCues();
+    this.renderMergedEditor();
+  },
+
+  validateMergedCues() {
+    const merged = this.state.review.merged;
+    if (!merged) {
+      this.state.review.validationErrors = [];
+      return [];
+    }
+    const cues = merged.transcriptCues || [];
+    const errors = [];
+    let prevEnd = null;
+    cues.forEach((cue, index) => {
+      const start = Number(cue.start) || 0;
+      const end = Number(cue.end) || 0;
+      const duration = end - start;
+      if (end <= start) {
+        errors.push(`Cue ${index + 1} has invalid timing.`);
+      }
+      if (duration < 0.6 || duration > 6.0) {
+        errors.push(`Cue ${index + 1} duration ${duration.toFixed(2)}s is out of bounds.`);
+      }
+      if (prevEnd != null) {
+        if (start < prevEnd - 1e-3) {
+          errors.push(`Cue ${index + 1} overlaps previous cue.`);
+        }
+        const gap = start - prevEnd;
+        if (gap > 0.5) {
+          errors.push(`Gap before cue ${index + 1} exceeds 0.5s.`);
+        }
+      }
+      prevEnd = end;
+    });
+    this.state.review.validationErrors = errors;
+    return errors;
+  },
+
+  extractVoiceTagValue(text) {
+    if (!text) return '';
+    const match = /^<v\s+S(\d+)>/i.exec(text.trim());
+    if (match) {
+      return `S${match[1]}`;
+    }
+    return '';
+  },
+
+  handleVoiceTagChange(value) {
+    if (!this.state.review.editingEnabled) return;
+    const merged = this.state.review.merged;
+    if (!merged) return;
+    const index = this.state.review.selectedCue;
+    if (index < 0) return;
+    const cue = merged.transcriptCues?.[index];
+    if (!cue) return;
+    const cleaned = (cue.text || '').replace(/^<v\s+S\d+>\s*/i, '');
+    if (!value) {
+      cue.text = cleaned.trimStart();
+    } else {
+      cue.text = `<v ${value}> ${cleaned.trimStart()}`.trim();
+    }
+    this.renderMergedCues();
+  },
+
+  showChoiceModal({ title, body, actions } = {}) {
+    return new Promise((resolve) => {
+      const root = this.elements.modalRoot;
+      if (!root) {
+        resolve(null);
+        return;
+      }
+      root.innerHTML = '';
+      root.hidden = false;
+      const content = document.createElement('div');
+      content.className = 'review-modal__content';
+      const heading = document.createElement('h2');
+      heading.className = 'review-modal__title';
+      heading.textContent = title || 'Select an option';
+      const message = document.createElement('div');
+      message.className = 'review-modal__body';
+      message.textContent = body || '';
+      const actionsEl = document.createElement('div');
+      actionsEl.className = 'review-modal__actions';
+      content.appendChild(heading);
+      content.appendChild(message);
+      content.appendChild(actionsEl);
+      root.appendChild(content);
+      const cleanup = (value) => {
+        root.hidden = true;
+        root.innerHTML = '';
+        document.removeEventListener('keydown', onKeyDown);
+        resolve(value);
+      };
+      const onKeyDown = (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          cleanup(null);
+        }
+      };
+      document.addEventListener('keydown', onKeyDown);
+      root.addEventListener(
+        'click',
+        (event) => {
+          if (event.target === root) {
+            cleanup(null);
+          }
+        },
+        { once: true },
+      );
+      const list = Array.isArray(actions) && actions.length ? actions : [{ label: 'Close', value: null }];
+      list.forEach((action) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'review-modal__button';
+        if (action.primary) {
+          button.style.background = 'rgba(56, 189, 248, 0.35)';
+          button.style.borderColor = 'rgba(56, 189, 248, 0.45)';
+        }
+        button.textContent = action.label || 'Select';
+        button.addEventListener('click', () => cleanup(action.value));
+        actionsEl.appendChild(button);
+      });
+    });
   },
 
   computeDiffs() {
@@ -822,12 +1484,15 @@ const ReviewPage = {
     const diarTrack = this.elements.diarTracks[passNumber];
     const pass = this.state.passes[passNumber];
     if (csTrack) {
+      const isEditing = !!this.state.review?.editingEnabled;
       csTrack.innerHTML = '';
+      csTrack.classList.toggle('is-interactive', isEditing);
       (pass.codeSwitchSpans || []).forEach((span) => {
         const startRatio = Math.max(0, Math.min(1, span.start / duration));
         const endRatio = Math.max(0, Math.min(1, span.end / duration));
         const width = Math.max(0.5, (endRatio - startRatio) * 100);
         const block = document.createElement('div');
+        block.className = 'cs-block';
         const key = toLanguageKey(span);
         const spec = CS_COLORS[key] || CS_COLORS.other;
         block.style.position = 'absolute';
@@ -837,6 +1502,25 @@ const ReviewPage = {
         block.style.bottom = '0';
         block.style.background = spec.background;
         block.title = spec.label || key.toUpperCase();
+        if (isEditing) {
+          const label = document.createElement('div');
+          label.textContent = spec.label || key.toUpperCase();
+          label.style.padding = '4px 6px';
+          label.style.fontSize = '11px';
+          label.style.fontWeight = '600';
+          label.style.color = spec.color || '#e2e8f0';
+          block.appendChild(label);
+          const copyBtn = document.createElement('button');
+          copyBtn.type = 'button';
+          copyBtn.className = 'cs-block__copy';
+          copyBtn.textContent = 'Copy';
+          copyBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.handleSpanCopyMenu(passNumber, span);
+          });
+          block.appendChild(copyBtn);
+        }
         csTrack.appendChild(block);
       });
     }
