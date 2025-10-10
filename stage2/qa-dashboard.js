@@ -1758,12 +1758,20 @@
       set.add(assetId);
       persistAdjudicationOpenedSet();
     }
+    try {
+      sessionStorage.setItem(`hasOpenedReview:${assetId}`, 'true');
+    } catch {}
   }
 
   function hasAdjudicationAssetOpened(assetId) {
     if (!assetId) return false;
     const set = getAdjudicationOpenedSet();
-    return set.has(assetId);
+    if (set.has(assetId)) return true;
+    try {
+      return sessionStorage.getItem(`hasOpenedReview:${assetId}`) === 'true';
+    } catch {
+      return false;
+    }
   }
 
   function normalizeDiffPreviewData(raw) {
