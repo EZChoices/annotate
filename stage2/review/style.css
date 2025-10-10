@@ -101,6 +101,22 @@ body {
   cursor: not-allowed;
 }
 
+.review-button__spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: rgba(255, 255, 255, 0.85);
+  animation: review-spin 0.9s linear infinite;
+  display: inline-block;
+  margin-right: 8px;
+  vertical-align: -2px;
+}
+
+.review-button__label {
+  vertical-align: middle;
+}
+
 .review-transport {
   display: flex;
   align-items: center;
@@ -662,4 +678,66 @@ body {
 .review-modal__button:hover {
   background: rgba(56, 189, 248, 0.35);
   border-color: rgba(56, 189, 248, 0.45);
+}
+.review-toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.review-toast {
+  min-width: 240px;
+  max-width: 320px;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 10px;
+  padding: 12px 16px;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.45);
+  color: var(--review-text);
+  font-size: 14px;
+  line-height: 1.4;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.review-toast--success {
+  border-color: rgba(74, 222, 128, 0.5);
+  background: rgba(22, 163, 74, 0.2);
+}
+
+.review-toast--error {
+  border-color: rgba(248, 113, 113, 0.5);
+  background: rgba(248, 113, 113, 0.22);
+}
+
+.review-toast__icon {
+  font-size: 16px;
+}
+
+.review-toast__message {
+  flex: 1 1 auto;
+}
+
+.review-toast__close {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+@keyframes review-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
