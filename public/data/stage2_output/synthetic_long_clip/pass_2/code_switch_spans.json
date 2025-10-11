@@ -1,0 +1,1004 @@
+{
+  "spans": [
+    {
+      "start": 0,
+      "end": 4.275,
+      "lang": "fra"
+    },
+    {
+      "start": 4.5,
+      "end": 8.775,
+      "lang": "ara"
+    },
+    {
+      "start": 9,
+      "end": 13.275,
+      "lang": "other"
+    },
+    {
+      "start": 13.5,
+      "end": 17.775,
+      "lang": "eng"
+    },
+    {
+      "start": 18,
+      "end": 22.275,
+      "lang": "fra"
+    },
+    {
+      "start": 22.5,
+      "end": 26.775,
+      "lang": "ara"
+    },
+    {
+      "start": 27,
+      "end": 31.275,
+      "lang": "other"
+    },
+    {
+      "start": 31.5,
+      "end": 35.775,
+      "lang": "eng"
+    },
+    {
+      "start": 36,
+      "end": 40.275,
+      "lang": "fra"
+    },
+    {
+      "start": 40.5,
+      "end": 44.775,
+      "lang": "ara"
+    },
+    {
+      "start": 45,
+      "end": 49.275,
+      "lang": "other"
+    },
+    {
+      "start": 49.5,
+      "end": 53.775,
+      "lang": "eng"
+    },
+    {
+      "start": 54,
+      "end": 58.275,
+      "lang": "fra"
+    },
+    {
+      "start": 58.5,
+      "end": 62.775,
+      "lang": "ara"
+    },
+    {
+      "start": 63,
+      "end": 67.275,
+      "lang": "other"
+    },
+    {
+      "start": 67.5,
+      "end": 71.775,
+      "lang": "eng"
+    },
+    {
+      "start": 72,
+      "end": 76.275,
+      "lang": "fra"
+    },
+    {
+      "start": 76.5,
+      "end": 80.775,
+      "lang": "ara"
+    },
+    {
+      "start": 81,
+      "end": 85.275,
+      "lang": "other"
+    },
+    {
+      "start": 85.5,
+      "end": 89.775,
+      "lang": "eng"
+    },
+    {
+      "start": 90,
+      "end": 94.275,
+      "lang": "fra"
+    },
+    {
+      "start": 94.5,
+      "end": 98.775,
+      "lang": "ara"
+    },
+    {
+      "start": 99,
+      "end": 103.275,
+      "lang": "other"
+    },
+    {
+      "start": 103.5,
+      "end": 107.775,
+      "lang": "eng"
+    },
+    {
+      "start": 108,
+      "end": 112.275,
+      "lang": "fra"
+    },
+    {
+      "start": 112.5,
+      "end": 116.775,
+      "lang": "ara"
+    },
+    {
+      "start": 117,
+      "end": 121.275,
+      "lang": "other"
+    },
+    {
+      "start": 121.5,
+      "end": 125.775,
+      "lang": "eng"
+    },
+    {
+      "start": 126,
+      "end": 130.275,
+      "lang": "fra"
+    },
+    {
+      "start": 130.5,
+      "end": 134.775,
+      "lang": "ara"
+    },
+    {
+      "start": 135,
+      "end": 139.275,
+      "lang": "other"
+    },
+    {
+      "start": 139.5,
+      "end": 143.775,
+      "lang": "eng"
+    },
+    {
+      "start": 144,
+      "end": 148.275,
+      "lang": "fra"
+    },
+    {
+      "start": 148.5,
+      "end": 152.775,
+      "lang": "ara"
+    },
+    {
+      "start": 153,
+      "end": 157.275,
+      "lang": "other"
+    },
+    {
+      "start": 157.5,
+      "end": 161.775,
+      "lang": "eng"
+    },
+    {
+      "start": 162,
+      "end": 166.275,
+      "lang": "fra"
+    },
+    {
+      "start": 166.5,
+      "end": 170.775,
+      "lang": "ara"
+    },
+    {
+      "start": 171,
+      "end": 175.275,
+      "lang": "other"
+    },
+    {
+      "start": 175.5,
+      "end": 179.775,
+      "lang": "eng"
+    },
+    {
+      "start": 180,
+      "end": 184.275,
+      "lang": "fra"
+    },
+    {
+      "start": 184.5,
+      "end": 188.775,
+      "lang": "ara"
+    },
+    {
+      "start": 189,
+      "end": 193.275,
+      "lang": "other"
+    },
+    {
+      "start": 193.5,
+      "end": 197.775,
+      "lang": "eng"
+    },
+    {
+      "start": 198,
+      "end": 202.275,
+      "lang": "fra"
+    },
+    {
+      "start": 202.5,
+      "end": 206.775,
+      "lang": "ara"
+    },
+    {
+      "start": 207,
+      "end": 211.275,
+      "lang": "other"
+    },
+    {
+      "start": 211.5,
+      "end": 215.775,
+      "lang": "eng"
+    },
+    {
+      "start": 216,
+      "end": 220.275,
+      "lang": "fra"
+    },
+    {
+      "start": 220.5,
+      "end": 224.775,
+      "lang": "ara"
+    },
+    {
+      "start": 225,
+      "end": 229.275,
+      "lang": "other"
+    },
+    {
+      "start": 229.5,
+      "end": 233.775,
+      "lang": "eng"
+    },
+    {
+      "start": 234,
+      "end": 238.275,
+      "lang": "fra"
+    },
+    {
+      "start": 238.5,
+      "end": 242.775,
+      "lang": "ara"
+    },
+    {
+      "start": 243,
+      "end": 247.275,
+      "lang": "other"
+    },
+    {
+      "start": 247.5,
+      "end": 251.775,
+      "lang": "eng"
+    },
+    {
+      "start": 252,
+      "end": 256.275,
+      "lang": "fra"
+    },
+    {
+      "start": 256.5,
+      "end": 260.775,
+      "lang": "ara"
+    },
+    {
+      "start": 261,
+      "end": 265.275,
+      "lang": "other"
+    },
+    {
+      "start": 265.5,
+      "end": 269.775,
+      "lang": "eng"
+    },
+    {
+      "start": 270,
+      "end": 274.275,
+      "lang": "fra"
+    },
+    {
+      "start": 274.5,
+      "end": 278.775,
+      "lang": "ara"
+    },
+    {
+      "start": 279,
+      "end": 283.275,
+      "lang": "other"
+    },
+    {
+      "start": 283.5,
+      "end": 287.775,
+      "lang": "eng"
+    },
+    {
+      "start": 288,
+      "end": 292.275,
+      "lang": "fra"
+    },
+    {
+      "start": 292.5,
+      "end": 296.775,
+      "lang": "ara"
+    },
+    {
+      "start": 297,
+      "end": 301.275,
+      "lang": "other"
+    },
+    {
+      "start": 301.5,
+      "end": 305.775,
+      "lang": "eng"
+    },
+    {
+      "start": 306,
+      "end": 310.275,
+      "lang": "fra"
+    },
+    {
+      "start": 310.5,
+      "end": 314.775,
+      "lang": "ara"
+    },
+    {
+      "start": 315,
+      "end": 319.275,
+      "lang": "other"
+    },
+    {
+      "start": 319.5,
+      "end": 323.775,
+      "lang": "eng"
+    },
+    {
+      "start": 324,
+      "end": 328.275,
+      "lang": "fra"
+    },
+    {
+      "start": 328.5,
+      "end": 332.775,
+      "lang": "ara"
+    },
+    {
+      "start": 333,
+      "end": 337.275,
+      "lang": "other"
+    },
+    {
+      "start": 337.5,
+      "end": 341.775,
+      "lang": "eng"
+    },
+    {
+      "start": 342,
+      "end": 346.275,
+      "lang": "fra"
+    },
+    {
+      "start": 346.5,
+      "end": 350.775,
+      "lang": "ara"
+    },
+    {
+      "start": 351,
+      "end": 355.275,
+      "lang": "other"
+    },
+    {
+      "start": 355.5,
+      "end": 359.775,
+      "lang": "eng"
+    },
+    {
+      "start": 360,
+      "end": 364.275,
+      "lang": "fra"
+    },
+    {
+      "start": 364.5,
+      "end": 368.775,
+      "lang": "ara"
+    },
+    {
+      "start": 369,
+      "end": 373.275,
+      "lang": "other"
+    },
+    {
+      "start": 373.5,
+      "end": 377.775,
+      "lang": "eng"
+    },
+    {
+      "start": 378,
+      "end": 382.275,
+      "lang": "fra"
+    },
+    {
+      "start": 382.5,
+      "end": 386.775,
+      "lang": "ara"
+    },
+    {
+      "start": 387,
+      "end": 391.275,
+      "lang": "other"
+    },
+    {
+      "start": 391.5,
+      "end": 395.775,
+      "lang": "eng"
+    },
+    {
+      "start": 396,
+      "end": 400.275,
+      "lang": "fra"
+    },
+    {
+      "start": 400.5,
+      "end": 404.775,
+      "lang": "ara"
+    },
+    {
+      "start": 405,
+      "end": 409.275,
+      "lang": "other"
+    },
+    {
+      "start": 409.5,
+      "end": 413.775,
+      "lang": "eng"
+    },
+    {
+      "start": 414,
+      "end": 418.275,
+      "lang": "fra"
+    },
+    {
+      "start": 418.5,
+      "end": 422.775,
+      "lang": "ara"
+    },
+    {
+      "start": 423,
+      "end": 427.275,
+      "lang": "other"
+    },
+    {
+      "start": 427.5,
+      "end": 431.775,
+      "lang": "eng"
+    },
+    {
+      "start": 432,
+      "end": 436.275,
+      "lang": "fra"
+    },
+    {
+      "start": 436.5,
+      "end": 440.775,
+      "lang": "ara"
+    },
+    {
+      "start": 441,
+      "end": 445.275,
+      "lang": "other"
+    },
+    {
+      "start": 445.5,
+      "end": 449.775,
+      "lang": "eng"
+    },
+    {
+      "start": 450,
+      "end": 454.275,
+      "lang": "fra"
+    },
+    {
+      "start": 454.5,
+      "end": 458.775,
+      "lang": "ara"
+    },
+    {
+      "start": 459,
+      "end": 463.275,
+      "lang": "other"
+    },
+    {
+      "start": 463.5,
+      "end": 467.775,
+      "lang": "eng"
+    },
+    {
+      "start": 468,
+      "end": 472.275,
+      "lang": "fra"
+    },
+    {
+      "start": 472.5,
+      "end": 476.775,
+      "lang": "ara"
+    },
+    {
+      "start": 477,
+      "end": 481.275,
+      "lang": "other"
+    },
+    {
+      "start": 481.5,
+      "end": 485.775,
+      "lang": "eng"
+    },
+    {
+      "start": 486,
+      "end": 490.275,
+      "lang": "fra"
+    },
+    {
+      "start": 490.5,
+      "end": 494.775,
+      "lang": "ara"
+    },
+    {
+      "start": 495,
+      "end": 499.275,
+      "lang": "other"
+    },
+    {
+      "start": 499.5,
+      "end": 503.775,
+      "lang": "eng"
+    },
+    {
+      "start": 504,
+      "end": 508.275,
+      "lang": "fra"
+    },
+    {
+      "start": 508.5,
+      "end": 512.775,
+      "lang": "ara"
+    },
+    {
+      "start": 513,
+      "end": 517.275,
+      "lang": "other"
+    },
+    {
+      "start": 517.5,
+      "end": 521.775,
+      "lang": "eng"
+    },
+    {
+      "start": 522,
+      "end": 526.275,
+      "lang": "fra"
+    },
+    {
+      "start": 526.5,
+      "end": 530.775,
+      "lang": "ara"
+    },
+    {
+      "start": 531,
+      "end": 535.275,
+      "lang": "other"
+    },
+    {
+      "start": 535.5,
+      "end": 539.775,
+      "lang": "eng"
+    },
+    {
+      "start": 540,
+      "end": 544.275,
+      "lang": "fra"
+    },
+    {
+      "start": 544.5,
+      "end": 548.775,
+      "lang": "ara"
+    },
+    {
+      "start": 549,
+      "end": 553.275,
+      "lang": "other"
+    },
+    {
+      "start": 553.5,
+      "end": 557.775,
+      "lang": "eng"
+    },
+    {
+      "start": 558,
+      "end": 562.275,
+      "lang": "fra"
+    },
+    {
+      "start": 562.5,
+      "end": 566.775,
+      "lang": "ara"
+    },
+    {
+      "start": 567,
+      "end": 571.275,
+      "lang": "other"
+    },
+    {
+      "start": 571.5,
+      "end": 575.775,
+      "lang": "eng"
+    },
+    {
+      "start": 576,
+      "end": 580.275,
+      "lang": "fra"
+    },
+    {
+      "start": 580.5,
+      "end": 584.775,
+      "lang": "ara"
+    },
+    {
+      "start": 585,
+      "end": 589.275,
+      "lang": "other"
+    },
+    {
+      "start": 589.5,
+      "end": 593.775,
+      "lang": "eng"
+    },
+    {
+      "start": 594,
+      "end": 598.275,
+      "lang": "fra"
+    },
+    {
+      "start": 598.5,
+      "end": 602.775,
+      "lang": "ara"
+    },
+    {
+      "start": 603,
+      "end": 607.275,
+      "lang": "other"
+    },
+    {
+      "start": 607.5,
+      "end": 611.775,
+      "lang": "eng"
+    },
+    {
+      "start": 612,
+      "end": 616.275,
+      "lang": "fra"
+    },
+    {
+      "start": 616.5,
+      "end": 620.775,
+      "lang": "ara"
+    },
+    {
+      "start": 621,
+      "end": 625.275,
+      "lang": "other"
+    },
+    {
+      "start": 625.5,
+      "end": 629.775,
+      "lang": "eng"
+    },
+    {
+      "start": 630,
+      "end": 634.275,
+      "lang": "fra"
+    },
+    {
+      "start": 634.5,
+      "end": 638.775,
+      "lang": "ara"
+    },
+    {
+      "start": 639,
+      "end": 643.275,
+      "lang": "other"
+    },
+    {
+      "start": 643.5,
+      "end": 647.775,
+      "lang": "eng"
+    },
+    {
+      "start": 648,
+      "end": 652.275,
+      "lang": "fra"
+    },
+    {
+      "start": 652.5,
+      "end": 656.775,
+      "lang": "ara"
+    },
+    {
+      "start": 657,
+      "end": 661.275,
+      "lang": "other"
+    },
+    {
+      "start": 661.5,
+      "end": 665.775,
+      "lang": "eng"
+    },
+    {
+      "start": 666,
+      "end": 670.275,
+      "lang": "fra"
+    },
+    {
+      "start": 670.5,
+      "end": 674.775,
+      "lang": "ara"
+    },
+    {
+      "start": 675,
+      "end": 679.275,
+      "lang": "other"
+    },
+    {
+      "start": 679.5,
+      "end": 683.775,
+      "lang": "eng"
+    },
+    {
+      "start": 684,
+      "end": 688.275,
+      "lang": "fra"
+    },
+    {
+      "start": 688.5,
+      "end": 692.775,
+      "lang": "ara"
+    },
+    {
+      "start": 693,
+      "end": 697.275,
+      "lang": "other"
+    },
+    {
+      "start": 697.5,
+      "end": 701.775,
+      "lang": "eng"
+    },
+    {
+      "start": 702,
+      "end": 706.275,
+      "lang": "fra"
+    },
+    {
+      "start": 706.5,
+      "end": 710.775,
+      "lang": "ara"
+    },
+    {
+      "start": 711,
+      "end": 715.275,
+      "lang": "other"
+    },
+    {
+      "start": 715.5,
+      "end": 719.775,
+      "lang": "eng"
+    },
+    {
+      "start": 720,
+      "end": 724.275,
+      "lang": "fra"
+    },
+    {
+      "start": 724.5,
+      "end": 728.775,
+      "lang": "ara"
+    },
+    {
+      "start": 729,
+      "end": 733.275,
+      "lang": "other"
+    },
+    {
+      "start": 733.5,
+      "end": 737.775,
+      "lang": "eng"
+    },
+    {
+      "start": 738,
+      "end": 742.275,
+      "lang": "fra"
+    },
+    {
+      "start": 742.5,
+      "end": 746.775,
+      "lang": "ara"
+    },
+    {
+      "start": 747,
+      "end": 751.275,
+      "lang": "other"
+    },
+    {
+      "start": 751.5,
+      "end": 755.775,
+      "lang": "eng"
+    },
+    {
+      "start": 756,
+      "end": 760.275,
+      "lang": "fra"
+    },
+    {
+      "start": 760.5,
+      "end": 764.775,
+      "lang": "ara"
+    },
+    {
+      "start": 765,
+      "end": 769.275,
+      "lang": "other"
+    },
+    {
+      "start": 769.5,
+      "end": 773.775,
+      "lang": "eng"
+    },
+    {
+      "start": 774,
+      "end": 778.275,
+      "lang": "fra"
+    },
+    {
+      "start": 778.5,
+      "end": 782.775,
+      "lang": "ara"
+    },
+    {
+      "start": 783,
+      "end": 787.275,
+      "lang": "other"
+    },
+    {
+      "start": 787.5,
+      "end": 791.775,
+      "lang": "eng"
+    },
+    {
+      "start": 792,
+      "end": 796.275,
+      "lang": "fra"
+    },
+    {
+      "start": 796.5,
+      "end": 800.775,
+      "lang": "ara"
+    },
+    {
+      "start": 801,
+      "end": 805.275,
+      "lang": "other"
+    },
+    {
+      "start": 805.5,
+      "end": 809.775,
+      "lang": "eng"
+    },
+    {
+      "start": 810,
+      "end": 814.275,
+      "lang": "fra"
+    },
+    {
+      "start": 814.5,
+      "end": 818.775,
+      "lang": "ara"
+    },
+    {
+      "start": 819,
+      "end": 823.275,
+      "lang": "other"
+    },
+    {
+      "start": 823.5,
+      "end": 827.775,
+      "lang": "eng"
+    },
+    {
+      "start": 828,
+      "end": 832.275,
+      "lang": "fra"
+    },
+    {
+      "start": 832.5,
+      "end": 836.775,
+      "lang": "ara"
+    },
+    {
+      "start": 837,
+      "end": 841.275,
+      "lang": "other"
+    },
+    {
+      "start": 841.5,
+      "end": 845.775,
+      "lang": "eng"
+    },
+    {
+      "start": 846,
+      "end": 850.275,
+      "lang": "fra"
+    },
+    {
+      "start": 850.5,
+      "end": 854.775,
+      "lang": "ara"
+    },
+    {
+      "start": 855,
+      "end": 859.275,
+      "lang": "other"
+    },
+    {
+      "start": 859.5,
+      "end": 863.775,
+      "lang": "eng"
+    },
+    {
+      "start": 864,
+      "end": 868.275,
+      "lang": "fra"
+    },
+    {
+      "start": 868.5,
+      "end": 872.775,
+      "lang": "ara"
+    },
+    {
+      "start": 873,
+      "end": 877.275,
+      "lang": "other"
+    },
+    {
+      "start": 877.5,
+      "end": 881.775,
+      "lang": "eng"
+    },
+    {
+      "start": 882,
+      "end": 886.275,
+      "lang": "fra"
+    },
+    {
+      "start": 886.5,
+      "end": 890.775,
+      "lang": "ara"
+    },
+    {
+      "start": 891,
+      "end": 895.275,
+      "lang": "other"
+    },
+    {
+      "start": 895.5,
+      "end": 899.775,
+      "lang": "eng"
+    }
+  ]
+}

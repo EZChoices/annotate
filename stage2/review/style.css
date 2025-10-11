@@ -383,6 +383,14 @@ body {
   background: rgba(56, 189, 248, 0.16);
 }
 
+.diff-item.is-playing:not(.is-active) {
+  background: rgba(56, 189, 248, 0.12);
+}
+
+.diff-item.is-playing .diff-item__time {
+  color: var(--review-accent);
+}
+
 .diff-item__time {
   display: block;
   font-variant-numeric: tabular-nums;
@@ -454,6 +462,9 @@ body {
   top: 0;
   left: 0;
   right: 0;
+  display: flex;
+  flex-direction: column;
+  will-change: transform;
 }
 
 .merged-overlay {
@@ -531,10 +542,30 @@ body {
 .merged-cue-list {
   flex: 1 1 auto;
   overflow: auto;
+  position: relative;
+}
+
+.merged-cue-list__scroller {
+  position: relative;
+  min-height: 100%;
   padding: 16px 24px 24px;
+  box-sizing: border-box;
+}
+
+.merged-cue-list__spacer {
+  width: 1px;
+  opacity: 0;
+}
+
+.merged-cue-list__viewport {
+  position: absolute;
+  top: 16px;
+  left: 24px;
+  right: 24px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  will-change: transform;
 }
 
 .merged-cue {

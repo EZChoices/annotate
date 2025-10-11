@@ -1,0 +1,28 @@
+{
+  "asset_id": "synthetic_long_clip",
+  "cell": "SYN-001",
+  "review_status": "assigned",
+  "adjudication": {
+    "status": "in_progress"
+  },
+  "assignments": [
+    {
+      "pass_number": 1,
+      "annotator_id": "annotator_alpha"
+    },
+    {
+      "pass_number": 2,
+      "annotator_id": "annotator_beta"
+    }
+  ],
+  "passes": {
+    "pass_1": {
+      "annotator_id": "annotator_alpha",
+      "audio_url": "/public/sample.mp4"
+    },
+    "pass_2": {
+      "annotator_id": "annotator_beta",
+      "audio_url": "/public/sample.mp4"
+    }
+  }
+}
