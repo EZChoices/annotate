@@ -1,0 +1,11 @@
+[
+  {
+    "id": "synthetic_long_clip",
+    "name": "synthetic long clip",
+    "stage": "stage2_output",
+    "emotion_url": "/public/data/stage2_output/synthetic_long_clip/pass_2/emotion.vtt",
+    "events_url": "/public/data/stage2_output/synthetic_long_clip/pass_2/events.vtt",
+    "transcript_url": "/public/data/stage2_output/synthetic_long_clip/pass_2/transcript.vtt",
+    "translation_url": "/public/data/stage2_output/synthetic_long_clip/pass_2/translation.vtt"
+  }
+]
