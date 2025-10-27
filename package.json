@@ -2,7 +2,8 @@
   "name": "annotate",
   "version": "1.0.0",
   "scripts": {
-    "build": "node scripts/inject-build-meta.js && next build",
+    "generate:manifest": "node scripts/generate_manifest.js",
+    "build": "npm run generate:manifest && node scripts/inject-build-meta.js && next build",
     "test": "node --test",
     "nightly:irr": "node scripts/nightly_irr.js"
   }
