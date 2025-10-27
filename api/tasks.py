@@ -5,10 +5,18 @@ from pathlib import Path
 import json
 import os
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from urllib.parse import quote
 
 import requests
+from datetime import datetime, timezone
+
+def _stamp():
+    return datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+
+def _dbg(msg, **kw):
+    safe = {k: ("<hidden>" if k.lower().endswith("key") else v) for k, v in kw.items()}
+    print(f"[tasks] {_stamp()} :: {msg} :: {safe}")
 
 from api.coverage import (
     CoverageSnapshotInvalid,
@@ -970,14 +978,18 @@ async def get_tasks(
                 keep_endpoint += f",{KEEP_AUDIO_COL}"
 
             headers = _supabase_headers()
+            _dbg("fetch.keep", endpoint=keep_endpoint)
             keep_resp = requests.get(keep_endpoint, headers=headers, timeout=20)
+            _dbg("fetch.keep.done", status=keep_resp.status_code)
             keep_resp.raise_for_status()
             rows = keep_resp.json()
 
             assign_endpoint = (
                 f"{SUPABASE_URL}/rest/v1/{ASSIGN2_TABLE}?select={ASSIGN2_FILE_COL},{ASSIGN2_USER_COL},{ASSIGN2_TIME_COL}"
             )
+            _dbg("fetch.assignments", endpoint=assign_endpoint)
             assigned_resp = requests.get(assign_endpoint, headers=headers, timeout=20)
+            _dbg("fetch.assignments.done", status=assigned_resp.status_code)
             assigned_resp.raise_for_status()
             assigned_rows = assigned_resp.json()
             active_cutoff = datetime.utcnow().replace(tzinfo=timezone.utc) - timedelta(
@@ -1192,6 +1204,12 @@ async def get_tasks(
                     )
 
                 manifest_item = {
+                    "__prefill_source": {
+                        "diar": bool(r.get(PREFILL_DIA)) if isinstance(r, dict) else False,
+                        "tr_vtt": bool(r.get(PREFILL_TR_VTT)) if isinstance(r, dict) else False,
+                        "tl_vtt": bool(r.get(PREFILL_TL_VTT)) if isinstance(r, dict) else False,
+                        "cs_vtt": bool(r.get(PREFILL_CS_VTT)) if isinstance(r, dict) else False,
+                    },
                     "asset_id": fname,
                     "media": {
                         "audio_proxy_url": audio_url or media_url,
@@ -1245,11 +1263,60 @@ async def get_tasks(
                 except Exception as e:
                     print("[tasks] stage2 assignment insert failed:", repr(e))
         except Exception as e:
-            print("[tasks] Supabase keep fetch failed:", repr(e))
-            return JSONResponse(_seed_manifest(annotator_id, stage), headers=CACHE_HEADERS)
+            _dbg("supabase.fetch.error", error=repr(e))
+            return JSONResponse(
+                {"__diag": "supabase_error_fallback", "manifest": _seed_manifest(annotator_id, stage)},
+                headers=CACHE_HEADERS,
+            )
 
     if not items:
-        return JSONResponse(_seed_manifest(annotator_id, stage), headers=CACHE_HEADERS)
+        _dbg("no_items_fallback", reason="no_available_rows_or_all_assigned")
+        return JSONResponse(
+            {"__diag": "no_items_fallback", "manifest": _seed_manifest(annotator_id, stage)},
+            headers=CACHE_HEADERS,
+        )
 
     manifest: Dict[str, Any] = {"annotator_id": annotator_id, "stage": stage, "items": items}
     return JSONResponse(manifest, headers=CACHE_HEADERS)
+
+
+@app.get('/api/prefill_check')
+async def prefill_check(file: str):
+    if not all([SUPABASE_URL, SUPABASE_KEY, KEEP_TABLE, FILE_COL]):
+        return JSONResponse({"ok": False, "error": "env_missing"})
+    try:
+        ep = f"{SUPABASE_URL}/rest/v1/{KEEP_TABLE}?{FILE_COL}=eq.{file}&select={FILE_COL},{PREFILL_TR_VTT},{PREFILL_TL_VTT},{PREFILL_CS_VTT},{PREFILL_DIA}"
+        _dbg("probe.prefill", endpoint=ep)
+        resp = requests.get(ep, headers=_supabase_headers(), timeout=20)
+        data = resp.json() if resp.ok else None
+        return JSONResponse({
+            "ok": resp.ok,
+            "status": resp.status_code,
+            "rows": data if isinstance(data, list) else [],
+            "env_present": {
+                "TR_VTT": bool(PREFILL_TR_VTT),
+                "TL_VTT": bool(PREFILL_TL_VTT),
+                "CS_VTT": bool(PREFILL_CS_VTT),
+                "DIA": bool(PREFILL_DIA)
+            }
+        })
+    except Exception as e:
+        _dbg("probe.prefill.error", error=repr(e))
+        return JSONResponse({"ok": False, "error": repr(e)})
+
+
+@app.get('/api/env_names')
+async def env_names():
+    return JSONResponse({
+        "ok": True,
+        "names": {
+            "SUPABASE_URL": bool(SUPABASE_URL),
+            "SUPABASE_KEY": bool(SUPABASE_KEY),
+            "KEEP_TABLE": KEEP_TABLE,
+            "FILE_COL": FILE_COL,
+            "PREFILL_TR_VTT": PREFILL_TR_VTT,
+            "PREFILL_TL_VTT": PREFILL_TL_VTT,
+            "PREFILL_CS_VTT": PREFILL_CS_VTT,
+            "PREFILL_DIA": PREFILL_DIA
+        }
+    })

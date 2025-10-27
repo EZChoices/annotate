@@ -1,5 +1,15 @@
 "use strict";
 
+(function(){
+  try{
+    const u = new URL(window.location.href);
+    const qd = u.searchParams.get('debug');
+    if(qd === '1'){ localStorage.setItem('ea_debug','1'); }
+    if(qd === '0'){ localStorage.removeItem('ea_debug'); }
+  }catch{}
+})();
+function isDbg(){ try{ return localStorage.getItem('ea_debug')==='1'; }catch{ return false; } }
+
 // Basic Stage 2 flow controller with offline queue and simple VTT editors.
 
 const EAQ = {
@@ -303,6 +313,25 @@ function getAnnotatorId(){
 }
 
 function qs(id){ return document.getElementById(id); }
+
+function dbgPane(){
+  if(!isDbg()) return null;
+  let el = document.getElementById('ea_dbg');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'ea_dbg';
+    el.style.cssText = 'position:fixed;right:8px;bottom:60px;z-index:9999;background:#111;color:#fff;padding:8px 10px;border-radius:8px;font:12px/1.3 monospace;max-width:48vw;opacity:.9;white-space:pre-wrap;';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+function dbgPrint(obj){
+  const el = dbgPane();
+  if(!el) return;
+  try{
+    el.textContent = JSON.stringify(obj, null, 2);
+  }catch{}
+}
 
 function escapeHtml(str){
   return String(str||'').replace(/[&<>"']/g, (s)=>({
@@ -1227,11 +1256,13 @@ async function fetchWithProxy(url){
   if(!url) return null;
   const options = { cache: 'no-store' };
   try{
+    if(isDbg()) console.log('[EA] fetch', url);
     const res = await fetch(url, options);
     if(res && res.ok) return res;
   }catch{}
   try{
     const fallback = `/api/proxy_audio?src=${encodeURIComponent(url)}`;
+    if(isDbg()) console.log('[EA] fetch-fallback', fallback);
     const res = await fetch(fallback, options);
     if(res && res.ok) return res;
   }catch{}
@@ -1320,10 +1351,30 @@ async function loadManifest(){
     const res = await fetch(url, {cache:'no-store'});
     if(!res.ok) throw new Error('tasks fetch');
     const manifest = await res.json();
-    await hydrateManifestTranslations(manifest);
-    EAQ.state.manifest = manifest;
-    saveManifestToStorage(manifest);
-    return manifest;
+    let payload = manifest;
+    if(manifest && typeof manifest === 'object' && manifest.manifest && typeof manifest.manifest === 'object'){
+      payload = Object.assign({}, manifest.manifest);
+      if(manifest.__diag){
+        payload.__diag = manifest.__diag;
+      }
+    }
+    await hydrateManifestTranslations(payload);
+    EAQ.state.manifest = payload;
+    saveManifestToStorage(payload);
+    if(isDbg()){
+      const firstItem = payload && payload.items && payload.items[0];
+      dbgPrint({
+        step: 'loadManifest',
+        diag: payload && payload.__diag,
+        count: payload && payload.items ? payload.items.length : 0,
+        item: firstItem ? {
+          asset_id: firstItem.asset_id,
+          prefill: firstItem.prefill,
+          prefill_source: firstItem.__prefill_source
+        } : null
+      });
+    }
+    return payload;
   }catch(err){
     const cached = loadManifestFromStorage();
     if(cached){
@@ -2454,6 +2505,19 @@ async function loadPrefillForCurrent(){
   const clipPrefill = prefill.clipFlagged === true || prefill.clip_flagged === true;
   EAQ.state.clipFlagged = clipPrefill;
   if(clipToggle){ clipToggle.checked = EAQ.state.clipFlagged; }
+  if(isDbg()){
+    const item = currentItem() || {};
+    dbgPrint({
+      step: 'loadPrefillForCurrent',
+      asset: item.asset_id,
+      transcript_url: prefill && prefill.transcript_vtt_url,
+      tl_url: prefill && prefill.translation_vtt_url,
+      cs_url: prefill && prefill.code_switch_vtt_url,
+      events_url: prefill && prefill.events_vtt_url,
+      emotion_url: prefill && prefill.emotion_vtt_url,
+      source: item && item.__prefill_source
+    });
+  }
   refreshTimeline();
   applyTranscriptNotice();
   return prefill;
