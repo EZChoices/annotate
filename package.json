@@ -2,6 +2,7 @@
   "name": "annotate",
   "version": "1.0.0",
   "scripts": {
+    "build": "node scripts/inject-build-meta.js && next build",
     "test": "node --test",
     "nightly:irr": "node scripts/nightly_irr.js"
   }

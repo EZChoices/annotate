@@ -8,7 +8,8 @@
 </head>
 <body>
   <div class="container">
-    <h2>Metadata Tagging — Version 2</h2>
+    <h2>Metadata Tagging - Version 2</h2>
+    <div class="notice"><strong>Status:</strong> <span id="saveBadge">Saved</span> &bull; Annotator <span id="annotId"></span> &bull; Build <span id="buildSha" data-build-sha>dev</span></div>
 
     <div id="video-wrapper" class="player-sticky">
       <button id="videoToggle" aria-label="Toggle mini player">Toggle</button>
@@ -135,13 +136,14 @@
         <button data-set-tag="face_visible" data-value="No">No Face</button>
       </div>
       <div class="tags">
-        <button data-set-tag="lip_visible" data-value="Yes">Lips Visible</button>
-        <button data-set-tag="lip_visible" data-value="No">No Lips</button>
+        <button data-set-tag="lips_visible" data-value="Yes">Lips Visible</button>
+        <button data-set-tag="lips_visible" data-value="No">No Lips</button>
       </div>
       <div class="tags">
-        <button data-set-tag="gestures_visible" data-value="Yes">Gestures Visible</button>
-        <button data-set-tag="gestures_visible" data-value="No">No Gestures</button>
+        <button data-set-tag="gestures_prominent" data-value="Yes">Gestures Prominent</button>
+        <button data-set-tag="gestures_prominent" data-value="No">Gestures Not Prominent</button>
       </div>
+      <textarea id="notesBox" placeholder="Add notes about the clip..." rows="3"></textarea>
     </div>
 
     <button id="darkModeBtn">Toggle Dark Mode</button>
@@ -149,27 +151,42 @@
     <button id="submitBtn" class="submit">Save & Next</button>
   </div>
 
+  <script src="/public/app.buildmeta.js"></script>
   <script src="/public/env.js"></script>
   <script src="/public/config.js"></script>
   <script src="/public/video-utils.js"></script>
   <script src="/public/meta-v2.js"></script>
+  <script src="/public/idb.meta.js"></script>
+  <script src="/public/meta-v2.offline.js"></script>
   <script>
     // Quick Links footer to switch UIs and hit APIs quickly
     (function(){
-      const c = document.createElement('div');
-      c.className = 'notice';
+      const container = document.createElement('div');
+      container.className = 'notice';
       const base = location.origin;
       function getAnnot(){ try{ const k='dd_annotator_id'; return localStorage.getItem(k)||'anonymous'; }catch{ return 'anonymous'; } }
       const id = getAnnot();
       if(new URLSearchParams(location.search).get('links')==='0') return;
-      c.innerHTML = `Quick Links:
-        <a href="${base}/meta-v2/index.html">Meta V2</a> ·
-        <a href="${base}/">Stage 2</a> ·
-        <a href="${base}/api/tasks?stage=2&annotator_id=${encodeURIComponent(id)}&limit=5" target="_blank">Tasks API</a> · 
-        <a href="${base}/api/clip?annotator=${encodeURIComponent(id)}" target="_blank">Clip API</a> · 
-        <a href="${base}/api/debug?annotator=${encodeURIComponent(id)}" target="_blank">Debug</a>`;
-      document.body.appendChild(c);
+      container.innerHTML = `Quick Links:
+        <a href="${base}/meta-v2/index.html">Meta V2</a> &bull;
+        <a href="${base}/">Stage 2</a> &bull;
+        <a href="${base}/api/tasks?stage=2&annotator_id=${encodeURIComponent(id)}&limit=5" target="_blank">Tasks API</a> &bull;
+        <a href="${base}/api/clip?annotator=${encodeURIComponent(id)}" target="_blank">Clip API</a> &bull;
+        <a href="${base}/api/debug?annotator=${encodeURIComponent(id)}" target="_blank">Debug</a> &bull;
+        Build <span data-build-sha>dev</span>`;
+      document.body.appendChild(container);
     })();
+  </script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function(){
+      if (typeof window.__META_BOOT === 'function') {
+        window.__META_BOOT();
+      }
+    });
   </script>
 </body>
 </html>
+
+
+
+

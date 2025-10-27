@@ -3,6 +3,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 import io, json, zipfile, os, requests
 from datetime import datetime
 from collections import defaultdict
+from pathlib import Path
 
 app = FastAPI()
 
@@ -13,6 +14,43 @@ SUPABASE_KEY = (
     or os.environ.get("SUPABASE_ANON_KEY")
 )
 STAGE2_TABLE = os.environ.get("SUPABASE_STAGE2_TABLE", "annotations_stage2")
+STAGE2_OUTPUT_DIR = Path(os.environ.get("STAGE2_OUTPUT_DIR", "data/stage2_output"))
+if not STAGE2_OUTPUT_DIR.is_absolute():
+    STAGE2_OUTPUT_DIR = Path(__file__).resolve().parent.parent / STAGE2_OUTPUT_DIR
+
+def _compute_stage2_summary(root: Path) -> Dict[str, int]:
+    clips = 0
+    double_passes = 0
+    if not root.exists():
+        return {"clips": clips, "double_passes": double_passes}
+
+    for clip_dir in root.iterdir():
+        if not clip_dir.is_dir():
+            continue
+        has_artifacts = False
+        passes_found = set()
+
+        for child in clip_dir.iterdir():
+            if child.is_dir() and child.name.lower().startswith("pass_"):
+                passes_found.add(child.name.lower())
+                if not has_artifacts:
+                    for artifact in child.rglob("*"):
+                        if artifact.is_file() and artifact.suffix.lower() in {".vtt", ".json"}:
+                            has_artifacts = True
+                            break
+            elif child.is_file() and child.suffix.lower() in {".vtt", ".json"}:
+                has_artifacts = True
+
+            if has_artifacts and any(name != "pass_1" for name in passes_found):
+                # Enough information gathered; stop scanning this clip.
+                break
+
+        if has_artifacts:
+            clips += 1
+        if any(name != "pass_1" for name in passes_found):
+            double_passes += 1
+
+    return {"clips": clips, "double_passes": double_passes}
 
 
 def _headers():
@@ -137,6 +175,12 @@ def _build_qa_report(data):
         "clips": clips,
         "reviewSummary": review_counts,
     }
+
+
+@app.get("/api/export/summary")
+async def export_summary():
+    summary = _compute_stage2_summary(STAGE2_OUTPUT_DIR)
+    return JSONResponse(summary, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/export")

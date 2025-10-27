@@ -6,6 +6,43 @@
   const SUMMARY_KEY = "ea_stage2_irr_summary";
   const memoryStore = { records: null, summary: null }; // records stored normalized
 
+  function renderSummary(summary) {
+    if (typeof document === "undefined") return;
+    const emptyState = document.getElementById("qaReportEmpty");
+    if (!emptyState) return;
+    if (!emptyState.dataset.defaultText) {
+      emptyState.dataset.defaultText = emptyState.textContent || "";
+    }
+    if (!summary || typeof summary !== "object") {
+      emptyState.textContent = emptyState.dataset.defaultText || "";
+      return;
+    }
+    const clips = Number(summary.clips) || 0;
+    const rawDoublePasses =
+      summary.double_passes != null ? summary.double_passes : summary.doublePasses;
+    const doublePasses = Number(rawDoublePasses) || 0;
+    const clipLabel = `${clips} clip${clips === 1 ? "" : "s"}`;
+    const doubleLabel = `${doublePasses} double-pass${doublePasses === 1 ? "" : "es"}`;
+    emptyState.textContent = `Local summary: ${clipLabel} · ${doubleLabel}`;
+  }
+
+  function loadSummary() {
+    if (typeof fetch !== "function") {
+      renderSummary(null);
+      return Promise.resolve(null);
+    }
+    return fetch("/api/export/summary", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json().catch(() => null) : null))
+      .then((data) => {
+        renderSummary(data || null);
+        return data;
+      })
+      .catch(() => {
+        renderSummary(null);
+        return null;
+      });
+  }
+
   // --- Environment guards ----------------------------------------------------
   function hasLocalStorage() {
     try {
@@ -5083,6 +5120,8 @@
       renderCoverageSnapshot(null);
       renderAdjudicationQueue();
 
+      loadSummary();
+
       refreshAdjudicationQueue();
 
       fetchTrainingSummary()
@@ -5250,6 +5289,8 @@
     computeAlpha,
     computeIRRSummary,
     saveIRRSummary,
+    loadSummary,
+    renderSummary,
     // Legacy/diagnostic helpers
     _loadRecords: () => clone(ensureRecords()),
     _saveRecords: (records) => persistRecords(records),

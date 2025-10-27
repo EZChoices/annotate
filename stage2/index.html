@@ -251,6 +251,7 @@
   </div>
   <div id="csToast" class="cs-toast" role="status" aria-live="polite"></div>
 
+  <script src="/public/app.buildmeta.js"></script>
   <script src="/public/idb.js"></script>
   <script src="/public/env.js"></script>
   <script src="/public/config.js"></script>
@@ -263,21 +264,22 @@
   <script>
     // Quick Links footer for easy switching/debug
     (function(){
-      const c = document.createElement('div');
-      c.className = 'notice';
+      const container = document.createElement('div');
+      container.className = 'notice';
       const base = location.origin;
       const annotKey = 'ea_stage2_annotator_id';
       let id = 'anonymous';
       try { id = localStorage.getItem(annotKey) || 'anonymous'; } catch{}
       if(new URLSearchParams(location.search).get('links')==='0') return;
-      c.innerHTML = `Quick Links:
-        <a href="${base}/meta-v2/index.html">Meta V2</a> ·
-        <a href="${base}/">Stage 2</a> ·
-        <a href="${base}/stage2/qa-dashboard.html">QA Dashboard</a> ·
-        <a href="${base}/api/tasks?stage=2&annotator_id=${encodeURIComponent(id)}&limit=5" target="_blank">Tasks API</a> ·
-        <a href="${base}/api/clip?annotator=${encodeURIComponent(id)}" target="_blank">Clip API</a> ·
-        <a href="${base}/api/debug?annotator=${encodeURIComponent(id)}" target="_blank">Debug</a>`;
-      document.body.appendChild(c);
+      container.innerHTML = Quick Links:
+        <a href="${base}/meta-v2/index.html">Meta V2</a> &bull;
+        <a href="${base}/">Stage 2</a> &bull;
+        <a href="${base}/stage2/qa-dashboard.html">QA Dashboard</a> &bull;
+        <a href="${base}/api/tasks?stage=2&annotator_id=${encodeURIComponent(id)}&limit=5" target="_blank">Tasks API</a> &bull;
+        <a href="${base}/api/clip?annotator=${encodeURIComponent(id)}" target="_blank">Clip API</a> &bull;
+        <a href="${base}/api/debug?annotator=${encodeURIComponent(id)}" target="_blank">Debug</a> &bull;
+        Build <span data-build-sha>dev</span>`;
+      document.body.appendChild(container);
     })();
   </script>
   <script>
@@ -285,5 +287,12 @@
       navigator.serviceWorker.register('/public/sw.js').catch(()=>{});
     }
   </script>
+  <div id='diag' style='position:fixed;right:8px;bottom:8px;background:#0008;color:#fff;padding:6px 8px;border-radius:8px;font:12px monospace;z-index:9999'></div>
 </body>
 </html>
+
+
+
+
+
+

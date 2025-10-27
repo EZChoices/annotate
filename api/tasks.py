@@ -106,6 +106,75 @@ DOUBLE_PASS_ANNOTATOR_CAP = float(os.environ.get("STAGE2_DOUBLE_PASS_ANNOTATOR_C
 MAX_PASSES_PER_ASSET = 2
 ASSIGNMENT_ACTIVE_HOURS = int(os.environ.get("STAGE2_ASSIGNMENT_ACTIVE_HOURS", "6") or 6)
 
+CACHE_HEADERS = {
+    "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate",
+}
+_SEED_CLIP_ID = "synthetic_long_clip"
+_SEED_PASS_DIR = "pass_1"
+_SEED_MEDIA_URL = "/public/sample.mp4"
+_SEED_PREFILL_BASE_URL = f"/public/data/stage2_output/{_SEED_CLIP_ID}/{_SEED_PASS_DIR}"
+_SEED_META_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "public"
+    / "data"
+    / "stage2_output"
+    / _SEED_CLIP_ID
+    / "item_meta.json"
+)
+
+
+def _seed_manifest(annotator_id: str, stage: int) -> Dict[str, Any]:
+    meta_data: Dict[str, Any] = {}
+    try:
+        meta_text = _SEED_META_PATH.read_text(encoding="utf-8")
+        meta_data = json.loads(meta_text)
+    except Exception:
+        meta_data = {}
+
+    asset_id = meta_data.get("asset_id") or _SEED_CLIP_ID
+    assigned_cell = meta_data.get("cell") or UNKNOWN_CELL_KEY
+    previous_annotators: List[str] = []
+    assignments = meta_data.get("assignments")
+    if isinstance(assignments, list):
+        for entry in assignments:
+            if not isinstance(entry, dict):
+                continue
+            annot = entry.get("annotator_id")
+            if annot and annot not in previous_annotators:
+                previous_annotators.append(annot)
+
+    manifest_item = {
+        "asset_id": asset_id,
+        "media": {
+            "audio_proxy_url": _SEED_MEDIA_URL,
+            "video_hls_url": None,
+            "poster_url": None,
+        },
+        "prefill": {
+            "diarization_rttm_url": f"{_SEED_PREFILL_BASE_URL}/diarization.rttm",
+            "transcript_vtt_url": f"{_SEED_PREFILL_BASE_URL}/transcript.vtt",
+            "transcript_ctm_url": None,
+            "translation_vtt_url": f"{_SEED_PREFILL_BASE_URL}/translation.vtt",
+            "code_switch_vtt_url": None,
+            "events_vtt_url": f"{_SEED_PREFILL_BASE_URL}/events.vtt",
+            "emotion_vtt_url": f"{_SEED_PREFILL_BASE_URL}/emotion.vtt",
+            "code_switch_spans_url": f"{_SEED_PREFILL_BASE_URL}/code_switch_spans.json",
+        },
+        "stage0_status": "seed",
+        "stage1_status": "seed",
+        "language_hint": "ar",
+        "notes": "seed manifest",
+        "assigned_cell": assigned_cell,
+        "double_pass_target": False,
+        "pass_number": 1,
+        "previous_annotators": previous_annotators,
+    }
+    return {
+        "annotator_id": annotator_id,
+        "stage": stage,
+        "items": [manifest_item],
+    }
+
 QA_F1_KEYS = [
     "rolling_median_code_switch_f1",
     "rolling_median_codeswitch_f1",
@@ -1133,37 +1202,10 @@ async def get_tasks(
                     print("[tasks] stage2 assignment insert failed:", repr(e))
         except Exception as e:
             print("[tasks] Supabase keep fetch failed:", repr(e))
+            return JSONResponse(_seed_manifest(annotator_id, stage), headers=CACHE_HEADERS)
 
     if not items:
-        media_url = "/public/sample.mp4"
-        items = [
-            {
-                "asset_id": "sample-001",
-                "media": {
-                    "audio_proxy_url": media_url,
-                    "video_hls_url": None,
-                    "poster_url": None,
-                },
-                "prefill": {
-                    "diarization_rttm_url": None,
-                    "transcript_vtt_url": None,
-                    "transcript_ctm_url": None,
-                    "translation_vtt_url": None,
-                    "code_switch_vtt_url": None,
-                },
-                "stage0_status": "validated",
-                "stage1_status": "validated",
-                "language_hint": "ar",
-                "notes": None,
-                "assigned_cell": UNKNOWN_CELL_KEY,
-                "double_pass_target": False,
-                "pass_number": 1,
-                "previous_annotators": [],
-            }
-        ]
+        return JSONResponse(_seed_manifest(annotator_id, stage), headers=CACHE_HEADERS)
 
     manifest: Dict[str, Any] = {"annotator_id": annotator_id, "stage": stage, "items": items}
-    return JSONResponse(
-        manifest,
-        headers={"Cache-Control": "no-store, no-cache, max-age=0, must-revalidate"},
-    )
+    return JSONResponse(manifest, headers=CACHE_HEADERS)

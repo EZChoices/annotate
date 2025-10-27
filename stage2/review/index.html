@@ -23,7 +23,11 @@
           </div>
           <div class="review-meta__row">
             <span class="review-meta__label">Status</span>
-            <span id="reviewStatus" class="review-meta__value">—</span>
+            <span id="reviewStatus" class="review-meta__value">-</span>
+          </div>
+          <div class="review-meta__row">
+            <span class="review-meta__label">Build</span>
+            <span class="review-meta__value" data-build-sha>dev</span>
           </div>
         </div>
         <div class="review-header__actions">
@@ -136,6 +140,7 @@
       <div id="reviewToasts" class="review-toast-container" aria-live="polite" aria-atomic="true"></div>
     </div>
 
+    <script src="/public/app.buildmeta.js"></script>
     <script src="/public/vtt.js"></script>
     <script type="module" src="/stage2/review/review-app.js"></script>
   </body>

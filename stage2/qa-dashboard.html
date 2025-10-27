@@ -249,6 +249,7 @@
     </div>
   </aside>
 
+  <script src="/public/app.buildmeta.js"></script>
   <script src="/public/env.js"></script>
   <script src="/public/config.js"></script>
   <script src="/stage2/qa_metrics.js"></script>
@@ -259,21 +260,22 @@
   <!-- Quick links bar -->
   <script>
     (function(){
-      const c = document.createElement('div');
-      c.className = 'notice';
+      const container = document.createElement('div');
+      container.className = 'notice';
       const base = location.origin;
       const annotKey = 'ea_stage2_annotator_id';
       let id = 'anonymous';
       try { id = localStorage.getItem(annotKey) || 'anonymous'; } catch{}
       if(new URLSearchParams(location.search).get('links')==='0') return;
-      c.innerHTML = `Quick Links:
-        <a href="${base}/meta-v2/index.html">Meta V2</a> ·
-        <a href="${base}/">Stage 2</a> ·
-        <a href="${base}/stage2/qa-dashboard.html">QA Dashboard</a> ·
-        <a href="${base}/api/tasks?stage=2&annotator_id=${encodeURIComponent(id)}&limit=5" target="_blank">Tasks API</a> ·
-        <a href="${base}/api/clip?annotator=${encodeURIComponent(id)}" target="_blank">Clip API</a> ·
-        <a href="${base}/api/debug?annotator=${encodeURIComponent(id)}" target="_blank">Debug</a>`;
-      document.body.appendChild(c);
+      container.innerHTML = `Quick Links:
+          <a href="${base}/meta-v2/index.html">Meta V2</a> &bull;
+          <a href="${base}/">Stage 2</a> &bull;
+          <a href="${base}/stage2/qa-dashboard.html">QA Dashboard</a> &bull;
+          <a href="${base}/api/tasks?stage=2&annotator_id=${encodeURIComponent(id)}&limit=5" target="_blank">Tasks API</a> &bull;
+          <a href="${base}/api/clip?annotator=${encodeURIComponent(id)}" target="_blank">Clip API</a> &bull;
+          <a href="${base}/api/debug?annotator=${encodeURIComponent(id)}" target="_blank">Debug</a> &bull;
+          Build <span data-build-sha>dev</span>`;
+      document.body.appendChild(container);
     })();
   </script>
 
@@ -1290,3 +1292,9 @@
   </script>
 </body>
 </html>
+
+
+
+
+
+

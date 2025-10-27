@@ -1858,23 +1858,70 @@ async function trySyncWithBackoff(){
   }
 }
 
-function bindUI(){
-  qs('startBtn').addEventListener('click', async ()=>{
-    qs('downloadStatus').textContent = 'Loading tasks...';
-    try{
-      await loadManifest();
-      const prefill = await loadPrefillForCurrent();
-      if(prefill){ await loadTranslationAndCodeSwitch(prefill); }
-      loadAudio();
-      prefetchNext();
-      EAQ.state.startedAt = Date.now();
-      show('screen_transcript');
-      refreshTimeline();
-      qs('downloadStatus').textContent = 'Tasks loaded.';
-    }catch{
-      qs('downloadStatus').textContent = 'Failed to load tasks. Using offline queue.';
+let __eaDiagTimer = null;
+let __eaDiagUpdating = false;
+let __eaStage2Booting = false;
+
+async function __ea_updateDiag(){
+  const diagEl = qs('diag');
+  if(!diagEl || __eaDiagUpdating) return;
+  __eaDiagUpdating = true;
+  try{
+    const item = currentItem();
+    let queueSize = null;
+    if(typeof EAIDB !== 'undefined' && EAIDB && typeof EAIDB.peekBatch === 'function'){
+      try{
+        const pending = await EAIDB.peekBatch(50);
+        queueSize = Array.isArray(pending) ? pending.length : 0;
+      }catch{
+        queueSize = 'err';
+      }
     }
-  });
+    const payload = {
+      asset: item && (item.asset_id || item.id || item.clip_id || 'none') || 'none',
+      q: queueSize == null ? 0 : queueSize,
+      online: typeof navigator !== 'undefined' && navigator && 'onLine' in navigator ? (navigator.onLine ? 'online' : 'offline') : 'unknown',
+      build: (typeof window !== 'undefined' && window.__BUILD && window.__BUILD.sha) ? window.__BUILD.sha : 'dev'
+    };
+    if(queueSize === 'err'){ payload.q = 'err'; }
+    diagEl.textContent = JSON.stringify(payload);
+  } finally {
+    __eaDiagUpdating = false;
+  }
+}
+
+async function startStage2(options = {}){
+  if(__eaStage2Booting) return;
+  __eaStage2Booting = true;
+  const statusBox = qs('downloadStatus');
+  if(statusBox){
+    statusBox.textContent = options.source === 'auto' ? 'Auto-loading tasks...' : 'Loading tasks...';
+  }
+  try{
+    await loadManifest();
+    const prefill = await loadPrefillForCurrent();
+    if(prefill){ await loadTranslationAndCodeSwitch(prefill); }
+    loadAudio();
+    prefetchNext();
+    EAQ.state.startedAt = Date.now();
+    show('screen_transcript');
+    refreshTimeline();
+    if(statusBox){
+      statusBox.textContent = 'Tasks loaded.';
+    }
+  }catch(err){
+    if(statusBox){
+      statusBox.textContent = 'Failed to load tasks. Using offline queue.';
+    }
+    try{ console.warn('Stage 2 start failed', err); }catch{}
+  }finally{
+    __eaStage2Booting = false;
+    __ea_updateDiag();
+  }
+}
+
+function bindUI(){
+  qs('startBtn').addEventListener('click', ()=>{ startStage2({ source: 'manual' }); });
 
   qs('transcriptNext').addEventListener('click', ()=>{
     const box = qs('transcriptVTT');
@@ -2065,7 +2112,8 @@ function bindUI(){
 window.addEventListener('load', ()=>{
   EAQ.state.annotator = getAnnotatorId();
   bindUI();
-  window.addEventListener('online', ()=>{ trySyncWithBackoff(); });
+  window.addEventListener('online', ()=>{ trySyncWithBackoff(); __ea_updateDiag(); });
+  window.addEventListener('offline', ()=>{ __ea_updateDiag(); });
   if('serviceWorker' in navigator){
     navigator.serviceWorker.addEventListener('message', (ev)=>{
       if(ev && ev.data && ev.data.type==='ea-sync'){ trySyncWithBackoff(); }
@@ -2195,6 +2243,11 @@ window.addEventListener('load', ()=>{
       alert('Local data cleared.');
     });
   }
+  if(__eaDiagTimer==null){
+    __ea_updateDiag();
+    __eaDiagTimer = setInterval(()=>{ __ea_updateDiag(); }, 1000);
+  }
+  startStage2({ source: 'auto' });
 });
 
 // Prefill loader and alignment helpers
