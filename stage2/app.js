@@ -100,6 +100,8 @@ const DIAR_SNAP_SEC = 0.12;
 
 let voiceHotkeyBound = false;
 
+const TRANSCRIPT_MISSING_NOTE = 'WEBVTT\n\nNOTE No transcript available; please add manually or contact support.';
+
 const EMOTION_OPTIONS = [
   { id: 'neutral', label: 'Neutral', color: '#6b7280', background: 'rgba(107,114,128,0.35)' },
   { id: 'happy', label: 'Happy', color: '#f59e0b', background: 'rgba(245,158,11,0.38)' },
@@ -1862,6 +1864,29 @@ let __eaDiagTimer = null;
 let __eaDiagUpdating = false;
 let __eaStage2Booting = false;
 
+function applyTranscriptNotice(){
+  const box = qs('transcriptVTT');
+  const container = qs('screen_transcript');
+  if(!box || !container) return;
+  const raw = (EAQ.state.transcriptVTT || '').trim();
+  const normalized = raw.replace(/\s+/g, '').toUpperCase();
+  const isEmpty = !raw || normalized === 'WEBVTT';
+  if(isEmpty){
+    container.classList.add('missing-transcript');
+    const currentValue = (box.value || '').trim();
+    const currentNormalized = currentValue.replace(/\s+/g, '').toUpperCase();
+    if(!currentValue || currentNormalized === 'WEBVTT'){
+      box.value = TRANSCRIPT_MISSING_NOTE + '\n';
+    }
+  } else {
+    container.classList.remove('missing-transcript');
+    const trimmed = box.value.trim();
+    if(trimmed === TRANSCRIPT_MISSING_NOTE){
+      box.value = raw;
+    }
+  }
+}
+
 async function __ea_updateDiag(){
   const diagEl = qs('diag');
   if(!diagEl || __eaDiagUpdating) return;
@@ -1901,6 +1926,7 @@ async function startStage2(options = {}){
     await loadManifest();
     const prefill = await loadPrefillForCurrent();
     if(prefill){ await loadTranslationAndCodeSwitch(prefill); }
+    applyTranscriptNotice();
     loadAudio();
     prefetchNext();
     EAQ.state.startedAt = Date.now();
@@ -1931,6 +1957,16 @@ function bindUI(){
     show('screen_translation');
     runValidationAndDisplay('screen_translation');
   });
+
+  const transcriptBox = qs('transcriptVTT');
+  if(transcriptBox){
+    transcriptBox.addEventListener('input', ()=>{
+      const container = qs('screen_transcript');
+      if(container){
+        container.classList.remove('missing-transcript');
+      }
+    });
+  }
 
   const lockTranslation = qs('lockTranslation');
   if(lockTranslation){
@@ -2419,6 +2455,7 @@ async function loadPrefillForCurrent(){
   EAQ.state.clipFlagged = clipPrefill;
   if(clipToggle){ clipToggle.checked = EAQ.state.clipFlagged; }
   refreshTimeline();
+  applyTranscriptNotice();
   return prefill;
 }
 

@@ -1,0 +1,113 @@
+{
+  "id": "annotate_checkpoint_20240609_stage2_meta_upgrade",
+  "created_at_utc": "2024-06-09T00:00:00Z",
+  "context": {
+    "branch": "main",
+    "workspace": "C:/Users/maanh/OneDrive/Documents/GitHub/annotate",
+    "notes": [
+      "Stage 2 now auto-starts, exposes diagnostics, and no longer relies on Supabase for the seed task.",
+      "Meta V2 gained offline queuing, status badges, and visual metadata controls.",
+      "Build metadata is generated at build time and injected across major pages.",
+      "QA dashboard surfaces local summary data via the new /api/export/summary endpoint."
+    ]
+  },
+  "changed_files": [
+    {
+      "path": "api/tasks.py",
+      "status": "modified",
+      "summary": "Added CACHE_HEADERS, seed manifest helper, and Supabase fallback to serve the synthetic_long_clip bundle when remote tasks fail."
+    },
+    {
+      "path": "stage2/app.js",
+      "status": "modified",
+      "summary": "Introduced startStage2(), periodic diagnostics overlay updates, and auto-init on window load."
+    },
+    {
+      "path": "stage2/index.html",
+      "status": "modified",
+      "summary": "Reordered scripts to load app.buildmeta.js and injected diag overlay plus Quick Links footer with build SHA."
+    },
+    {
+      "path": "api/submit.py",
+      "status": "modified",
+      "summary": "Persisted meta submissions locally under data/meta_v2_output when Supabase is unavailable."
+    },
+    {
+      "path": "api/export.py",
+      "status": "modified",
+      "summary": "Added STAGE2_OUTPUT_DIR scan capability and exposed /api/export/summary for offline QA metrics."
+    },
+    {
+      "path": "stage2/qa-dashboard.js",
+      "status": "modified",
+      "summary": "Added renderSummary/loadSummary helpers, invoked summary fetch on DOMContentLoaded, and exported them."
+    },
+    {
+      "path": "stage2/qa-dashboard.html",
+      "status": "modified",
+      "summary": "Loaded build metadata script and extended Quick Links footer with build SHA."
+    },
+    {
+      "path": "meta-v2/index.html",
+      "status": "modified",
+      "summary": "Inserted status notice (save badge, annotator ID, build SHA), new lips/gestures buttons, notes textarea, and offline scripts."
+    },
+    {
+      "path": "public/meta-v2.js",
+      "status": "modified",
+      "summary": "Rebuilt meta state manager with dirty tracking, localStorage annotator IDs, offline queue hooks, and note handling."
+    },
+    {
+      "path": "public/idb.meta.js",
+      "status": "added",
+      "summary": "IndexedDB helper (EAIDB_META) for Meta V2 offline queue."
+    },
+    {
+      "path": "public/meta-v2.offline.js",
+      "status": "added",
+      "summary": "Enqueue/drain logic for Meta V2 records that syncs on reconnect and raises status events."
+    },
+    {
+      "path": "scripts/inject-build-meta.js",
+      "status": "added",
+      "summary": "Build-time script that writes public/__build.json using VERCEL_GIT_COMMIT_SHA/GITHUB_SHA."
+    },
+    {
+      "path": "package.json",
+      "status": "modified",
+      "summary": "Prepended build script with node scripts/inject-build-meta.js."
+    },
+    {
+      "path": "public/app.buildmeta.js",
+      "status": "added",
+      "summary": "Frontend loader that fetches __build.json, populates window.__BUILD, and updates data-build-sha/time spans."
+    },
+    {
+      "path": "stage2/review/index.html",
+      "status": "modified",
+      "summary": "Displayed build SHA in review header and loaded build metadata script."
+    },
+    {
+      "path": "stage2/qa-dashboard.html",
+      "status": "modified",
+      "summary": "Quick Links footer now shows build SHA (uses build metadata script)."
+    }
+  ],
+  "untracked_items": [
+    ".venv/",
+    "public/__build.json (generated post-build; not yet present)",
+    "scripts/publish_prefill.py (already dirty before checkpoint; untouched here)"
+  ],
+  "recommended_follow_up": [
+    "Run npm install if dependencies changed (none expected).",
+    "Generate build metadata: node scripts/inject-build-meta.js (or npm run build).",
+    "Execute npm run test or project-specific validation.",
+    "Manually verify /stage2, /meta-v2, /stage2/qa-dashboard, and /stage2/review for build badge + offline behavior."
+  ],
+  "meta": {
+    "build_script": "npm run build",
+    "seed_clip": "/public/sample.mp4 (synthetic_long_clip bundle)",
+    "api_summary_endpoint": "/api/export/summary",
+    "offline_meta_dir": "data/meta_v2_output/<annotator>/"
+  }
+}

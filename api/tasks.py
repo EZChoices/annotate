@@ -36,6 +36,18 @@ PREFILL_TR_CTM = os.environ.get("SUPABASE_KEEP_TR_CTM_COL")
 PREFILL_TL_VTT = os.environ.get("SUPABASE_KEEP_TL_VTT_COL")
 PREFILL_CS_VTT = os.environ.get("SUPABASE_KEEP_CS_VTT_COL")
 
+# Provide default column names if env vars are missing
+if not PREFILL_DIA:
+    PREFILL_DIA = "diarization_rttm_url"
+if not PREFILL_TR_VTT:
+    PREFILL_TR_VTT = "transcript_vtt_url"
+if not PREFILL_TR_CTM:
+    PREFILL_TR_CTM = "transcript_ctm_url"
+if not PREFILL_TL_VTT:
+    PREFILL_TL_VTT = "translation_vtt_url"
+if not PREFILL_CS_VTT:
+    PREFILL_CS_VTT = "code_switch_vtt_url"
+
 # Stage2 assignment tracking (to avoid duplicates across annotators)
 ASSIGN2_TABLE = os.environ.get("SUPABASE_ASSIGN_STAGE2_TABLE", "clip_assignments_stage2")
 ASSIGN2_FILE_COL = os.environ.get("SUPABASE_ASSIGN_STAGE2_FILE_COL", "file_name")
@@ -174,6 +186,36 @@ def _seed_manifest(annotator_id: str, stage: int) -> Dict[str, Any]:
         "stage": stage,
         "items": [manifest_item],
     }
+
+
+def _prefill_local_url(fname: str, filename: str) -> Optional[str]:
+    if not fname or not filename:
+        return None
+    base = Path("public/data/stage2_output")
+    normalized = str(fname).strip().strip("/\\")
+    candidates = []
+    if normalized:
+        candidates.append(normalized)
+    stem = Path(normalized).stem if normalized else ""
+    if stem and stem not in candidates:
+        candidates.append(stem)
+    for candidate in candidates:
+        rel = Path(*candidate.split("/"))
+        local_path = base / rel / "pass_1" / filename
+        if local_path.exists():
+            return "/" + local_path.as_posix()
+    return None
+
+
+def _resolve_prefill_url(row: Dict[str, Any], column: Optional[str], fname: str, fallback_filename: Optional[str]) -> Optional[str]:
+    value = None
+    if column:
+        value = row.get(column)
+    if value:
+        return value
+    if fallback_filename:
+        return _prefill_local_url(fname, fallback_filename)
+    return None
 
 QA_F1_KEYS = [
     "rolling_median_code_switch_f1",
@@ -1157,11 +1199,13 @@ async def get_tasks(
                         "poster_url": None,
                     },
                     "prefill": {
-                        "diarization_rttm_url": r.get(PREFILL_DIA) if PREFILL_DIA else None,
-                        "transcript_vtt_url": r.get(PREFILL_TR_VTT) if PREFILL_TR_VTT else None,
-                        "transcript_ctm_url": r.get(PREFILL_TR_CTM) if PREFILL_TR_CTM else None,
-                        "translation_vtt_url": r.get(PREFILL_TL_VTT) if PREFILL_TL_VTT else None,
-                        "code_switch_vtt_url": r.get(PREFILL_CS_VTT) if PREFILL_CS_VTT else None,
+                        "diarization_rttm_url": _resolve_prefill_url(r, PREFILL_DIA, fname, "diarization.rttm"),
+                        "transcript_vtt_url": _resolve_prefill_url(r, PREFILL_TR_VTT, fname, "transcript.vtt"),
+                        "transcript_ctm_url": _resolve_prefill_url(r, PREFILL_TR_CTM, fname, None),
+                        "translation_vtt_url": _resolve_prefill_url(r, PREFILL_TL_VTT, fname, "translation.vtt"),
+                        "code_switch_vtt_url": _resolve_prefill_url(r, PREFILL_CS_VTT, fname, "code_switch_spans.json"),
+                        "events_vtt_url": _resolve_prefill_url(r, "events_vtt_url", fname, "events.vtt"),
+                        "emotion_vtt_url": _resolve_prefill_url(r, "emotion_vtt_url", fname, "emotion.vtt"),
                     },
                     "is_gold": is_gold,
                     "stage0_status": "validated",
