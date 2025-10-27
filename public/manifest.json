@@ -1,11 +1,32 @@
-[
-  {
-    "id": "synthetic_long_clip",
-    "name": "synthetic long clip",
-    "stage": "stage2_output",
-    "emotion_url": "/public/data/stage2_output/synthetic_long_clip/pass_2/emotion.vtt",
-    "events_url": "/public/data/stage2_output/synthetic_long_clip/pass_2/events.vtt",
-    "transcript_url": "/public/data/stage2_output/synthetic_long_clip/pass_2/transcript.vtt",
-    "translation_url": "/public/data/stage2_output/synthetic_long_clip/pass_2/translation.vtt"
-  }
-]
+{
+  "annotator_id": "auto",
+  "stage": 2,
+  "items": [
+    {
+      "asset_id": "synthetic_long_clip",
+      "media": {
+        "audio_proxy_url": "/sample.mp4",
+        "video_hls_url": null,
+        "poster_url": null
+      },
+      "prefill": {
+        "diarization_rttm_url": "/data/stage2_output/synthetic_long_clip/pass_2/diarization.rttm",
+        "transcript_vtt_url": "/data/stage2_output/synthetic_long_clip/pass_2/transcript.vtt",
+        "transcript_ctm_url": null,
+        "translation_vtt_url": "/data/stage2_output/synthetic_long_clip/pass_2/translation.vtt",
+        "code_switch_vtt_url": null,
+        "events_vtt_url": "/data/stage2_output/synthetic_long_clip/pass_2/events.vtt",
+        "emotion_vtt_url": "/data/stage2_output/synthetic_long_clip/pass_2/emotion.vtt",
+        "code_switch_spans_url": "/data/stage2_output/synthetic_long_clip/pass_2/code_switch_spans.json"
+      },
+      "stage0_status": "seed",
+      "stage1_status": "seed",
+      "language_hint": "ar",
+      "notes": "auto-generated",
+      "assigned_cell": "unknown:unknown:unknown:unknown",
+      "double_pass_target": false,
+      "pass_number": 1,
+      "previous_annotators": []
+    }
+  ]
+}
