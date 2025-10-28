@@ -49,8 +49,6 @@ if not PREFILL_DIA:
     PREFILL_DIA = "diarization_rttm_url"
 if not PREFILL_TR_VTT:
     PREFILL_TR_VTT = "transcript_vtt_url"
-if not PREFILL_TR_CTM:
-    PREFILL_TR_CTM = "transcript_ctm_url"
 if not PREFILL_TL_VTT:
     PREFILL_TL_VTT = "translation_vtt_url"
 if not PREFILL_CS_VTT:
