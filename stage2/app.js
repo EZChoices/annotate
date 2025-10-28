@@ -1,4 +1,4 @@
-﻿"use strict";
+"use strict";
 
 (function(){
   try{
@@ -113,13 +113,13 @@ let voiceHotkeyBound = false;
 function setAudioSource(item){
   const audioUrl = (item && item.media && (item.media.audio_proxy_url || item.media.video_hls_url)) || null;
   if(!audioUrl){
-    console.error('🚨 No valid audio source found for item:', item ? item.asset_id : 'unknown', item);
+    console.error('?? No valid audio source found for item:', item ? item.asset_id : 'unknown', item);
     try{
-      alert(❌ Missing audio file for asset_id: \nCheck if \"audio_proxy_url\" or \"video_hls_url\" exists in the manifest.);
+      alert(? Missing audio file for asset_id: \nCheck if \"audio_proxy_url\" or \"video_hls_url\" exists in the manifest.);
     }catch{}
     return null;
   }
-  console.log('🎧 Using audio source:', audioUrl);
+  console.log('?? Using audio source:', audioUrl);
   return audioUrl;
 }
 
@@ -456,7 +456,7 @@ function parseVttSafe(text){
 function chunkTextByPunctuation(text){
   const norm = normalizeCueText(text);
   if(!norm) return [];
-  const parts = norm.match(/[^?!.,â€¦]+[?!.,â€¦]?/g);
+  const parts = norm.match(/[^?!.,…]+[?!.,…]?/g);
   if(!parts) return [norm];
   return parts.map(part=> normalizeCueText(part)).filter(Boolean);
 }
@@ -668,9 +668,9 @@ function normalizeCueVoiceTag(text){
     return `<v ${normalizedVoice}>${rest}`;
   }
   const patterns = [
-    /^(?:speaker|spk|spkr|voice)\s*([A-Za-z0-9]+)\s*[:ï¼š\-]\s*([\s\S]*)$/i,
-    /^(S\d{1,2})\s*[:ï¼š\-]\s*([\s\S]*)$/i,
-    /^([A-Za-z])\s*[:ï¼š\-]\s*([\s\S]*)$/i
+    /^(?:speaker|spk|spkr|voice)\s*([A-Za-z0-9]+)\s*[:：\-]\s*([\s\S]*)$/i,
+    /^(S\d{1,2})\s*[:：\-]\s*([\s\S]*)$/i,
+    /^([A-Za-z])\s*[:：\-]\s*([\s\S]*)$/i
   ];
   for(const pattern of patterns){
     const match = pattern.exec(trimmed);
@@ -1223,7 +1223,7 @@ function renderDiarTimeline(){
     el.style.width = `${Math.max(width * 100, 0.75)}%`;
     el.style.setProperty('--diar-color', colorForSpeaker(seg.speaker));
     const displayLabel = seg.label || seg.speaker || `S${idx+1}`;
-    el.title = `${displayLabel}: ${secToLabel(seg.start)} â†’ ${secToLabel(seg.end)}`;
+    el.title = `${displayLabel}: ${secToLabel(seg.start)} → ${secToLabel(seg.end)}`;
     el.setAttribute('role', 'button');
     el.setAttribute('aria-label', `${displayLabel} ${secToLabel(seg.start)} to ${secToLabel(seg.end)}`);
     el.dataset.index = String(idx);
@@ -1404,16 +1404,16 @@ async function loadManifest(){
     const firstItem = payload && payload.items && payload.items[0];
     if(firstItem){
       clearManifestWarning();
-      try{ console.log('✅ Using live manifest item:', firstItem.asset_id); }catch{}
+      try{ console.log('? Using live manifest item:', firstItem.asset_id); }catch{}
       if(firstItem.prefill && firstItem.prefill.transcript_vtt_url){
-        try{ console.log('🗒 Transcript URL:', firstItem.prefill.transcript_vtt_url); }catch{}
+        try{ console.log('?? Transcript URL:', firstItem.prefill.transcript_vtt_url); }catch{}
       } else {
-        try{ console.error('🚫 No transcript_vtt_url found in manifest for', firstItem.asset_id); }catch{}
+        try{ console.error('?? No transcript_vtt_url found in manifest for', firstItem.asset_id); }catch{}
       }
     } else {
       const diag = payload && payload.__diag ? ` (${payload.__diag})` : '';
-      console.warn('⚠️ Manifest is empty, falling back to seed item' + diag);
-      showManifestWarning('⚠️ Manifest is empty. Check Supabase tasks configuration.');
+      console.warn('?? Manifest is empty, falling back to seed item' + diag);
+      showManifestWarning('?? Manifest is empty. Check Supabase tasks configuration.');
     }
     if(isDbg()){
       const dbgItem = payload && payload.items && payload.items[0];
@@ -1533,7 +1533,7 @@ function loadAudio(){
     if(!existingWarning){
       const msg = document.createElement('div');
       msg.id = warningId;
-      msg.textContent = `âš ï¸ Audio missing for asset: ${it && it.asset_id ? it.asset_id : 'unknown'}`;
+      msg.textContent = `⚠️ Audio missing for asset: ${it && it.asset_id ? it.asset_id : 'unknown'}`;
       msg.style.cssText = 'color:red;padding:1rem;font-weight:bold;';
       document.body.appendChild(msg);
     }
@@ -1565,13 +1565,13 @@ function loadAudio(){
   if(transcriptUrl){
     fetchWithProxy(transcriptUrl).then((res)=>{
       if(res && res.ok){
-        console.log(`ðŸ—’ Transcript found for ${it.asset_id}`);
+        console.log(`🗒 Transcript found for ${it.asset_id}`);
         return res.text().catch(()=>null);
       }
       throw new Error(`Transcript not found (${res ? res.status : 'unknown'})`);
     }).catch((err)=>{
-      console.error(`ðŸš« Transcript missing for ${it && it.asset_id ? it.asset_id : 'unknown'}:`, err && err.message ? err.message : err);
-      try{ alert(`âŒ Transcript fetch failed for ${it && it.asset_id ? it.asset_id : 'unknown'}`); }catch{}
+      console.error(`🚫 Transcript missing for ${it && it.asset_id ? it.asset_id : 'unknown'}:`, err && err.message ? err.message : err);
+      try{ alert(`❌ Transcript fetch failed for ${it && it.asset_id ? it.asset_id : 'unknown'}`); }catch{}
     });
   }
 }
@@ -2280,8 +2280,40 @@ function bindUI(){
   updateDiarControlsAvailability();
 }
 
-window.addEventListener('load', ()=>{
+window.addEventListener('load', async ()=>{
   EAQ.state.annotator = getAnnotatorId();
+  try {
+    console.log('⚙️ Auto-starting Stage2 manifest fetch...');
+    const annotatorId = EAQ.state.annotator || 'anonymous';
+    const stage = 2;
+    const res = await fetch(`/api/tasks?stage=${stage}&annotator_id=${encodeURIComponent(annotatorId)}`);
+    if(!res.ok) throw new Error(`Manifest fetch failed (${res.status})`);
+    const manifest = await res.json();
+    if(!manifest || !Array.isArray(manifest.items) || manifest.items.length === 0){
+      showManifestWarning('⚠️ No manifest items returned from /api/tasks');
+      console.error('Manifest empty or invalid:', manifest);
+    } else {
+      await hydrateManifestTranslations(manifest);
+      EAQ.state.manifest = manifest;
+      saveManifestToStorage(manifest);
+      const firstItem = manifest.items[0];
+      clearManifestWarning();
+      try{ console.log('✅ Using live manifest item (auto-start):', firstItem.asset_id); }catch{}
+      if(firstItem.prefill && firstItem.prefill.transcript_vtt_url){
+        try{ console.log('🗒 Transcript URL:', firstItem.prefill.transcript_vtt_url); }catch{}
+      }
+      const prefill = await loadPrefillForCurrent();
+      if(prefill){ await loadTranslationAndCodeSwitch(prefill); }
+      loadAudio();
+      prefetchNext();
+      EAQ.state.startedAt = Date.now();
+      show('screen_transcript');
+      refreshTimeline();
+    }
+  } catch(err) {
+    showManifestWarning('❌ Auto-load failed: ' + err.message);
+    console.error('🚨 Auto-load failed:', err);
+  }
   bindUI();
   window.addEventListener('online', ()=>{ trySyncWithBackoff(); __ea_updateDiag(); });
   window.addEventListener('offline', ()=>{ __ea_updateDiag(); });
@@ -2824,12 +2856,12 @@ function renderTranslationList(options){
 
     const header = document.createElement('div');
     header.className = 'translation-row__header';
-    header.innerHTML = `<strong>Cue #${idx+1}</strong><span>${secToLabel(cue.start)} â†’ ${secToLabel(cue.end)}</span>`;
+    header.innerHTML = `<strong>Cue #${idx+1}</strong><span>${secToLabel(cue.start)} → ${secToLabel(cue.end)}</span>`;
 
     const original = document.createElement('div');
     original.className = 'translation-row__original';
     const originalText = stripSpeakerTags(cue.text);
-    original.textContent = originalText || 'â€”';
+    original.textContent = originalText || '—';
 
     const textarea = document.createElement('textarea');
     textarea.className = 'translation-row__input';
@@ -3330,7 +3362,7 @@ function groupLatinFromTranscript(){
   cues.forEach(cue=>{
     const text = stripSpeakerTags(cue.text||'');
     if(!text) return;
-    const matches = Array.from(text.matchAll(/[A-Za-z][A-Za-z'â€™\-]*/g));
+    const matches = Array.from(text.matchAll(/[A-Za-z][A-Za-z'’\-]*/g));
     if(!matches.length) return;
     let current = [];
     const flush = ()=>{
@@ -3512,7 +3544,7 @@ function renderDiarList(){
     });
 
     const info = document.createElement('span');
-    info.textContent = `${secToLabel(seg.start)} â†’ ${secToLabel(seg.end)}`;
+    info.textContent = `${secToLabel(seg.start)} → ${secToLabel(seg.end)}`;
     info.style.flex = '1 1 auto';
     info.style.minWidth = '0';
     info.style.marginLeft = '.75rem';
@@ -3524,7 +3556,7 @@ function renderDiarList(){
     duration.textContent = `${diarSegmentDuration(seg).toFixed(2)}s`;
 
     const mergePrev = document.createElement('button');
-    mergePrev.textContent = 'Merge â—€';
+    mergePrev.textContent = 'Merge ◀';
     mergePrev.disabled = idx === 0;
     mergePrev.addEventListener('click', (ev)=>{
       ev.stopPropagation();
@@ -3532,7 +3564,7 @@ function renderDiarList(){
     });
 
     const mergeNext = document.createElement('button');
-    mergeNext.textContent = 'Merge â–¶';
+    mergeNext.textContent = 'Merge ▶';
     mergeNext.disabled = idx === segments.length - 1;
     mergeNext.addEventListener('click', (ev)=>{
       ev.stopPropagation();
@@ -4480,6 +4512,7 @@ if(typeof window !== 'undefined'){
     computeSafetyCoverageCounts
   });
 }
+
 
 
 
