@@ -1,4 +1,4 @@
-"use strict";
+﻿"use strict";
 
 (function(){
   try{
@@ -115,7 +115,7 @@ function setAudioSource(item){
   if(!audioUrl){
     console.error('🚨 No valid audio source found for item:', item ? item.asset_id : 'unknown', item);
     try{
-      alert(`❌ Missing audio file for asset_id: ${item && item.asset_id ? item.asset_id : 'unknown'}\nCheck if "audio_proxy_url" or "video_hls_url" exists in the manifest.`);
+      alert(❌ Missing audio file for asset_id: \nCheck if \"audio_proxy_url\" or \"video_hls_url\" exists in the manifest.);
     }catch{}
     return null;
   }
@@ -346,6 +346,24 @@ function dbgPrint(obj){
   }catch{}
 }
 
+function showManifestWarning(message){
+  let banner = document.getElementById('ea_manifest_warning');
+  if(!banner){
+    banner = document.createElement('div');
+    banner.id = 'ea_manifest_warning';
+    banner.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:10000;background:#b91c1c;color:#fff;padding:10px 16px;border-radius:8px;font:14px/1.3 sans-serif;box-shadow:0 4px 12px rgba(0,0,0,0.25);';
+    document.body.appendChild(banner);
+  }
+  banner.textContent = message;
+}
+
+function clearManifestWarning(){
+  const banner = document.getElementById('ea_manifest_warning');
+  if(banner){
+    banner.remove();
+  }
+}
+
 function escapeHtml(str){
   return String(str||'').replace(/[&<>"']/g, (s)=>({
     '&':'&amp;',
@@ -438,7 +456,7 @@ function parseVttSafe(text){
 function chunkTextByPunctuation(text){
   const norm = normalizeCueText(text);
   if(!norm) return [];
-  const parts = norm.match(/[^?!.,…]+[?!.,…]?/g);
+  const parts = norm.match(/[^?!.,â€¦]+[?!.,â€¦]?/g);
   if(!parts) return [norm];
   return parts.map(part=> normalizeCueText(part)).filter(Boolean);
 }
@@ -650,9 +668,9 @@ function normalizeCueVoiceTag(text){
     return `<v ${normalizedVoice}>${rest}`;
   }
   const patterns = [
-    /^(?:speaker|spk|spkr|voice)\s*([A-Za-z0-9]+)\s*[:：\-]\s*([\s\S]*)$/i,
-    /^(S\d{1,2})\s*[:：\-]\s*([\s\S]*)$/i,
-    /^([A-Za-z])\s*[:：\-]\s*([\s\S]*)$/i
+    /^(?:speaker|spk|spkr|voice)\s*([A-Za-z0-9]+)\s*[:ï¼š\-]\s*([\s\S]*)$/i,
+    /^(S\d{1,2})\s*[:ï¼š\-]\s*([\s\S]*)$/i,
+    /^([A-Za-z])\s*[:ï¼š\-]\s*([\s\S]*)$/i
   ];
   for(const pattern of patterns){
     const match = pattern.exec(trimmed);
@@ -1205,7 +1223,7 @@ function renderDiarTimeline(){
     el.style.width = `${Math.max(width * 100, 0.75)}%`;
     el.style.setProperty('--diar-color', colorForSpeaker(seg.speaker));
     const displayLabel = seg.label || seg.speaker || `S${idx+1}`;
-    el.title = `${displayLabel}: ${secToLabel(seg.start)} → ${secToLabel(seg.end)}`;
+    el.title = `${displayLabel}: ${secToLabel(seg.start)} â†’ ${secToLabel(seg.end)}`;
     el.setAttribute('role', 'button');
     el.setAttribute('aria-label', `${displayLabel} ${secToLabel(seg.start)} to ${secToLabel(seg.end)}`);
     el.dataset.index = String(idx);
@@ -1383,16 +1401,30 @@ async function loadManifest(){
     await hydrateManifestTranslations(payload);
     EAQ.state.manifest = payload;
     saveManifestToStorage(payload);
+    const firstItem = payload && payload.items && payload.items[0];
+    if(firstItem){
+      clearManifestWarning();
+      try{ console.log('✅ Using live manifest item:', firstItem.asset_id); }catch{}
+      if(firstItem.prefill && firstItem.prefill.transcript_vtt_url){
+        try{ console.log('🗒 Transcript URL:', firstItem.prefill.transcript_vtt_url); }catch{}
+      } else {
+        try{ console.error('🚫 No transcript_vtt_url found in manifest for', firstItem.asset_id); }catch{}
+      }
+    } else {
+      const diag = payload && payload.__diag ? ` (${payload.__diag})` : '';
+      console.warn('⚠️ Manifest is empty, falling back to seed item' + diag);
+      showManifestWarning('⚠️ Manifest is empty. Check Supabase tasks configuration.');
+    }
     if(isDbg()){
-      const firstItem = payload && payload.items && payload.items[0];
+      const dbgItem = payload && payload.items && payload.items[0];
       dbgPrint({
         step: 'loadManifest',
         diag: payload && payload.__diag,
         count: payload && payload.items ? payload.items.length : 0,
-        item: firstItem ? {
-          asset_id: firstItem.asset_id,
-          prefill: firstItem.prefill,
-          prefill_source: firstItem.__prefill_source
+        item: dbgItem ? {
+          asset_id: dbgItem.asset_id,
+          prefill: dbgItem.prefill,
+          prefill_source: dbgItem.__prefill_source
         } : null
       });
     }
@@ -1501,7 +1533,7 @@ function loadAudio(){
     if(!existingWarning){
       const msg = document.createElement('div');
       msg.id = warningId;
-      msg.textContent = `⚠️ Audio missing for asset: ${it && it.asset_id ? it.asset_id : 'unknown'}`;
+      msg.textContent = `âš ï¸ Audio missing for asset: ${it && it.asset_id ? it.asset_id : 'unknown'}`;
       msg.style.cssText = 'color:red;padding:1rem;font-weight:bold;';
       document.body.appendChild(msg);
     }
@@ -1533,13 +1565,13 @@ function loadAudio(){
   if(transcriptUrl){
     fetchWithProxy(transcriptUrl).then((res)=>{
       if(res && res.ok){
-        console.log(`🗒 Transcript found for ${it.asset_id}`);
+        console.log(`ðŸ—’ Transcript found for ${it.asset_id}`);
         return res.text().catch(()=>null);
       }
       throw new Error(`Transcript not found (${res ? res.status : 'unknown'})`);
     }).catch((err)=>{
-      console.error(`🚫 Transcript missing for ${it && it.asset_id ? it.asset_id : 'unknown'}:`, err && err.message ? err.message : err);
-      try{ alert(`❌ Transcript fetch failed for ${it && it.asset_id ? it.asset_id : 'unknown'}`); }catch{}
+      console.error(`ðŸš« Transcript missing for ${it && it.asset_id ? it.asset_id : 'unknown'}:`, err && err.message ? err.message : err);
+      try{ alert(`âŒ Transcript fetch failed for ${it && it.asset_id ? it.asset_id : 'unknown'}`); }catch{}
     });
   }
 }
@@ -2792,12 +2824,12 @@ function renderTranslationList(options){
 
     const header = document.createElement('div');
     header.className = 'translation-row__header';
-    header.innerHTML = `<strong>Cue #${idx+1}</strong><span>${secToLabel(cue.start)} → ${secToLabel(cue.end)}</span>`;
+    header.innerHTML = `<strong>Cue #${idx+1}</strong><span>${secToLabel(cue.start)} â†’ ${secToLabel(cue.end)}</span>`;
 
     const original = document.createElement('div');
     original.className = 'translation-row__original';
     const originalText = stripSpeakerTags(cue.text);
-    original.textContent = originalText || '—';
+    original.textContent = originalText || 'â€”';
 
     const textarea = document.createElement('textarea');
     textarea.className = 'translation-row__input';
@@ -3298,7 +3330,7 @@ function groupLatinFromTranscript(){
   cues.forEach(cue=>{
     const text = stripSpeakerTags(cue.text||'');
     if(!text) return;
-    const matches = Array.from(text.matchAll(/[A-Za-z][A-Za-z'’\-]*/g));
+    const matches = Array.from(text.matchAll(/[A-Za-z][A-Za-z'â€™\-]*/g));
     if(!matches.length) return;
     let current = [];
     const flush = ()=>{
@@ -3480,7 +3512,7 @@ function renderDiarList(){
     });
 
     const info = document.createElement('span');
-    info.textContent = `${secToLabel(seg.start)} → ${secToLabel(seg.end)}`;
+    info.textContent = `${secToLabel(seg.start)} â†’ ${secToLabel(seg.end)}`;
     info.style.flex = '1 1 auto';
     info.style.minWidth = '0';
     info.style.marginLeft = '.75rem';
@@ -3492,7 +3524,7 @@ function renderDiarList(){
     duration.textContent = `${diarSegmentDuration(seg).toFixed(2)}s`;
 
     const mergePrev = document.createElement('button');
-    mergePrev.textContent = 'Merge ◀';
+    mergePrev.textContent = 'Merge â—€';
     mergePrev.disabled = idx === 0;
     mergePrev.addEventListener('click', (ev)=>{
       ev.stopPropagation();
@@ -3500,7 +3532,7 @@ function renderDiarList(){
     });
 
     const mergeNext = document.createElement('button');
-    mergeNext.textContent = 'Merge ▶';
+    mergeNext.textContent = 'Merge â–¶';
     mergeNext.disabled = idx === segments.length - 1;
     mergeNext.addEventListener('click', (ev)=>{
       ev.stopPropagation();
@@ -4448,3 +4480,6 @@ if(typeof window !== 'undefined'){
     computeSafetyCoverageCounts
   });
 }
+
+
+
