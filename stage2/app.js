@@ -1252,20 +1252,29 @@ if(typeof window !== 'undefined'){
   catch{}
 }
 
-async function fetchWithProxy(url){
+async function fetchWithProxy(url, options = {}){
   if(!url) return null;
-  const options = { cache: 'no-store' };
+  const opts = Object.assign({ cache: 'no-store' }, options);
   try{
     if(isDbg()) console.log('[EA] fetch', url);
-    const res = await fetch(url, options);
-    if(res && res.ok) return res;
-  }catch{}
+    const res = await fetch(url, opts);
+    if(res && res.ok){
+      return res;
+    }
+    throw new Error(`HTTP ${res ? res.status : 'unknown'}`);
+  }catch(err){
+    try{ console.warn(`Primary fetch failed for ${url}: ${err && err.message ? err.message : err}`); }catch{}
+  }
   try{
     const fallback = `/api/proxy_audio?src=${encodeURIComponent(url)}`;
     if(isDbg()) console.log('[EA] fetch-fallback', fallback);
-    const res = await fetch(fallback, options);
-    if(res && res.ok) return res;
-  }catch{}
+    const res = await fetch(fallback, opts);
+    if(res && res.ok){
+      return res;
+    }
+  }catch(err){
+    try{ console.warn(`Proxy fetch failed for ${url}: ${err && err.message ? err.message : err}`); }catch{}
+  }
   return null;
 }
 
@@ -2379,12 +2388,15 @@ async function loadPrefillForCurrent(){
   // Transcript
   if(prefill.transcript_vtt_url){
     try{
-      let vttText = '';
       const res = await fetchWithProxy(prefill.transcript_vtt_url);
-      if(res) vttText = await res.text();
-      EAQ.state.transcriptVTT = vttText;
-      const parsed = vttText.trim() ? VTT.parse(vttText) : [];
-      normalizeTranscriptCues(parsed, { writeState: true });
+      if(res && res.ok){
+        const vttText = await res.text();
+        EAQ.state.transcriptVTT = vttText;
+        const parsed = vttText.trim() ? VTT.parse(vttText) : [];
+        normalizeTranscriptCues(parsed, { writeState: true });
+      } else {
+        try{ console.warn(`Skipping transcript parse for ${prefill.transcript_vtt_url}: bad response`); }catch{}
+      }
     } catch{}
   } else if(typeof prefill.transcript_vtt === 'string' && prefill.transcript_vtt.trim()){
     EAQ.state.transcriptVTT = prefill.transcript_vtt;
