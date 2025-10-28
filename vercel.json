@@ -1,22 +1,9 @@
 {
   "version": 2,
   "builds": [
-    { "src": "api/*.py", "use": "@vercel/python" },
-    { "src": "meta-v2/index.html", "use": "@vercel/static" },
-    { "src": "stage2/**/*", "use": "@vercel/static" },
-    { "src": "public/**/*", "use": "@vercel/static" }
+    { "src": "package.json", "use": "@vercel/next" }
   ],
-  "routes": [
-    { "src": "/api/(.*)", "dest": "/api/$1.py" },
-    { "src": "^/stage2$", "dest": "/stage2/index.html" },
-    { "src": "^/stage2/$", "dest": "/stage2/index.html" },
-    { "src": "^/stage2/review$", "dest": "/stage2/review/index.html" },
-    { "src": "^/stage2/review/$", "dest": "/stage2/review/index.html" },
-    { "src": "^/stage2/(.*)$", "dest": "/stage2/$1" },
-    { "src": "^/meta-v2$", "dest": "/meta-v2/index.html" },
-    { "src": "^/meta-v2/$", "dest": "/meta-v2/index.html" },
-    { "src": "^/meta-v2/(.*)$", "dest": "/meta-v2/$1" },
-    { "src": "/public/(.*)", "dest": "/public/$1" },
-    { "src": "/(.*)", "dest": "/stage2/index.html" }
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/$1" }
   ]
 }
