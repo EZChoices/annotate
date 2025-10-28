@@ -2387,8 +2387,19 @@ async function startStage2(seed){
   } catch(err) {
     showManifestWarning('Auto-load failed: ' + err.message);
     console.error('[Stage2] Auto-load failed:', err);
+  } finally {
+    __eaStage2Booting = false;
+    __ea_updateDiag();
   }
-  bindUI();
+}
+
+
+
+let __eaControlsBound = false;
+function initStage2Controls(){
+  if(__eaControlsBound) return;
+  __eaControlsBound = true;
+
   window.addEventListener('online', ()=>{ trySyncWithBackoff(); __ea_updateDiag(); });
   window.addEventListener('offline', ()=>{ __ea_updateDiag(); });
   if('serviceWorker' in navigator){
@@ -2396,7 +2407,7 @@ async function startStage2(seed){
       if(ev && ev.data && ev.data.type==='ea-sync'){ trySyncWithBackoff(); }
     });
   }
-  // Bind basic editing controls
+
   const a = qs('audio');
   EAQ.audio = a;
   qs('rewindBtn').addEventListener('click', ()=>{ if(a) a.currentTime = Math.max(0, a.currentTime - 3); });
@@ -2438,7 +2449,8 @@ async function startStage2(seed){
     for(let i=0;i<cues.length-1;i++){
       const cur = cues[i], nxt = cues[i+1];
       if(Math.abs(cur.end - nxt.start) < 0.25){
-        const merged = { start: cur.start, end: nxt.end, text: `${cur.text}\n${nxt.text}`.trim() };
+        const merged = { start: cur.start, end: nxt.end, text: `${cur.text}
+${nxt.text}`.trim() };
         cues.splice(i,2,merged);
         normalizeTranscriptCues(cues, { writeState: true });
         alignTranslationToTranscript({ preserveScroll: true });
@@ -2449,7 +2461,6 @@ async function startStage2(seed){
     }
   });
 
-  // Code-switch interactive overlay
   const langButtons = [
     ['btnEN','eng'],
     ['btnFR','fra'],
@@ -2465,16 +2476,12 @@ async function startStage2(seed){
   });
 
   const timelineContainer = qs('codeSwitchTimeline');
-  if(timelineContainer){
-    timelineContainer.addEventListener('click', ()=> selectCodeSwitchSpan(null));
-  }
+  if(timelineContainer){ timelineContainer.addEventListener('click', ()=> selectCodeSwitchSpan(null)); }
 
   const diarTimeline = qs('diarTimeline');
   if(diarTimeline){
     diarTimeline.addEventListener('click', (ev)=>{
-      if(ev.target === diarTimeline){
-        selectDiarSegment(null, { focusTranscript: false });
-      }
+      if(ev.target === diarTimeline){ selectDiarSegment(null, { focusTranscript: false }); }
     });
   }
 
@@ -2520,12 +2527,24 @@ async function startStage2(seed){
       alert('Local data cleared.');
     });
   }
+
   if(__eaDiagTimer==null){
     __ea_updateDiag();
     __eaDiagTimer = setInterval(()=>{ __ea_updateDiag(); }, 1000);
   }
+}
+
+const __EA_STAGE2_BOOT = ()=>{
+  initStage2Controls();
+  bindUI();
   startStage2({ source: 'auto' });
-});
+};
+
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', __EA_STAGE2_BOOT);
+} else {
+  __EA_STAGE2_BOOT();
+}
 
 // Prefill loader and alignment helpers
 async function loadPrefillForCurrent(){
