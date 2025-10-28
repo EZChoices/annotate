@@ -8,7 +8,17 @@
     if(qd === '0'){ localStorage.removeItem('ea_debug'); }
   }catch{}
 })();
-function isDbg(){ try{ return localStorage.getItem('ea_debug')==='1'; }catch{ return false; } }
+const __DD = window.__DD_DEBUG || {};
+const DEBUG = typeof __DD.DEBUG === 'boolean' ? __DD.DEBUG : (function(){ try{ return localStorage.getItem('ea_debug')==='1'; }catch{return false;} })();
+const mountHUD = typeof __DD.mountHUD === 'function' ? __DD.mountHUD : ()=>{};
+const logHUD = typeof __DD.logHUD === 'function' ? __DD.logHUD : ()=>{};
+const fetchInspected = typeof __DD.fetchInspected === 'function' ? __DD.fetchInspected : (url, options)=> fetch(url, options || {});
+
+mountHUD();
+
+function isDbg(){
+  return DEBUG;
+}
 
 // Basic Stage 2 flow controller with offline queue and simple VTT editors.
 
@@ -59,7 +69,8 @@ const EAQ = {
     diarDrag: null,
     speakerProfiles: [],
     startedAt: 0,
-    lintReport: { errors: [], warnings: [] }
+    lintReport: { errors: [], warnings: [] },
+    __prefetchedTranscript: null
   }
 };
 
@@ -113,13 +124,13 @@ let voiceHotkeyBound = false;
 function setAudioSource(item){
   const audioUrl = (item && item.media && (item.media.audio_proxy_url || item.media.video_hls_url)) || null;
   if(!audioUrl){
-    console.error('?? No valid audio source found for item:', item ? item.asset_id : 'unknown', item);
+    console.error('[Stage2] No valid audio source found for item:', item ? item.asset_id : 'unknown', item);
     try{
-      alert(? Missing audio file for asset_id: \nCheck if \"audio_proxy_url\" or \"video_hls_url\" exists in the manifest.);
+      alert(`Missing audio file for asset_id: ${item && item.asset_id ? item.asset_id : 'unknown'}\nCheck if "audio_proxy_url" or "video_hls_url" exists in the manifest.`);
     }catch{}
     return null;
   }
-  console.log('?? Using audio source:', audioUrl);
+  console.log('[Stage2] Using audio source:', audioUrl);
   return audioUrl;
 }
 
@@ -456,7 +467,7 @@ function parseVttSafe(text){
 function chunkTextByPunctuation(text){
   const norm = normalizeCueText(text);
   if(!norm) return [];
-  const parts = norm.match(/[^?!.,…]+[?!.,…]?/g);
+  const parts = norm.match(/[^?!.,\u2026]+[?!.,\u2026]?/g);
   if(!parts) return [norm];
   return parts.map(part=> normalizeCueText(part)).filter(Boolean);
 }
@@ -668,9 +679,9 @@ function normalizeCueVoiceTag(text){
     return `<v ${normalizedVoice}>${rest}`;
   }
   const patterns = [
-    /^(?:speaker|spk|spkr|voice)\s*([A-Za-z0-9]+)\s*[:：\-]\s*([\s\S]*)$/i,
-    /^(S\d{1,2})\s*[:：\-]\s*([\s\S]*)$/i,
-    /^([A-Za-z])\s*[:：\-]\s*([\s\S]*)$/i
+    /^(?:speaker|spk|spkr|voice)\s*([A-Za-z0-9]+)\s*[:\uFF1A\-]\s*([\s\S]*)$/i,
+    /^(S\d{1,2})\s*[:\uFF1A\-]\s*([\s\S]*)$/i,
+    /^([A-Za-z])\s*[:\uFF1A\-]\s*([\s\S]*)$/i
   ];
   for(const pattern of patterns){
     const match = pattern.exec(trimmed);
@@ -1223,7 +1234,7 @@ function renderDiarTimeline(){
     el.style.width = `${Math.max(width * 100, 0.75)}%`;
     el.style.setProperty('--diar-color', colorForSpeaker(seg.speaker));
     const displayLabel = seg.label || seg.speaker || `S${idx+1}`;
-    el.title = `${displayLabel}: ${secToLabel(seg.start)} → ${secToLabel(seg.end)}`;
+    el.title = `${displayLabel}: ${secToLabel(seg.start)} -> ${secToLabel(seg.end)}`;
     el.setAttribute('role', 'button');
     el.setAttribute('aria-label', `${displayLabel} ${secToLabel(seg.start)} to ${secToLabel(seg.end)}`);
     el.dataset.index = String(idx);
@@ -1286,29 +1297,84 @@ if(typeof window !== 'undefined'){
 async function fetchWithProxy(url, options = {}){
   if(!url) return null;
   const opts = Object.assign({ cache: 'no-store' }, options);
+  logHUD({ url, options: opts }, 'fetchWithProxy:start');
   try{
-    if(isDbg()) console.log('[EA] fetch', url);
-    const res = await fetch(url, opts);
+    const res = await fetchInspected(url, opts, 'direct');
     if(res && res.ok){
       return res;
     }
     throw new Error(`HTTP ${res ? res.status : 'unknown'}`);
   }catch(err){
-    try{ console.warn(`Primary fetch failed for ${url}: ${err && err.message ? err.message : err}`); }catch{}
-  }
-  try{
-    const fallback = `/api/proxy_audio?src=${encodeURIComponent(url)}`;
-    if(isDbg()) console.log('[EA] fetch-fallback', fallback);
-    const res = await fetch(fallback, opts);
-    if(res && res.ok){
-      return res;
+    logHUD({ url, error: err && err.message ? err.message : String(err) }, 'fetchWithProxy:direct-failed');
+    const proxyUrl = `/api/proxy_audio?src=${encodeURIComponent(url)}`;
+    const proxied = await fetchInspected(proxyUrl, opts, 'proxy');
+    if(proxied && proxied.ok){
+      return proxied;
     }
-  }catch(err){
-    try{ console.warn(`Proxy fetch failed for ${url}: ${err && err.message ? err.message : err}`); }catch{}
+    logHUD({ proxyUrl, status: proxied ? proxied.status : 'no-response' }, 'fetchWithProxy:proxy-failed');
+    throw new Error(`Proxy failed: ${proxied ? proxied.status : 'no-response'}`);
   }
-  return null;
 }
 
+async function loadLiveManifestOrFail(annotatorId){
+  const url = `/api/tasks?stage=2&annotator_id=${encodeURIComponent(annotatorId)}`;
+  const res = await fetchInspected(url, {}, 'manifest');
+  if(!res.ok){
+    throw new Error(`Manifest fetch failed (${res.status})`);
+  }
+  const raw = await res.json();
+  let payload = raw;
+  if(raw && typeof raw === 'object' && raw.manifest && typeof raw.manifest === 'object'){
+    payload = Object.assign({}, raw.manifest);
+    if(raw.__diag){ payload.__diag = raw.__diag; }
+  }
+  const count = payload && Array.isArray(payload.items) ? payload.items.length : 0;
+  logHUD({ count }, 'manifest:parsed');
+  if(!payload || !Array.isArray(payload.items) || payload.items.length === 0){
+    throw new Error('Manifest empty or invalid');
+  }
+  return payload;
+}
+
+function pickFirstLiveItem(manifest){
+  const item = manifest && manifest.items ? manifest.items[0] : null;
+  if(!item){
+    throw new Error('No items in manifest');
+  }
+  if(!item.media || (!item.media.audio_proxy_url && !item.media.video_hls_url)){
+    logHUD({ item }, 'item:missing-media');
+    throw new Error('Item missing media URLs');
+  }
+  if(!item.prefill || !item.prefill.transcript_vtt_url){
+    logHUD({ item }, 'item:missing-transcript');
+    throw new Error('Item missing transcript_vtt_url');
+  }
+  logHUD({ asset_id: item.asset_id, audio: item.media.audio_proxy_url || item.media.video_hls_url, vtt: item.prefill.transcript_vtt_url }, 'item:selected');
+  return item;
+}
+
+async function assertTranscriptReadable(vttUrl){
+  const res = await fetchWithProxy(vttUrl, {});
+  if(!res || !res.ok){
+    throw new Error(`Transcript not OK: ${res ? res.status : 'no-response'}`);
+  }
+  const ct = res.headers && res.headers.get ? (res.headers.get('content-type') || '') : '';
+  if(ct && !ct.includes('vtt') && !ct.includes('text')){
+    logHUD({ vttUrl, ct }, 'vtt:unexpected-content-type');
+  }
+  const txt = await res.text();
+  if(!/^WEBVTT/m.test(txt)){
+    logHUD({ head: txt.slice(0, 200) }, 'vtt:missing-header');
+    throw new Error('Transcript lacks WEBVTT header or looks like HTML');
+  }
+  if(!/\d\d:\d\d:\d\d\.\d{3}\s+-->\s+\d\d:\d\d:\d\d\.\d{3}/.test(txt)){
+    logHUD({ head: txt.slice(0, 200) }, 'vtt:no-cues');
+    throw new Error('Transcript has no cues');
+  }
+  logHUD({ size: txt.length }, 'vtt:ok');
+  EAQ.state.__prefetchedTranscript = { url: vttUrl, text: txt };
+  return txt;
+}
 function relocateErrorsList(activeScreenId){
   const el = qs('errorsList');
   if(!el) return;
@@ -1385,51 +1451,34 @@ async function hydrateManifestTranslations(manifest){
 }
 
 async function loadManifest(){
-  const annot = encodeURIComponent(EAQ.state.annotator);
-  const url = `/api/tasks?stage=2&annotator_id=${annot}`;
+  const annotatorId = EAQ.state.annotator || getAnnotatorId();
   try{
-    const res = await fetch(url, {cache:'no-store'});
-    if(!res.ok) throw new Error('tasks fetch');
-    const manifest = await res.json();
-    let payload = manifest;
-    if(manifest && typeof manifest === 'object' && manifest.manifest && typeof manifest.manifest === 'object'){
-      payload = Object.assign({}, manifest.manifest);
-      if(manifest.__diag){
-        payload.__diag = manifest.__diag;
-      }
-    }
+    const payload = await loadLiveManifestOrFail(annotatorId);
+    const firstItem = pickFirstLiveItem(payload);
     await hydrateManifestTranslations(payload);
     EAQ.state.manifest = payload;
+    EAQ.state.idx = Math.min(EAQ.state.idx || 0, payload.items.length - 1);
     saveManifestToStorage(payload);
-    const firstItem = payload && payload.items && payload.items[0];
-    if(firstItem){
-      clearManifestWarning();
-      try{ console.log('? Using live manifest item:', firstItem.asset_id); }catch{}
-      if(firstItem.prefill && firstItem.prefill.transcript_vtt_url){
-        try{ console.log('?? Transcript URL:', firstItem.prefill.transcript_vtt_url); }catch{}
-      } else {
-        try{ console.error('?? No transcript_vtt_url found in manifest for', firstItem.asset_id); }catch{}
-      }
-    } else {
-      const diag = payload && payload.__diag ? ` (${payload.__diag})` : '';
-      console.warn('?? Manifest is empty, falling back to seed item' + diag);
-      showManifestWarning('?? Manifest is empty. Check Supabase tasks configuration.');
+    clearManifestWarning();
+    try{ console.log('[Stage2] Using live manifest item:', firstItem.asset_id); }catch{}
+    if(firstItem.prefill && firstItem.prefill.transcript_vtt_url){
+      try{ console.log('[Stage2] Transcript URL:', firstItem.prefill.transcript_vtt_url); }catch{}
     }
     if(isDbg()){
-      const dbgItem = payload && payload.items && payload.items[0];
       dbgPrint({
-        step: 'loadManifest',
+        step: "loadManifest",
         diag: payload && payload.__diag,
         count: payload && payload.items ? payload.items.length : 0,
-        item: dbgItem ? {
-          asset_id: dbgItem.asset_id,
-          prefill: dbgItem.prefill,
-          prefill_source: dbgItem.__prefill_source
-        } : null
+        item: {
+          asset_id: firstItem.asset_id,
+          prefill: firstItem.prefill,
+          prefill_source: firstItem.__prefill_source
+        }
       });
     }
     return payload;
   }catch(err){
+    logHUD({ error: err && err.message ? err.message : String(err), annotatorId }, "manifest:error");
     const cached = loadManifestFromStorage();
     if(cached){
       await hydrateManifestTranslations(cached);
@@ -1437,9 +1486,11 @@ async function loadManifest(){
       try{ recordAllocatorAssignments(cached); }catch{}
       return cached;
     }
+    showManifestWarning('Manifest load failed: ' + (err && err.message ? err.message : err));
     throw err;
   }
 }
+
 
 function currentItem(){
   const m = EAQ.state.manifest; if(!m||!m.items) return null; return m.items[EAQ.state.idx]||null;
@@ -1533,7 +1584,7 @@ function loadAudio(){
     if(!existingWarning){
       const msg = document.createElement('div');
       msg.id = warningId;
-      msg.textContent = `⚠️ Audio missing for asset: ${it && it.asset_id ? it.asset_id : 'unknown'}`;
+      msg.textContent = Warning: audio missing for asset ;
       msg.style.cssText = 'color:red;padding:1rem;font-weight:bold;';
       document.body.appendChild(msg);
     }
@@ -1565,13 +1616,13 @@ function loadAudio(){
   if(transcriptUrl){
     fetchWithProxy(transcriptUrl).then((res)=>{
       if(res && res.ok){
-        console.log(`🗒 Transcript found for ${it.asset_id}`);
+        console.log([Stage2] Transcript found for );
         return res.text().catch(()=>null);
       }
       throw new Error(`Transcript not found (${res ? res.status : 'unknown'})`);
     }).catch((err)=>{
-      console.error(`🚫 Transcript missing for ${it && it.asset_id ? it.asset_id : 'unknown'}:`, err && err.message ? err.message : err);
-      try{ alert(`❌ Transcript fetch failed for ${it && it.asset_id ? it.asset_id : 'unknown'}`); }catch{}
+      console.error([Stage2] Transcript missing for :, err && err.message ? err.message : err);
+      try{ alert(Transcript fetch failed for ); }catch{}
     });
   }
 }
@@ -2283,14 +2334,14 @@ function bindUI(){
 window.addEventListener('load', async ()=>{
   EAQ.state.annotator = getAnnotatorId();
   try {
-    console.log('⚙️ Auto-starting Stage2 manifest fetch...');
+    console.log('[Stage2] Auto-starting Stage2 manifest fetch...');
     const annotatorId = EAQ.state.annotator || 'anonymous';
     const stage = 2;
     const res = await fetch(`/api/tasks?stage=${stage}&annotator_id=${encodeURIComponent(annotatorId)}`);
     if(!res.ok) throw new Error(`Manifest fetch failed (${res.status})`);
     const manifest = await res.json();
     if(!manifest || !Array.isArray(manifest.items) || manifest.items.length === 0){
-      showManifestWarning('⚠️ No manifest items returned from /api/tasks');
+      showManifestWarning('Warning: no manifest items returned from /api/tasks');
       console.error('Manifest empty or invalid:', manifest);
     } else {
       await hydrateManifestTranslations(manifest);
@@ -2298,9 +2349,9 @@ window.addEventListener('load', async ()=>{
       saveManifestToStorage(manifest);
       const firstItem = manifest.items[0];
       clearManifestWarning();
-      try{ console.log('✅ Using live manifest item (auto-start):', firstItem.asset_id); }catch{}
+      try{ console.log('[Stage2] Using live manifest item (auto-start):', firstItem.asset_id); }catch{}
       if(firstItem.prefill && firstItem.prefill.transcript_vtt_url){
-        try{ console.log('🗒 Transcript URL:', firstItem.prefill.transcript_vtt_url); }catch{}
+        try{ console.log('[Stage2] Transcript URL:', firstItem.prefill.transcript_vtt_url); }catch{}
       }
       const prefill = await loadPrefillForCurrent();
       if(prefill){ await loadTranslationAndCodeSwitch(prefill); }
@@ -2311,8 +2362,8 @@ window.addEventListener('load', async ()=>{
       refreshTimeline();
     }
   } catch(err) {
-    showManifestWarning('❌ Auto-load failed: ' + err.message);
-    console.error('🚨 Auto-load failed:', err);
+    showManifestWarning('Auto-load failed: ' + err.message);
+    console.error('[Stage2] Auto-load failed:', err);
   }
   bindUI();
   window.addEventListener('online', ()=>{ trySyncWithBackoff(); __ea_updateDiag(); });
@@ -2493,23 +2544,33 @@ async function loadPrefillForCurrent(){
   renderCodeSwitchTimeline();
 
   // Transcript
+  const cachedTranscript = EAQ.state.__prefetchedTranscript;
   if(prefill.transcript_vtt_url){
     try{
-      const res = await fetchWithProxy(prefill.transcript_vtt_url);
-      if(res && res.ok){
-        const vttText = await res.text();
-        EAQ.state.transcriptVTT = vttText;
-        const parsed = vttText.trim() ? VTT.parse(vttText) : [];
-        normalizeTranscriptCues(parsed, { writeState: true });
+      let vttText = null;
+      if(cachedTranscript && cachedTranscript.url === prefill.transcript_vtt_url){
+        logHUD({ url: prefill.transcript_vtt_url }, 'vtt:use-cached');
+        vttText = cachedTranscript.text;
       } else {
-        try{ console.warn(`Skipping transcript parse for ${prefill.transcript_vtt_url}: bad response`); }catch{}
+        const res = await fetchWithProxy(prefill.transcript_vtt_url);
+        if(!res || !res.ok){
+          throw new Error(`Transcript response not OK (${res ? res.status : 'no-response'})`);
+        }
+        vttText = await res.text();
       }
-    } catch{}
+      EAQ.state.transcriptVTT = vttText;
+      const parsed = vttText.trim() ? VTT.parse(vttText) : [];
+      normalizeTranscriptCues(parsed, { writeState: true });
+    } catch(err){
+      logHUD({ url: prefill.transcript_vtt_url, error: err && err.message ? err.message : String(err) }, 'vtt:load-error');
+      throw err;
+    }
   } else if(typeof prefill.transcript_vtt === 'string' && prefill.transcript_vtt.trim()){
     EAQ.state.transcriptVTT = prefill.transcript_vtt;
     try{ normalizeTranscriptCues(VTT.parse(prefill.transcript_vtt), { writeState: true }); }
     catch{ normalizeTranscriptCues([], { writeState: true }); }
   }
+  EAQ.state.__prefetchedTranscript = null;
 
   const needsSplit = (EAQ.state.transcriptCues||[]).some(c=>{
     const duration = Math.max(0, (+c.end||0) - (+c.start||0));
@@ -2856,12 +2917,12 @@ function renderTranslationList(options){
 
     const header = document.createElement('div');
     header.className = 'translation-row__header';
-    header.innerHTML = `<strong>Cue #${idx+1}</strong><span>${secToLabel(cue.start)} → ${secToLabel(cue.end)}</span>`;
+    header.innerHTML = `<strong>Cue #${idx+1}</strong><span>${secToLabel(cue.start)} -> ${secToLabel(cue.end)}</span>`;
 
     const original = document.createElement('div');
     original.className = 'translation-row__original';
     const originalText = stripSpeakerTags(cue.text);
-    original.textContent = originalText || '—';
+    original.textContent = originalText || '--';
 
     const textarea = document.createElement('textarea');
     textarea.className = 'translation-row__input';
@@ -3362,7 +3423,7 @@ function groupLatinFromTranscript(){
   cues.forEach(cue=>{
     const text = stripSpeakerTags(cue.text||'');
     if(!text) return;
-    const matches = Array.from(text.matchAll(/[A-Za-z][A-Za-z'’\-]*/g));
+    const matches = Array.from(text.matchAll(/[A-Za-z][A-Za-z'\u2019\-]*/g));
     if(!matches.length) return;
     let current = [];
     const flush = ()=>{
@@ -3544,7 +3605,7 @@ function renderDiarList(){
     });
 
     const info = document.createElement('span');
-    info.textContent = `${secToLabel(seg.start)} → ${secToLabel(seg.end)}`;
+    info.textContent = `${secToLabel(seg.start)} -> ${secToLabel(seg.end)}`;
     info.style.flex = '1 1 auto';
     info.style.minWidth = '0';
     info.style.marginLeft = '.75rem';
@@ -3556,7 +3617,7 @@ function renderDiarList(){
     duration.textContent = `${diarSegmentDuration(seg).toFixed(2)}s`;
 
     const mergePrev = document.createElement('button');
-    mergePrev.textContent = 'Merge ◀';
+    mergePrev.textContent = 'Merge <<';
     mergePrev.disabled = idx === 0;
     mergePrev.addEventListener('click', (ev)=>{
       ev.stopPropagation();
@@ -3564,7 +3625,7 @@ function renderDiarList(){
     });
 
     const mergeNext = document.createElement('button');
-    mergeNext.textContent = 'Merge ▶';
+    mergeNext.textContent = 'Merge >>';
     mergeNext.disabled = idx === segments.length - 1;
     mergeNext.addEventListener('click', (ev)=>{
       ev.stopPropagation();
@@ -4512,6 +4573,14 @@ if(typeof window !== 'undefined'){
     computeSafetyCoverageCounts
   });
 }
+
+
+
+
+
+
+
+
 
 
 

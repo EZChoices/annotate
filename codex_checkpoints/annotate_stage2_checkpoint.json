@@ -1,0 +1,40 @@
+{
+  "timestamp_utc": "2025-10-28T09:55:34Z",
+  "repo": "annotate",
+  "branch": "main",
+  "specs_tracked": [
+    {
+      "id": "ANNOTATE_FIX_TRANSCRIPTS_2025_10_27",
+      "status": "in_progress",
+      "notes": "Server prefill defaults and Stage2 fallbacks are implemented; UI auto-boot and diagnostics active. Need end-to-end verifications (Supabase + Bunny fetch) and Meta-V2 gate review."
+    },
+    {
+      "id": "ANNOTATE_TROUBLESHOOTING_2025_10_27",
+      "status": "in_progress",
+      "notes": "API diagnostics, HUD overlay, and probe endpoints landed. Await log review and QA to confirm."
+    }
+  ],
+  "current_state": {
+    "stage2/app.js": {
+      "auto_manifest": true,
+      "hud_logging": true,
+      "transcript_notice": "WEBVTT NOTE stub when empty",
+      "audio_fallback_removed": true
+    },
+    "stage2/debug.js": "floating HUD, fetchInspected instrumentation gated by ?debug=1",
+    "stage2/index.html": "loads debug.js before app.js",
+    "api/tasks.py": {
+      "prefill_defaults": true,
+      "local_fallback_paths": "public/data/stage2_output/<asset>/pass_1/*",
+      "diag_fields": ["__prefill_source", "__diag"],
+      "probe_endpoints": ["/api/prefill_check", "/api/env_names"]
+    }
+  },
+  "pending_validation": [
+    "Run npm run dev and smoke test /stage2?debug=1 overlay",
+    "Verify /meta-v2 loads media without transcript dependency",
+    "Exercise /api/prefill_check with real Supabase data"
+  ],
+  "tests": "not run",
+  "notes": "All recent strings sanitized to ASCII. HUD relies on stage2/debug.js; ensure asset is served in build pipeline."
+}

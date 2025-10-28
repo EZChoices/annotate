@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>EchoAtlas Stage 2 — Deep Annotation</title>
+  <title>EchoAtlas Stage 2 - Deep Annotation</title>
   <link rel="manifest" href="/public/manifest.webmanifest">
   <link rel="stylesheet" href="/public/styles.css">
   <style>
@@ -130,14 +130,14 @@
     </div>
 
     <div class="screen hide" id="screen_transcript">
-      <h3>Transcript — keep cues 0.6–6.0s, no overlaps</h3>
+      <h3>Transcript - keep cues 0.6-6.0s, no overlaps</h3>
       <audio id="audio" controls preload="auto"></audio>
       <canvas id="wave" style="width:100%;height:80px;margin:.4rem 0;background:var(--card);border:1px solid var(--border);border-radius:8px"></canvas>
       <div class="controls">
         <button id="zoomOut" class="secondary">- Zoom</button>
         <button id="zoomIn" class="secondary">+ Zoom</button>
-        <button id="scrollLeft" class="secondary">◀︎</button>
-        <button id="scrollRight" class="secondary">▶︎</button>
+        <button id="scrollLeft" class="secondary"><<</button>
+        <button id="scrollRight" class="secondary">>></button>
       </div>
       <div class="controls">
         <button id="splitBtn" class="secondary">Split</button>
@@ -155,7 +155,7 @@
     </div>
 
     <div class="screen hide" id="screen_translation">
-      <h3>Translation — one translation per cue</h3>
+      <h3>Translation - one translation per cue</h3>
       <label style="display:flex;align-items:center;gap:.5rem"><input type="checkbox" id="lockTranslation" checked> Lock translation timings to transcript</label>
       <div class="translation-sticky notice warn hide" id="translationStickyNotice"></div>
       <div id="translationList" class="translation-list" aria-live="polite"></div>
@@ -166,7 +166,7 @@
     </div>
 
     <div class="screen hide" id="screen_codeswitch">
-      <h3>Code-Switch — press while the switch lasts</h3>
+      <h3>Code-Switch - press while the switch lasts</h3>
       <div class="controls">
         <button class="secondary" data-lang="eng" id="btnEN">EN</button>
         <button class="secondary" data-lang="fra" id="btnFR">FR</button>
@@ -278,6 +278,7 @@
   <script src="/public/waveform.js"></script>
   <script src="/stage2/irr.js"></script>
   <script src="/stage2/qa_metrics.js"></script>
+  <script src="/stage2/debug.js"></script>
   <script src="/stage2/app.js"></script>
   <script>
     // Quick Links footer for easy switching/debug
@@ -289,14 +290,16 @@
       let id = 'anonymous';
       try { id = localStorage.getItem(annotKey) || 'anonymous'; } catch{}
       if(new URLSearchParams(location.search).get('links')==='0') return;
-      container.innerHTML = Quick Links:
-        <a href="${base}/meta-v2/index.html">Meta V2</a> &bull;
-        <a href="${base}/">Stage 2</a> &bull;
-        <a href="${base}/stage2/qa-dashboard.html">QA Dashboard</a> &bull;
-        <a href="${base}/api/tasks?stage=2&annotator_id=${encodeURIComponent(id)}&limit=5" target="_blank">Tasks API</a> &bull;
-        <a href="${base}/api/clip?annotator=${encodeURIComponent(id)}" target="_blank">Clip API</a> &bull;
-        <a href="${base}/api/debug?annotator=${encodeURIComponent(id)}" target="_blank">Debug</a> &bull;
-        Build <span data-build-sha>dev</span>`;
+      container.innerHTML = [
+        'Quick Links:',
+        `<a href="${base}/meta-v2/index.html">Meta V2</a> &bull;`,
+        `<a href="${base}/">Stage 2</a> &bull;`,
+        `<a href="${base}/stage2/qa-dashboard.html">QA Dashboard</a> &bull;`,
+        `<a href="${base}/api/tasks?stage=2&annotator_id=${encodeURIComponent(id)}&limit=5" target="_blank">Tasks API</a> &bull;`,
+        `<a href="${base}/api/clip?annotator=${encodeURIComponent(id)}" target="_blank">Clip API</a> &bull;`,
+        `<a href="${base}/api/debug?annotator=${encodeURIComponent(id)}" target="_blank">Debug</a> &bull;`,
+        'Build <span data-build-sha>dev</span>'
+      ].join(' ');
       document.body.appendChild(container);
     })();
   </script>
