@@ -2102,57 +2102,6 @@ async function __ea_updateDiag(){
   }
 }
 
-async function startStage2(options = {}){
-  if(__eaStage2Booting) return;
-  __eaStage2Booting = true;
-  const statusBox = qs('downloadStatus');
-  const startBtn = qs('startBtn');
-  if(startBtn){
-    startBtn.disabled = true;
-    if(options.source === 'manual'){
-      startBtn.classList.remove('hide');
-    } else {
-      startBtn.classList.add('hide');
-    }
-  }
-  if(statusBox){
-    statusBox.classList.remove('hide');
-    statusBox.textContent = options.source === 'auto' ? 'Auto-loading tasks...' : 'Loading tasks...';
-  }
-  try{
-    await loadManifest();
-    const prefill = await loadPrefillForCurrent();
-    if(prefill){ await loadTranslationAndCodeSwitch(prefill); }
-    applyTranscriptNotice();
-    loadAudio();
-    prefetchNext();
-    EAQ.state.startedAt = Date.now();
-    show('screen_transcript');
-    refreshTimeline();
-    if(statusBox){
-      statusBox.textContent = 'Tasks loaded.';
-      setTimeout(()=> statusBox.classList.add('hide'), 1500);
-    }
-    if(startBtn){
-      startBtn.disabled = false;
-      startBtn.classList.add('hide');
-    }
-  }catch(err){
-    if(statusBox){
-      statusBox.textContent = 'Failed to load tasks. Tap Start to retry.';
-      statusBox.classList.remove('hide');
-    }
-    if(startBtn){
-      startBtn.disabled = false;
-      startBtn.classList.remove('hide');
-    }
-    try{ console.warn('Stage 2 start failed', err); }catch{}
-  }finally{
-    __eaStage2Booting = false;
-    __ea_updateDiag();
-  }
-}
-
 function bindUI(){
   const startBtn = qs('startBtn');
   if(startBtn){
@@ -2356,11 +2305,25 @@ function bindUI(){
   updateDiarControlsAvailability();
 }
 
-window.addEventListener('load', ()=>{
-  startStage2({ source: 'auto' });
-});
-
 async function startStage2(seed){
+  const options = (seed && typeof seed === 'object') ? seed : {};
+  if(__eaStage2Booting) return;
+  __eaStage2Booting = true;
+  const startBtn = qs('startBtn');
+  const statusBox = qs('downloadStatus');
+  if(startBtn){
+    startBtn.disabled = true;
+    if(options.source === 'manual'){
+      startBtn.classList.remove('hide');
+    } else {
+      startBtn.classList.add('hide');
+    }
+  }
+  if(statusBox){
+    statusBox.classList.remove('hide');
+    statusBox.textContent = options.source === 'auto' ? 'Auto-loading tasks...' : 'Loading tasks...';
+  }
+
   EAQ.state.annotator = getAnnotatorId();
   try {
     console.log('[Stage2] Auto-starting Stage2 manifest fetch...');
