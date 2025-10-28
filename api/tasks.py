@@ -957,6 +957,10 @@ async def get_tasks(
     keep_rows_total: Optional[int] = None
     available_rows_total: Optional[int] = None
     selected_entries_count = 0
+    skipped_missing_transcript = 0
+    skipped_assets: List[str] = []
+    selected_entries: List[Dict[str, Any]] = []
+    assignment_rows: List[Dict[str, Any]] = []
     routing_config = _load_routing_config()
     annotator_cap = _normalize_probability(routing_config.get("annotator_daily_cap"))
     if annotator_cap is None:
@@ -1018,7 +1022,7 @@ async def get_tasks(
             if snapshot:
                 coverage_weights = _compute_allocator_weights(snapshot)
 
-            selected_entries: List[Dict[str, Any]] = []
+            selected_entries = []
             if coverage_weights:
                 selected_entries.extend(
                     _select_with_allocator(available_rows, coverage_weights, limit)
@@ -1080,7 +1084,7 @@ async def get_tasks(
             annot_double_count, annot_total_count = _compute_recent_double_pass_stats(
                 annotator_id, meta_cache
             )
-            assignment_rows: List[Dict[str, Any]] = []
+            assignment_rows = []
             seen_assets: set = set()
             base = BUNNY_KEEP_URL.rstrip("/")
 
@@ -1240,6 +1244,13 @@ async def get_tasks(
                     "pass_number": pass_number,
                     "previous_annotators": previous_annotators,
                 }
+                prefill_block = manifest_item.get("prefill") or {}
+                has_transcript = bool(prefill_block.get("transcript_vtt_url")) or bool(prefill_block.get("translation_vtt_url"))
+                if not has_transcript:
+                    skipped_missing_transcript += 1
+                    skipped_assets.append(fname)
+                    continue
+
                 items.append(manifest_item)
                 seen_assets.add(fname)
                 assignment_rows.append(
@@ -1289,24 +1300,31 @@ async def get_tasks(
                 headers=CACHE_HEADERS,
             )
 
+    selected_entries_total = len(selected_entries)
     selected_entries_count = len(items)
+    manifest_meta: Dict[str, Any] = {
+        "keep_rows": keep_rows_total,
+        "available_rows": available_rows_total,
+        "selected_entries": selected_entries_total,
+        "delivered": selected_entries_count,
+        "skipped_missing_transcript": skipped_missing_transcript,
+    }
+    if skipped_assets:
+        manifest_meta["skipped_assets"] = skipped_assets
 
     if not items and seed_fallback and not use_seed:
-        _dbg("no_items_fallback", reason="no_available_rows_or_all_assigned")
+        _dbg("no_items_fallback", reason=manifest_meta)
         return JSONResponse(
             {
                 "__diag": "no_items_fallback",
-                "reason": {
-                    "keep_rows": keep_rows_total,
-                    "available_rows": available_rows_total,
-                    "selected_items": selected_entries_count,
-                },
+                "reason": manifest_meta,
                 "manifest": _seed_manifest(annotator_id, stage),
             },
             headers=CACHE_HEADERS,
         )
 
     manifest: Dict[str, Any] = {"annotator_id": annotator_id, "stage": stage, "items": items}
+    manifest["__meta"] = manifest_meta
     if use_seed:
         manifest["__seed"] = _seed_manifest(annotator_id, stage)
     return JSONResponse(manifest, headers=CACHE_HEADERS)

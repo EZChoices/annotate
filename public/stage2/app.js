@@ -1469,11 +1469,12 @@ async function loadManifest(){
         step: "loadManifest",
         diag: payload && payload.__diag,
         count: payload && payload.items ? payload.items.length : 0,
-        item: {
+        meta: payload && payload.__meta,
+        item: firstItem ? {
           asset_id: firstItem.asset_id,
           prefill: firstItem.prefill,
           prefill_source: firstItem.__prefill_source
-        }
+        } : null
       });
     }
     return payload;
@@ -2342,13 +2343,23 @@ window.addEventListener('load', async ()=>{
     const manifest = await res.json();
     const payload = (manifest && Array.isArray(manifest.items)) ? manifest
       : (manifest && manifest.manifest && Array.isArray(manifest.manifest.items) ? Object.assign({ __diag: manifest.__diag, reason: manifest.reason }, manifest.manifest) : null);
+    const payloadMeta = payload && payload.__meta;
 
     if(!payload || !Array.isArray(payload.items) || payload.items.length === 0){
       const diag = manifest && manifest.__diag ? `Warning: ${manifest.__diag}` : 'Warning: no manifest items returned from /api/tasks';
       const details = manifest && manifest.reason ? JSON.stringify(manifest.reason) : null;
       showManifestWarning(details ? `${diag} (reason: ${details})` : diag);
       console.error('Manifest empty or invalid:', manifest);
+      if(payloadMeta){
+        console.warn('[Stage2] Manifest meta (empty):', payloadMeta);
+      }
     } else {
+      if(payloadMeta){
+        console.log('[Stage2] Manifest meta:', payloadMeta);
+        if(payloadMeta.skipped_missing_transcript){
+          console.warn(`[Stage2] Skipped ${payloadMeta.skipped_missing_transcript} task(s) missing transcripts`, payloadMeta.skipped_assets || []);
+        }
+      }
       await hydrateManifestTranslations(payload);
       EAQ.state.manifest = payload;
       saveManifestToStorage(payload);
@@ -2360,6 +2371,19 @@ window.addEventListener('load', async ()=>{
         if(firstItem.prefill && firstItem.prefill.transcript_vtt_url){
           try{ console.log('[Stage2] Transcript URL:', firstItem.prefill.transcript_vtt_url); }catch{}
         }
+      }
+      if(isDbg()){
+        dbgPrint({
+          step: 'autoLoad',
+          diag: manifest && manifest.__diag,
+          meta: payloadMeta,
+          count: payload.items.length,
+          first: firstItem ? {
+            asset_id: firstItem.asset_id,
+            prefill: firstItem.prefill,
+            prefill_source: firstItem.__prefill_source
+          } : null
+        });
       }
       const prefill = await loadPrefillForCurrent();
       if(prefill){ await loadTranslationAndCodeSwitch(prefill); }
