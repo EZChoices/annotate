@@ -5,6 +5,8 @@
     { "src": "api/**/*.py", "use": "@vercel/python" }
   ],
   "routes": [
+    { "src": "/api/tasks(?:/.*)?", "dest": "api/tasks.py" },
+    { "src": "/api/(prefill_check|env_names)", "dest": "api/tasks.py" },
     { "src": "/api/(.*)", "dest": "api/$1.py" }
   ]
 }
