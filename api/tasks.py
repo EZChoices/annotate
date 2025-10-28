@@ -131,8 +131,8 @@ CACHE_HEADERS = {
 }
 _SEED_CLIP_ID = "synthetic_long_clip"
 _SEED_PASS_DIR = "pass_1"
-_SEED_MEDIA_URL = "/public/sample.mp4"
-_SEED_PREFILL_BASE_URL = f"/public/data/stage2_output/{_SEED_CLIP_ID}/{_SEED_PASS_DIR}"
+_SEED_MEDIA_URL = "/sample.mp4"
+_SEED_PREFILL_BASE_URL = f"/data/stage2_output/{_SEED_CLIP_ID}/{_SEED_PASS_DIR}"
 _SEED_META_PATH = (
     Path(__file__).resolve().parent.parent
     / "public"
@@ -199,7 +199,7 @@ def _seed_manifest(annotator_id: str, stage: int) -> Dict[str, Any]:
 def _prefill_local_url(fname: str, filename: str) -> Optional[str]:
     if not fname or not filename:
         return None
-    base = Path("public/data/stage2_output")
+    base = Path("data/stage2_output")
     normalized = str(fname).strip().strip("/\\")
     candidates = []
     if normalized:
@@ -949,11 +949,16 @@ async def get_config() -> JSONResponse:
 
 @app.get("/api/tasks")
 async def get_tasks(
-    stage: int = 2,
-    annotator_id: str = "anonymous",
+    stage: int = Query(2),
+    annotator_id: str = Query("anonymous"),
     limit: int = Query(10, ge=1, le=200),
+    seed_fallback: bool = Query(True),
+    use_seed: bool = Query(False),
 ):
     items: List[Dict[str, Any]] = []
+    keep_rows_total: Optional[int] = None
+    available_rows_total: Optional[int] = None
+    selected_entries_count = 0
     routing_config = _load_routing_config()
     annotator_cap = _normalize_probability(routing_config.get("annotator_daily_cap"))
     if annotator_cap is None:
@@ -983,6 +988,7 @@ async def get_tasks(
             _dbg("fetch.keep.done", status=keep_resp.status_code)
             keep_resp.raise_for_status()
             rows = keep_resp.json()
+            keep_rows_total = len(rows) if isinstance(rows, list) else None
 
             assign_endpoint = (
                 f"{SUPABASE_URL}/rest/v1/{ASSIGN2_TABLE}?select={ASSIGN2_FILE_COL},{ASSIGN2_USER_COL},{ASSIGN2_TIME_COL}"
@@ -1007,6 +1013,7 @@ async def get_tasks(
             available_rows = [
                 r for r in rows if r and r.get(FILE_COL) and r.get(FILE_COL) not in active_assigned
             ]
+            available_rows_total = len(available_rows)
 
             coverage_weights: Dict[str, float] = {}
             snapshot = _load_allocator_snapshot()
@@ -1269,14 +1276,26 @@ async def get_tasks(
                 headers=CACHE_HEADERS,
             )
 
-    if not items:
+    selected_entries_count = len(items)
+
+    if not items and seed_fallback and not use_seed:
         _dbg("no_items_fallback", reason="no_available_rows_or_all_assigned")
         return JSONResponse(
-            {"__diag": "no_items_fallback", "manifest": _seed_manifest(annotator_id, stage)},
+            {
+                "__diag": "no_items_fallback",
+                "reason": {
+                    "keep_rows": keep_rows_total,
+                    "available_rows": available_rows_total,
+                    "selected_items": selected_entries_count,
+                },
+                "manifest": _seed_manifest(annotator_id, stage),
+            },
             headers=CACHE_HEADERS,
         )
 
     manifest: Dict[str, Any] = {"annotator_id": annotator_id, "stage": stage, "items": items}
+    if use_seed:
+        manifest["__seed"] = _seed_manifest(annotator_id, stage)
     return JSONResponse(manifest, headers=CACHE_HEADERS)
 
 

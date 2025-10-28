@@ -2340,18 +2340,26 @@ window.addEventListener('load', async ()=>{
     const res = await fetch(`/api/tasks?stage=${stage}&annotator_id=${encodeURIComponent(annotatorId)}`);
     if(!res.ok) throw new Error(`Manifest fetch failed (${res.status})`);
     const manifest = await res.json();
-    if(!manifest || !Array.isArray(manifest.items) || manifest.items.length === 0){
-      showManifestWarning('Warning: no manifest items returned from /api/tasks');
+    const payload = (manifest && Array.isArray(manifest.items)) ? manifest
+      : (manifest && manifest.manifest && Array.isArray(manifest.manifest.items) ? Object.assign({ __diag: manifest.__diag, reason: manifest.reason }, manifest.manifest) : null);
+
+    if(!payload || !Array.isArray(payload.items) || payload.items.length === 0){
+      const diag = manifest && manifest.__diag ? `Warning: ${manifest.__diag}` : 'Warning: no manifest items returned from /api/tasks';
+      const details = manifest && manifest.reason ? JSON.stringify(manifest.reason) : null;
+      showManifestWarning(details ? `${diag} (reason: ${details})` : diag);
       console.error('Manifest empty or invalid:', manifest);
     } else {
-      await hydrateManifestTranslations(manifest);
-      EAQ.state.manifest = manifest;
-      saveManifestToStorage(manifest);
-      const firstItem = manifest.items[0];
+      await hydrateManifestTranslations(payload);
+      EAQ.state.manifest = payload;
+      saveManifestToStorage(payload);
+      EAQ.state.idx = Math.min(EAQ.state.idx || 0, payload.items.length - 1);
+      const firstItem = payload.items[EAQ.state.idx] || payload.items[0];
       clearManifestWarning();
-      try{ console.log('[Stage2] Using live manifest item (auto-start):', firstItem.asset_id); }catch{}
-      if(firstItem.prefill && firstItem.prefill.transcript_vtt_url){
-        try{ console.log('[Stage2] Transcript URL:', firstItem.prefill.transcript_vtt_url); }catch{}
+      if(firstItem){
+        try{ console.log('[Stage2] Using manifest item (auto-start):', firstItem.asset_id); }catch{}
+        if(firstItem.prefill && firstItem.prefill.transcript_vtt_url){
+          try{ console.log('[Stage2] Transcript URL:', firstItem.prefill.transcript_vtt_url); }catch{}
+        }
       }
       const prefill = await loadPrefillForCurrent();
       if(prefill){ await loadTranslationAndCodeSwitch(prefill); }
