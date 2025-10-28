@@ -110,6 +110,19 @@ const DIAR_SNAP_SEC = 0.12;
 
 let voiceHotkeyBound = false;
 
+function setAudioSource(item){
+  const audioUrl = (item && item.media && (item.media.audio_proxy_url || item.media.video_hls_url)) || null;
+  if(!audioUrl){
+    console.error('🚨 No valid audio source found for item:', item ? item.asset_id : 'unknown', item);
+    try{
+      alert(`❌ Missing audio file for asset_id: ${item && item.asset_id ? item.asset_id : 'unknown'}\nCheck if "audio_proxy_url" or "video_hls_url" exists in the manifest.`);
+    }catch{}
+    return null;
+  }
+  console.log('🎧 Using audio source:', audioUrl);
+  return audioUrl;
+}
+
 const TRANSCRIPT_MISSING_NOTE = 'WEBVTT\n\nNOTE No transcript available; please add manually or contact support.';
 
 const EMOTION_OPTIONS = [
@@ -1481,7 +1494,23 @@ function loadAudio(){
   const it = currentItem(); if(!it) return;
   const a = qs('audio'); if(!a) return;
   EAQ.audio = a;
-  a.src = it.media && it.media.audio_proxy_url ? it.media.audio_proxy_url : '/public/sample.mp4';
+  const source = setAudioSource(it);
+  const warningId = 'ea_missing_audio_warning';
+  const existingWarning = document.getElementById(warningId);
+  if(!source){
+    if(!existingWarning){
+      const msg = document.createElement('div');
+      msg.id = warningId;
+      msg.textContent = `⚠️ Audio missing for asset: ${it && it.asset_id ? it.asset_id : 'unknown'}`;
+      msg.style.cssText = 'color:red;padding:1rem;font-weight:bold;';
+      document.body.appendChild(msg);
+    }
+    return;
+  }
+  if(existingWarning){
+    existingWarning.remove();
+  }
+  a.src = source;
   a.play().catch(()=>{});
   prefetchAssetsForItem(it);
   const wave = qs('wave'); if(wave){ Wave.attach(wave); Wave.load(a.src); }
@@ -1498,6 +1527,20 @@ function loadAudio(){
       const safetyOverlay = (EAQ.state.safetyEvents||[]).map(evt=>({ start: Math.max(0, +evt.startSec||0), end: Math.max(0, +evt.endSec||0) }));
       Timeline.setOverlays(EAQ.state.codeSwitchCues||[], safetyOverlay);
     }, 600);
+  }
+
+  const transcriptUrl = it && it.prefill && it.prefill.transcript_vtt_url;
+  if(transcriptUrl){
+    fetchWithProxy(transcriptUrl).then((res)=>{
+      if(res && res.ok){
+        console.log(`🗒 Transcript found for ${it.asset_id}`);
+        return res.text().catch(()=>null);
+      }
+      throw new Error(`Transcript not found (${res ? res.status : 'unknown'})`);
+    }).catch((err)=>{
+      console.error(`🚫 Transcript missing for ${it && it.asset_id ? it.asset_id : 'unknown'}:`, err && err.message ? err.message : err);
+      try{ alert(`❌ Transcript fetch failed for ${it && it.asset_id ? it.asset_id : 'unknown'}`); }catch{}
+    });
   }
 }
 
