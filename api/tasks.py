@@ -1270,9 +1270,24 @@ async def get_tasks(
                 except Exception as e:
                     print("[tasks] stage2 assignment insert failed:", repr(e))
         except Exception as e:
-            _dbg("supabase.fetch.error", error=repr(e))
+            error_info: Dict[str, Any] = {"message": repr(e)}
+            resp = getattr(e, "response", None)
+            if resp is not None:
+                error_info["status_code"] = getattr(resp, "status_code", None)
+                try:
+                    error_info["body"] = resp.json()
+                except Exception:
+                    try:
+                        error_info["text"] = resp.text
+                    except Exception:
+                        pass
+            _dbg("supabase.fetch.error", error=error_info)
             return JSONResponse(
-                {"__diag": "supabase_error_fallback", "manifest": _seed_manifest(annotator_id, stage)},
+                {
+                    "__diag": "supabase_error_fallback",
+                    "error": error_info,
+                    "manifest": _seed_manifest(annotator_id, stage),
+                },
                 headers=CACHE_HEADERS,
             )
 
