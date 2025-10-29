@@ -16,9 +16,24 @@ const fetchInspected = typeof __DD.fetchInspected === 'function' ? __DD.fetchIns
 
 mountHUD();
 
+function stage2Log(message, extra){
+  const stamp = new Date().toISOString();
+  if(extra !== undefined){
+    try{
+      console.log(`[EA Stage2] ${stamp} ${message}`, extra);
+    }catch{
+      console.log(`[EA Stage2] ${stamp} ${message}`);
+    }
+  } else {
+    console.log(`[EA Stage2] ${stamp} ${message}`);
+  }
+}
+
 function isDbg(){
   return DEBUG;
 }
+
+stage2Log('Stage 2 bundle evaluated');
 
 // Basic Stage 2 flow controller with offline queue and simple VTT editors.
 
@@ -2050,6 +2065,35 @@ async function trySyncWithBackoff(){
 let __eaDiagTimer = null;
 let __eaDiagUpdating = false;
 let __eaStage2Booting = false;
+let __eaStage2BootStarted = false;
+let __eaStage2RetryTimer = null;
+let __eaStage2RetryIndex = 0;
+const __EA_STAGE2_RETRY_DELAYS = [1000, 3000, 5000];
+let __eaControlsBound = false;
+
+function resetStage2Retry(){
+  if(__eaStage2RetryTimer){
+    clearTimeout(__eaStage2RetryTimer);
+    __eaStage2RetryTimer = null;
+  }
+  __eaStage2RetryIndex = 0;
+}
+
+function retryInit(reason){
+  const attempt = __eaStage2RetryIndex + 1;
+  const delay = __EA_STAGE2_RETRY_DELAYS[Math.min(__eaStage2RetryIndex, __EA_STAGE2_RETRY_DELAYS.length - 1)];
+  if(__eaStage2RetryTimer){
+    clearTimeout(__eaStage2RetryTimer);
+    __eaStage2RetryTimer = null;
+  }
+  stage2Log('Scheduling retry', { reason, attempt, delay });
+  __eaStage2RetryTimer = setTimeout(()=>{
+    __eaStage2RetryTimer = null;
+    stage2Log('Retrying manifest bootstrap', { reason, attempt });
+    startStage2({ source: 'retry', attempt, reason });
+  }, delay);
+  __eaStage2RetryIndex = Math.min(__eaStage2RetryIndex + 1, __EA_STAGE2_RETRY_DELAYS.length - 1);
+}
 
 function applyTranscriptNotice(){
   const box = qs('transcriptVTT');
@@ -2105,9 +2149,23 @@ async function __ea_updateDiag(){
 function bindUI(){
   const startBtn = qs('startBtn');
   if(startBtn){
-    startBtn.addEventListener('click', ()=>{ startStage2({ source: 'manual' }); });
+    startBtn.onclick = ()=>{
+      stage2Log('Start button clicked', { source: 'manual' });
+      resetStage2Retry();
+      startStage2({ source: 'manual' });
+    };
+    startBtn.disabled = false;
+    startBtn.classList.remove('hide');
+    stage2Log('Start button wired');
   }
-  const notice = qs('downloadStatus'); if(notice){ notice.classList.remove('hide'); }
+  const notice = qs('downloadStatus');
+  if(notice){
+    notice.classList.remove('hide');
+    if(!notice.textContent){
+      notice.textContent = 'Ready. Tap Start to load tasks.';
+    }
+  }
+  stage2Log('Stage 2 controls bound');
 
   qs('transcriptNext').addEventListener('click', ()=>{
     const box = qs('transcriptVTT');
@@ -2307,88 +2365,150 @@ function bindUI(){
 
 async function startStage2(seed){
   const options = (seed && typeof seed === 'object') ? seed : {};
-  if(__eaStage2Booting) return;
+  const source = options.source || 'manual';
+  if(__eaStage2Booting){
+    stage2Log('startStage2 ignored because boot is already running', { source });
+    return false;
+  }
   __eaStage2Booting = true;
+  stage2Log('startStage2 begin', { source });
+  if(__eaStage2RetryTimer){
+    clearTimeout(__eaStage2RetryTimer);
+    __eaStage2RetryTimer = null;
+  }
+  if(source === 'manual'){
+    resetStage2Retry();
+  }
+
   const startBtn = qs('startBtn');
   const statusBox = qs('downloadStatus');
   if(startBtn){
     startBtn.disabled = true;
-    if(options.source === 'manual'){
-      startBtn.classList.remove('hide');
-    } else {
-      startBtn.classList.add('hide');
-    }
+    startBtn.classList.remove('hide');
+    startBtn.textContent = source === 'manual' ? 'Starting...' : 'Loading...';
   }
   if(statusBox){
     statusBox.classList.remove('hide');
-    statusBox.textContent = options.source === 'auto' ? 'Auto-loading tasks...' : 'Loading tasks...';
+    statusBox.textContent = source === 'auto' ? 'Auto-loading tasks...' : 'Loading tasks...';
   }
 
   EAQ.state.annotator = getAnnotatorId();
+  let success = false;
   try {
-    console.log('[Stage2] Auto-starting Stage2 manifest fetch...');
     const annotatorId = EAQ.state.annotator || 'anonymous';
     const stage = 2;
-    const res = await fetch(`/api/tasks?stage=${stage}&annotator_id=${encodeURIComponent(annotatorId)}`);
-    if(!res.ok) throw new Error(`Manifest fetch failed (${res.status})`);
+    const manifestUrl = `/api/tasks?stage=${stage}&annotator_id=${encodeURIComponent(annotatorId)}`;
+    stage2Log('Manifest fetch start', { source, url: manifestUrl });
+    const res = await fetch(manifestUrl);
+    stage2Log('Manifest fetch response', { status: res.status, ok: res.ok });
+    if(!res.ok){
+      throw new Error(`Manifest fetch failed (${res.status})`);
+    }
     const manifest = await res.json();
+    stage2Log('Manifest payload received', {
+      diag: manifest && manifest.__diag,
+      directItems: Array.isArray(manifest && manifest.items) ? manifest.items.length : null,
+      nested: Boolean(manifest && manifest.manifest)
+    });
+
     const payload = (manifest && Array.isArray(manifest.items)) ? manifest
-      : (manifest && manifest.manifest && Array.isArray(manifest.manifest.items) ? Object.assign({ __diag: manifest.__diag, reason: manifest.reason }, manifest.manifest) : null);
+      : (manifest && manifest.manifest && Array.isArray(manifest.manifest.items)
+        ? Object.assign({ __diag: manifest.__diag, reason: manifest.reason }, manifest.manifest)
+        : null);
     const payloadMeta = payload && payload.__meta;
 
     if(!payload || !Array.isArray(payload.items) || payload.items.length === 0){
       const diag = manifest && manifest.__diag ? `Warning: ${manifest.__diag}` : 'Warning: no manifest items returned from /api/tasks';
       const details = manifest && manifest.reason ? JSON.stringify(manifest.reason) : null;
       showManifestWarning(details ? `${diag} (reason: ${details})` : diag);
-      console.error('Manifest empty or invalid:', manifest);
+      stage2Log('Manifest empty or invalid', { diag, reason: manifest && manifest.reason });
       if(payloadMeta){
-        console.warn('[Stage2] Manifest meta (empty):', payloadMeta);
+        stage2Log('Manifest meta (empty)', payloadMeta);
       }
-    } else {
-      if(payloadMeta){
-        console.log('[Stage2] Manifest meta:', payloadMeta);
-        if(payloadMeta.skipped_missing_transcript){
-          console.warn(`[Stage2] Skipped ${payloadMeta.skipped_missing_transcript} task(s) missing transcripts`, payloadMeta.skipped_assets || []);
-        }
+      if(statusBox){
+        statusBox.textContent = 'Tap Start to retry';
       }
-      await hydrateManifestTranslations(payload);
-      EAQ.state.manifest = payload;
-      saveManifestToStorage(payload);
-      EAQ.state.idx = Math.min(EAQ.state.idx || 0, payload.items.length - 1);
-      const firstItem = payload.items[EAQ.state.idx] || payload.items[0];
-      clearManifestWarning();
-      if(firstItem){
-        try{ console.log('[Stage2] Using manifest item (auto-start):', firstItem.asset_id); }catch{}
-        if(firstItem.prefill && firstItem.prefill.transcript_vtt_url){
-          try{ console.log('[Stage2] Transcript URL:', firstItem.prefill.transcript_vtt_url); }catch{}
-        }
+      if(source !== 'manual'){
+        retryInit('empty_manifest');
       }
-      if(isDbg()){
-        dbgPrint({
-          step: 'autoLoad',
-          diag: manifest && manifest.__diag,
-          meta: payloadMeta,
-          count: payload.items.length,
-          first: firstItem ? {
-            asset_id: firstItem.asset_id,
-            prefill: firstItem.prefill,
-            prefill_source: firstItem.__prefill_source
-          } : null
+      return false;
+    }
+
+    if(payloadMeta){
+      stage2Log('Manifest meta', payloadMeta);
+      if(payloadMeta.skipped_missing_transcript){
+        stage2Log('Manifest skipped entries without transcript', {
+          count: payloadMeta.skipped_missing_transcript,
+          assets: payloadMeta.skipped_assets || []
         });
       }
-      const prefill = await loadPrefillForCurrent();
-      if(prefill){ await loadTranslationAndCodeSwitch(prefill); }
-      loadAudio();
-      prefetchNext();
-      EAQ.state.startedAt = Date.now();
-      show('screen_transcript');
-      refreshTimeline();
     }
+
+    await hydrateManifestTranslations(payload);
+    EAQ.state.manifest = payload;
+    saveManifestToStorage(payload);
+    EAQ.state.idx = Math.min(EAQ.state.idx || 0, payload.items.length - 1);
+    const firstItem = payload.items[EAQ.state.idx] || payload.items[0];
+    clearManifestWarning();
+    if(firstItem){
+      stage2Log('Current manifest item selected', {
+        asset_id: firstItem.asset_id,
+        transcript_url: firstItem.prefill ? firstItem.prefill.transcript_vtt_url : null
+      });
+    }
+    if(isDbg()){
+      dbgPrint({
+        step: source === 'auto' ? 'autoLoad' : source,
+        diag: manifest && manifest.__diag,
+        meta: payloadMeta,
+        count: payload.items.length,
+        first: firstItem ? {
+          asset_id: firstItem.asset_id,
+          prefill: firstItem.prefill,
+          prefill_source: firstItem.__prefill_source
+        } : null
+      });
+    }
+    const prefill = await loadPrefillForCurrent();
+    if(prefill){
+      await loadTranslationAndCodeSwitch(prefill);
+    }
+    loadAudio();
+    prefetchNext();
+    EAQ.state.startedAt = Date.now();
+    show('screen_transcript');
+    refreshTimeline();
+    resetStage2Retry();
+    success = true;
+    if(statusBox){
+      statusBox.textContent = 'Tasks loaded';
+    }
+    stage2Log('Stage 2 manifest loaded', { source, items: payload.items.length });
+    return true;
   } catch(err) {
-    showManifestWarning('Auto-load failed: ' + err.message);
+    const message = err && err.message ? err.message : String(err);
+    const prefix = source === 'manual' ? 'Load failed' : 'Auto-load failed';
+    showManifestWarning(prefix + ': ' + message);
+    stage2Log('startStage2 failed', { source, error: message });
     console.error('[Stage2] Auto-load failed:', err);
+    if(statusBox){
+      statusBox.textContent = 'Tap Start to retry';
+    }
+    if(source !== 'manual'){
+      retryInit(message || 'manifest_error');
+    }
+    return false;
   } finally {
+    stage2Log('startStage2 finished', { source, success });
     __eaStage2Booting = false;
+    if(startBtn){
+      startBtn.disabled = false;
+      startBtn.classList.remove('hide');
+      startBtn.textContent = 'Start';
+    }
+    if(!success && statusBox && !statusBox.textContent){
+      statusBox.textContent = 'Tap Start to retry';
+    }
     __ea_updateDiag();
   }
 }
@@ -2534,21 +2654,39 @@ ${nxt.text}`.trim() };
   }
 }
 
-const __EA_STAGE2_BOOT = ()=>{
+function bootStage2(origin){
+  if(__eaStage2BootStarted){
+    stage2Log('Boot sequence already started', { origin });
+    return;
+  }
+  __eaStage2BootStarted = true;
+  stage2Log('Boot sequence triggered', { origin });
   initStage2Controls();
   bindUI();
-  startStage2({ source: 'auto' });
-};
+  setTimeout(()=>{
+    stage2Log('Auto-start timer fired', { origin });
+    startStage2({ source: 'auto' });
+  }, 200);
+}
 
-if(document.readyState === 'loading'){
-  document.addEventListener('DOMContentLoaded', __EA_STAGE2_BOOT);
-} else {
-  __EA_STAGE2_BOOT();
+window.addEventListener('load', ()=>{
+  stage2Log('window.load event received');
+  bootStage2('window.load');
+});
+
+if(document.readyState === 'complete'){
+  stage2Log('Document already complete; booting immediately');
+  bootStage2('immediate');
 }
 
 // Prefill loader and alignment helpers
 async function loadPrefillForCurrent(){
-  const it = currentItem(); if(!it) return;
+  const it = currentItem();
+  if(!it){
+    stage2Log('loadPrefillForCurrent skipped; no manifest item');
+    return;
+  }
+  stage2Log('loadPrefillForCurrent invoked', { asset_id: it.asset_id });
   EAQ.state.emotionSpans = [];
   EAQ.state.emotionHistory = [];
   EAQ.state.emotionFuture = [];
