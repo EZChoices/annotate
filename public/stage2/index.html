@@ -91,6 +91,11 @@
     .emotion-safety__actions{display:flex;flex-wrap:wrap;gap:.5rem}
     .emotion-safety__actions button{flex:1 1 calc(33.33% - .5rem);min-width:120px}
     .emotion-safety__empty{font-size:.9rem;color:var(--muted)}
+    .stats-grid{display:flex;flex-wrap:wrap;gap:.75rem;margin:-.35rem 0 0 0}
+    .stat-pill{flex:0 1 150px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:.6rem .75rem;box-shadow:0 1px 2px rgba(0,0,0,0.08)}
+    .stat-pill .stat-label{display:block;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+    .stat-pill .stat-value{display:block;font-size:1.15rem;font-weight:600;margin-top:.15rem;word-break:break-word}
+    .nav-controls{justify-content:flex-start}
     @media (min-width:720px){
       .speaker-card{padding:1rem}
       .emotion-button-grid button,.safety-button-grid button{flex:0 0 auto;min-width:140px}
@@ -115,14 +120,16 @@
         a2.onclick=(e)=>{
           e.preventDefault();
           try{
-            const state = window.EAQ && EAQ.state ? EAQ.state : null;
-            const manifest = state && Array.isArray(state.manifest && state.manifest.items) ? state.manifest : null;
-            if(!manifest){
+            const state = (window.EAQ && EAQ.state) ? EAQ.state : null;
+            const manifest = state && state.manifest;
+            const items = manifest && Array.isArray(manifest.items) ? manifest.items : null;
+            if(!items || !items.length){
               alert('Manifest not loaded yet. Please wait a moment and try again.');
               return;
             }
             const idx = Number.isInteger(state.idx) ? state.idx : 0;
-            const item = manifest.items[idx] || null;
+            const safeIdx = Math.min(Math.max(idx, 0), items.length - 1);
+            const item = items[safeIdx] || null;
             if(!item || !item.asset_id){
               alert('Current task is unavailable. Select a task first.');
               return;
@@ -150,6 +157,34 @@
 
     <div class="screen hide" id="screen_transcript">
       <h3>Transcript - keep cues 0.6-6.0s, no overlaps</h3>
+      <div id="manifestStats" class="notice hide">
+        <div class="stats-grid">
+          <div class="stat-pill">
+            <span class="stat-label">Current</span>
+            <span class="stat-value" data-stat="position">0 / 0</span>
+          </div>
+          <div class="stat-pill">
+            <span class="stat-label">Asset</span>
+            <span class="stat-value" data-stat="asset">—</span>
+          </div>
+          <div class="stat-pill">
+            <span class="stat-label">Completed</span>
+            <span class="stat-value" data-stat="completed">0</span>
+          </div>
+          <div class="stat-pill">
+            <span class="stat-label">Skipped</span>
+            <span class="stat-value" data-stat="skipped">0</span>
+          </div>
+          <div class="stat-pill">
+            <span class="stat-label">Remaining</span>
+            <span class="stat-value" data-stat="remaining">0</span>
+          </div>
+        </div>
+      </div>
+      <div id="navControls" class="controls hide nav-controls">
+        <button id="navBack" class="secondary">⟵ Back</button>
+        <button id="navSkip" class="secondary">Skip ⟶</button>
+      </div>
       <audio id="audio" controls preload="auto"></audio>
       <canvas id="wave" style="width:100%;height:80px;margin:.4rem 0;background:var(--card);border:1px solid var(--border);border-radius:8px"></canvas>
       <div class="controls">

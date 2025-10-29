@@ -77,6 +77,10 @@ const EAQ = {
     safetySelectedIndex: null,
     safetyDrag: null,
     clipFlagged: false,
+    sessionStats: {
+      completed: 0,
+      skipped: 0
+    },
     diarSegments: [],
     diarSelectedIndex: null,
     diarColorMap: {},
@@ -1473,6 +1477,8 @@ async function loadManifest(){
     await hydrateManifestTranslations(payload);
     EAQ.state.manifest = payload;
     EAQ.state.idx = Math.min(EAQ.state.idx || 0, payload.items.length - 1);
+    EAQ.state.sessionStats = { completed: 0, skipped: 0 };
+    updateSessionStats();
     saveManifestToStorage(payload);
     clearManifestWarning();
     try{ console.log('[Stage2] Using live manifest item:', firstItem.asset_id); }catch{}
@@ -1509,7 +1515,63 @@ async function loadManifest(){
 
 
 function currentItem(){
-  const m = EAQ.state.manifest; if(!m||!m.items) return null; return m.items[EAQ.state.idx]||null;
+  const m = EAQ.state.manifest;
+  if(!m || !m.items) return null;
+  return m.items[EAQ.state.idx] || null;
+}
+
+function ensureSessionStats(){
+  if(!EAQ.state.sessionStats){
+    EAQ.state.sessionStats = { completed: 0, skipped: 0 };
+  }
+  return EAQ.state.sessionStats;
+}
+
+function updateStatValue(name, value){
+  const el = document.querySelector(`[data-stat="${name}"]`);
+  if(el){ el.textContent = value; }
+}
+
+function updateSessionStats(){
+  const stats = ensureSessionStats();
+  const manifest = EAQ.state.manifest;
+  const items = manifest && Array.isArray(manifest.items) ? manifest.items : null;
+  const total = items ? items.length : 0;
+  const idx = total ? Math.min(Math.max(Number(EAQ.state.idx) || 0, 0), total - 1) : 0;
+  const currentNumber = total ? idx + 1 : 0;
+  const remaining = Math.max(0, total - stats.completed - stats.skipped);
+  const current = items && items[idx] ? items[idx] : null;
+
+  updateStatValue('position', `${currentNumber} / ${total}`);
+  updateStatValue('asset', current && current.asset_id ? current.asset_id : '—');
+  updateStatValue('completed', stats.completed);
+  updateStatValue('skipped', stats.skipped);
+  updateStatValue('remaining', remaining);
+
+  const statsBox = qs('manifestStats');
+  if(statsBox){
+    if(total > 0){
+      statsBox.classList.remove('hide');
+    } else {
+      statsBox.classList.add('hide');
+    }
+  }
+  const navControls = qs('navControls');
+  if(navControls){
+    if(total > 0){
+      navControls.classList.remove('hide');
+    } else {
+      navControls.classList.add('hide');
+    }
+  }
+  const backBtn = qs('navBack');
+  if(backBtn){
+    backBtn.disabled = total === 0 || idx <= 0;
+  }
+  const skipBtn = qs('navSkip');
+  if(skipBtn){
+    skipBtn.disabled = total === 0 || idx >= total - 1;
+  }
 }
 
 function computeDeterministicRatio(input){
@@ -1587,6 +1649,31 @@ async function prefetchNext(){
     const it = manifest.items[EAQ.state.idx+1];
     if(it){ prefetchAssetsForItem(it); }
   }catch{}
+}
+
+async function transitionToClip(newIdx, meta){
+  const manifest = EAQ.state.manifest;
+  const items = manifest && Array.isArray(manifest.items) ? manifest.items : null;
+  if(!items || !items.length) return false;
+  if(newIdx < 0 || newIdx >= items.length) return false;
+  EAQ.state.idx = newIdx;
+  const transcriptBox = qs('transcriptVTT'); if(transcriptBox) transcriptBox.value = '';
+  const translationBox = qs('translationVTT'); if(translationBox) translationBox.value = '';
+  const csBox = qs('codeSwitchVTT'); if(csBox) csBox.value = '';
+  const prefill = await loadPrefillForCurrent();
+  if(prefill){ await loadTranslationAndCodeSwitch(prefill); }
+  loadAudio();
+  prefetchNext();
+  EAQ.state.startedAt = Date.now();
+  show('screen_transcript');
+  refreshTimeline();
+  updateSessionStats();
+  stage2Log('clip.transition', {
+    idx: newIdx,
+    reason: meta && meta.reason ? meta.reason : null,
+    asset: items[newIdx] && items[newIdx].asset_id ? items[newIdx].asset_id : null
+  });
+  return true;
 }
 
 function loadAudio(){
@@ -2072,6 +2159,7 @@ let __eaStage2RetryTimer = null;
 let __eaStage2RetryIndex = 0;
 const __EA_STAGE2_RETRY_DELAYS = [1000, 3000, 5000];
 let __eaControlsBound = false;
+let __eaNavBusy = false;
 
 function resetStage2Retry(){
   if(__eaStage2RetryTimer){
@@ -2332,29 +2420,27 @@ function bindUI(){
         console.warn('Failed to generate QA report', err);
       }
     }
-    EAQ.state.idx = (EAQ.state.idx + 1) % Math.max(1, EAQ.state.manifest.items.length);
-    qs('transcriptVTT').value = '';
-    qs('translationVTT').value = '';
-    qs('codeSwitchVTT').value = '';
-    EAQ.state.emotionSpans = [];
-    EAQ.state.emotionHistory = [];
-    EAQ.state.emotionFuture = [];
-    EAQ.state.emotionSelectedIndex = null;
-    EAQ.state.safetyEvents = [];
-    EAQ.state.safetyHistory = [];
-    EAQ.state.safetyFuture = [];
-    EAQ.state.safetySelectedIndex = null;
-    EAQ.state.clipFlagged = false;
-    renderEmotionSafetyTimeline();
-    EAQ.state.speakerProfiles = [];
-    const speakerCards = qs('speakerCards'); if(speakerCards) speakerCards.innerHTML = '';
-    const prefill = await loadPrefillForCurrent();
-    if(prefill){ await loadTranslationAndCodeSwitch(prefill); }
-    loadAudio();
-    prefetchNext();
-    EAQ.state.startedAt = Date.now();
-    show('screen_transcript');
-    refreshTimeline();
+    const manifest = EAQ.state.manifest;
+    const items = manifest && Array.isArray(manifest.items) ? manifest.items : null;
+    const totalItems = items ? items.length : 0;
+    if(totalItems > 0){
+      const currentIdx = Math.min(Math.max(EAQ.state.idx || 0, 0), totalItems - 1);
+      const statsObj = ensureSessionStats();
+      statsObj.completed += 1;
+      const nextIdx = (currentIdx + 1) >= totalItems ? 0 : currentIdx + 1;
+      __eaNavBusy = true;
+      try{
+        const moved = await transitionToClip(nextIdx, { reason: 'submit' });
+        if(!moved){
+          statsObj.completed = Math.max(0, statsObj.completed - 1);
+        }
+      } finally {
+        __eaNavBusy = false;
+        updateSessionStats();
+      }
+    } else {
+      updateSessionStats();
+    }
   });
 
   if(!voiceHotkeyBound){
@@ -2430,6 +2516,8 @@ async function startStage2(seed){
       if(statusBox){
         statusBox.textContent = 'Tap Start to retry';
       }
+      EAQ.state.sessionStats = { completed: 0, skipped: 0 };
+      updateSessionStats();
       if(source !== 'manual'){
         retryInit('empty_manifest');
       }
@@ -2450,6 +2538,8 @@ async function startStage2(seed){
     EAQ.state.manifest = payload;
     saveManifestToStorage(payload);
     EAQ.state.idx = Math.min(EAQ.state.idx || 0, payload.items.length - 1);
+    EAQ.state.sessionStats = { completed: 0, skipped: 0 };
+    updateSessionStats();
     const firstItem = payload.items[EAQ.state.idx] || payload.items[0];
     clearManifestWarning();
     if(firstItem){
@@ -2528,6 +2618,49 @@ function initStage2Controls(){
 
   const a = qs('audio');
   EAQ.audio = a;
+  const navBack = qs('navBack');
+  const navSkip = qs('navSkip');
+  if(navBack){
+    navBack.addEventListener('click', async ()=>{
+      const manifest = EAQ.state.manifest;
+      const items = manifest && Array.isArray(manifest.items) ? manifest.items : null;
+      if(__eaNavBusy || !items || !items.length) return;
+      if(EAQ.state.idx <= 0){
+        updateSessionStats();
+        return;
+      }
+      __eaNavBusy = true;
+      try{
+        await transitionToClip(EAQ.state.idx - 1, { reason: 'back' });
+      } finally {
+        __eaNavBusy = false;
+        updateSessionStats();
+      }
+    });
+  }
+  if(navSkip){
+    navSkip.addEventListener('click', async ()=>{
+      const manifest = EAQ.state.manifest;
+      const items = manifest && Array.isArray(manifest.items) ? manifest.items : null;
+      if(__eaNavBusy || !items || !items.length) return;
+      if(EAQ.state.idx >= items.length - 1){
+        updateSessionStats();
+        return;
+      }
+      const statsObj = ensureSessionStats();
+      statsObj.skipped += 1;
+      __eaNavBusy = true;
+      try{
+        const moved = await transitionToClip(EAQ.state.idx + 1, { reason: 'skip' });
+        if(!moved){
+          statsObj.skipped = Math.max(0, statsObj.skipped - 1);
+        }
+      } finally {
+        __eaNavBusy = false;
+        updateSessionStats();
+      }
+    });
+  }
   qs('rewindBtn').addEventListener('click', ()=>{ if(a) a.currentTime = Math.max(0, a.currentTime - 3); });
   qs('splitBtn').addEventListener('click', ()=>{
     if(!a) return;
@@ -2878,6 +3011,7 @@ async function loadPrefillForCurrent(){
   }
   refreshTimeline();
   applyTranscriptNotice();
+  updateSessionStats();
   return prefill;
 }
 
