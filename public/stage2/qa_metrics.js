@@ -1028,7 +1028,6 @@
       const language =
         manifestInfo.language || manifestInfo.locale || qaPayload.language || "unknown";
       const metrics = entry.metrics || entry.result || {};
-      const qaPayload = entry.qa || {};
       const reviewData = entry.review || qaPayload.review || {};
       const reviewStatus =
         (reviewData && (reviewData.status || reviewData.review_status)) ||
@@ -1194,4 +1193,5 @@
       computeMetrics,
     },
   };
+  console.log("[EA Stage2] qa_metrics.js evaluated successfully");
 })(typeof window !== "undefined" ? window : globalThis);
