@@ -112,7 +112,26 @@
         bar.style.cssText='position:fixed;left:8px;bottom:8px;z-index:9998;background:#0a0a0a;color:#fff;padding:6px 8px;border-radius:6px;font:12px monospace;opacity:.9';
         const a1=document.createElement('a'); a1.href='/api/env_names'; a1.textContent='env-names'; a1.style.color='#7dd3fc'; a1.target='_blank';
         const a2=document.createElement('a'); a2.href='#'; a2.textContent='prefill-check'; a2.style.cssText='color:#86efac;margin-left:10px';
-        a2.onclick=(e)=>{e.preventDefault();try{const it=(window.EAQ&&EAQ.state&&typeof currentItem==='function')?currentItem():null; if(!it){ alert('No manifest item loaded'); return;} window.open('/api/prefill_check?file='+encodeURIComponent(it.asset_id),'_blank');}catch(err){alert(err);}};
+        a2.onclick=(e)=>{
+          e.preventDefault();
+          try{
+            const state = window.EAQ && EAQ.state ? EAQ.state : null;
+            const manifest = state && Array.isArray(state.manifest && state.manifest.items) ? state.manifest : null;
+            if(!manifest){
+              alert('Manifest not loaded yet. Please wait a moment and try again.');
+              return;
+            }
+            const idx = Number.isInteger(state.idx) ? state.idx : 0;
+            const item = manifest.items[idx] || null;
+            if(!item || !item.asset_id){
+              alert('Current task is unavailable. Select a task first.');
+              return;
+            }
+            window.open('/api/prefill_check?file='+encodeURIComponent(item.asset_id),'_blank');
+          }catch(err){
+            alert(err);
+          }
+        };
         bar.appendChild(a1); bar.appendChild(a2); document.body.appendChild(bar);
       }
     })();
