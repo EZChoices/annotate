@@ -1631,16 +1631,17 @@ function loadAudio(){
 
   const transcriptUrl = it && it.prefill && it.prefill.transcript_vtt_url;
   if(transcriptUrl){
-    fetchWithProxy(transcriptUrl).then((res)=>{
-      if(res && res.ok){
-        console.log([Stage2] Transcript found for );
-        return res.text().catch(()=>null);
-      }
-      throw new Error(`Transcript not found (${res ? res.status : 'unknown'})`);
-    }).catch((err)=>{
-      console.error([Stage2] Transcript missing for :, err && err.message ? err.message : err);
-      try{ alert(Transcript fetch failed for ); }catch{}
-    });
+    fetchWithProxy(transcriptUrl)
+      .then((res)=>{
+        if(res && res.ok){
+          console.log('[Stage2] Transcript found for', it.asset_id);
+          return res.text().catch(()=>null);
+        }
+        throw new Error(`Transcript not found (${res ? res.status : 'unknown'})`);
+      })
+      .catch((err)=>{
+        console.error('[Stage2] Transcript missing for', it.asset_id, err && err.message ? err.message : err);
+      });
   }
 }
 
@@ -2513,10 +2514,6 @@ async function startStage2(seed){
     __ea_updateDiag();
   }
 }
-
-
-
-let __eaControlsBound = false;
 function initStage2Controls(){
   if(__eaControlsBound) return;
   __eaControlsBound = true;
