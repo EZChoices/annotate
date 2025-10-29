@@ -199,6 +199,50 @@ const SAFETY_DRAG_MAX_DELTA = 0.5;
 const MANIFEST_STORAGE_KEY = 'ea_stage2_manifest';
 const ALLOCATOR_HISTORY_KEY = 'ea_stage2_allocator_history_v1';
 const ALLOCATOR_HISTORY_MAX = 100;
+const SESSION_STORAGE_KEY = 'ea_stage2_session_stats';
+
+function loadStoredSessionStats(){
+  if(typeof window === 'undefined' || typeof localStorage === 'undefined') return null;
+  try{
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    if(!raw) return null;
+    const parsed = JSON.parse(raw);
+    const completed = Number.isFinite(Number(parsed.completed)) ? Number(parsed.completed) : 0;
+    const skipped = Number.isFinite(Number(parsed.skipped)) ? Number(parsed.skipped) : 0;
+    const annotator = parsed.annotator || null;
+    const updatedAt = parsed.updatedAt || null;
+    return { completed, skipped, annotator, updatedAt };
+  }catch{
+    return null;
+  }
+}
+
+function persistSessionStats(stats){
+  if(typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+  try{
+    const annot = EAQ.state && (EAQ.state.annotator || getAnnotatorId());
+    const payload = {
+      completed: stats && Number.isFinite(Number(stats.completed)) ? Number(stats.completed) : 0,
+      skipped: stats && Number.isFinite(Number(stats.skipped)) ? Number(stats.skipped) : 0,
+      annotator: annot || null,
+      updatedAt: stats && stats.updatedAt ? stats.updatedAt : new Date().toISOString()
+    };
+    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(payload));
+  }catch{
+    /* ignore storage issues */
+  }
+}
+
+function formatSessionTimestamp(iso){
+  if(!iso) return '—';
+  try{
+    const dt = new Date(iso);
+    if(Number.isNaN(dt.getTime())) return '—';
+    return dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }catch{
+    return '—';
+  }
+}
 
 const DIARIZATION_COLORS = [
   '#4e79a7',
@@ -1477,7 +1521,8 @@ async function loadManifest(){
     await hydrateManifestTranslations(payload);
     EAQ.state.manifest = payload;
     EAQ.state.idx = Math.min(EAQ.state.idx || 0, payload.items.length - 1);
-    EAQ.state.sessionStats = { completed: 0, skipped: 0 };
+    EAQ.state.sessionStats = null;
+    ensureSessionStats();
     updateSessionStats();
     saveManifestToStorage(payload);
     clearManifestWarning();
@@ -1522,7 +1567,17 @@ function currentItem(){
 
 function ensureSessionStats(){
   if(!EAQ.state.sessionStats){
-    EAQ.state.sessionStats = { completed: 0, skipped: 0 };
+    const stored = loadStoredSessionStats();
+    const annot = EAQ.state && (EAQ.state.annotator || getAnnotatorId());
+    if(stored && (!stored.annotator || stored.annotator === annot)){
+      EAQ.state.sessionStats = {
+        completed: stored.completed || 0,
+        skipped: stored.skipped || 0,
+        updatedAt: stored.updatedAt || null
+      };
+    } else {
+      EAQ.state.sessionStats = { completed: 0, skipped: 0, updatedAt: null };
+    }
   }
   return EAQ.state.sessionStats;
 }
@@ -1547,6 +1602,9 @@ function updateSessionStats(){
   updateStatValue('completed', stats.completed);
   updateStatValue('skipped', stats.skipped);
   updateStatValue('remaining', remaining);
+  stats.updatedAt = new Date().toISOString();
+  persistSessionStats(stats);
+  updateStatValue('updated', formatSessionTimestamp(stats.updatedAt));
 
   const statsBox = qs('manifestStats');
   if(statsBox){
@@ -2516,7 +2574,8 @@ async function startStage2(seed){
       if(statusBox){
         statusBox.textContent = 'Tap Start to retry';
       }
-      EAQ.state.sessionStats = { completed: 0, skipped: 0 };
+      EAQ.state.sessionStats = null;
+      ensureSessionStats();
       updateSessionStats();
       if(source !== 'manual'){
         retryInit('empty_manifest');
@@ -2538,7 +2597,8 @@ async function startStage2(seed){
     EAQ.state.manifest = payload;
     saveManifestToStorage(payload);
     EAQ.state.idx = Math.min(EAQ.state.idx || 0, payload.items.length - 1);
-    EAQ.state.sessionStats = { completed: 0, skipped: 0 };
+    EAQ.state.sessionStats = null;
+    ensureSessionStats();
     updateSessionStats();
     const firstItem = payload.items[EAQ.state.idx] || payload.items[0];
     clearManifestWarning();
@@ -2602,6 +2662,7 @@ async function startStage2(seed){
       statusBox.textContent = 'Tap Start to retry';
     }
     __ea_updateDiag();
+    updateSessionStats();
   }
 }
 function initStage2Controls(){

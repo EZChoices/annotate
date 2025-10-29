@@ -120,9 +120,9 @@
         a2.onclick=(e)=>{
           e.preventDefault();
           try{
-            const state = (window.EAQ && EAQ.state) ? EAQ.state : null;
-            const manifest = state && state.manifest;
-            const items = manifest && Array.isArray(manifest.items) ? manifest.items : null;
+        const state = (window.EAQ && EAQ.state) ? EAQ.state : null;
+        const manifest = state && state.manifest;
+        const items = manifest && Array.isArray(manifest.items) ? manifest.items : null;
             if(!items || !items.length){
               alert('Manifest not loaded yet. Please wait a moment and try again.');
               return;
@@ -350,6 +350,7 @@
         `<a href="${base}/meta-v2/index.html">Meta V2</a> &bull;`,
         `<a href="${base}/">Stage 2</a> &bull;`,
         `<a href="${base}/stage2/qa-dashboard.html">QA Dashboard</a> &bull;`,
+        `<a href="${base}/stage2/stats">Stage 2 Stats</a> &bull;`,
         `<a href="${base}/api/tasks?stage=2&annotator_id=${encodeURIComponent(id)}&limit=5" target="_blank">Tasks API</a> &bull;`,
         `<a href="${base}/api/clip?annotator=${encodeURIComponent(id)}" target="_blank">Clip API</a> &bull;`,
         `<a href="${base}/api/debug?annotator=${encodeURIComponent(id)}" target="_blank">Debug</a> &bull;`,
