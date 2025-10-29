@@ -1600,7 +1600,8 @@ function loadAudio(){
     if(!existingWarning){
       const msg = document.createElement('div');
       msg.id = warningId;
-      msg.textContent = Warning: audio missing for asset ;
+      const assetLabel = it && (it.asset_id || it.id || 'unknown');
+      msg.textContent = 'Warning: audio missing for asset ' + assetLabel;
       msg.style.cssText = 'color:red;padding:1rem;font-weight:bold;';
       document.body.appendChild(msg);
     }

@@ -73,9 +73,9 @@
       if (!vttResp.ok) {
         throw new Error(`transcript fetch ${vttResp.status}`);
       }
-      const ct = vttResp.headers.get("content-type") || "";
-      if (!/text/.test(ct)) {
-        throw new Error(`unexpected transcript content-type ${ct}`);
+      const ct = (vttResp.headers.get("content-type") || "").toLowerCase();
+      if (!/text/.test(ct) && !/octet/.test(ct)) {
+        throw new Error(`unexpected transcript content-type ${ct || "unknown"}`);
       }
       window.__EA_CURRENT = item;
       pass(item);
