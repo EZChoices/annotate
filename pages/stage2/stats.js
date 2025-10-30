@@ -467,6 +467,50 @@ export default function Stage2StatsPage() {
         button:hover {
           background: #1d4ed8;
         }
+        .table-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          flex-wrap: wrap;
+          gap: 1rem;
+        }
+        .table-meta {
+          margin: 0.3rem 0 0;
+          font-size: 0.85rem;
+          color: #6b7280;
+        }
+        .filters-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.75rem;
+          margin-bottom: 1rem;
+        }
+        .filters-row input,
+        .filters-row select {
+          border: 1px solid #d1d5db;
+          border-radius: 8px;
+          padding: 0.45rem 0.75rem;
+          background: #fff;
+          flex: 1 1 220px;
+        }
+        .filters-row select {
+          min-width: 180px;
+        }
+        .pagination {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 0.75rem;
+          margin-top: 1rem;
+        }
+        .pagination button {
+          background: #1f2937;
+          padding: 0.4rem 0.8rem;
+        }
+        .pagination button[disabled] {
+          background: #9ca3af;
+          cursor: not-allowed;
+        }
         .description {
           margin: 0;
           color: #6b7280;
