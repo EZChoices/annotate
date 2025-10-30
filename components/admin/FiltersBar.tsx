@@ -17,6 +17,10 @@ interface FiltersBarProps {
   annotatorOptions?: string[];
   searchQuery: string;
   onSearchChange: (value: string) => void;
+  onResync: () => void;
+  onExportCsv: () => void;
+  onToggleAnnotatorView: () => void;
+  annotatorViewEnabled: boolean;
 }
 
 const stageOptions = [
@@ -52,6 +56,10 @@ export default function FiltersBar({
   annotatorOptions,
   searchQuery,
   onSearchChange,
+  onResync,
+  onExportCsv,
+  onToggleAnnotatorView,
+  annotatorViewEnabled,
 }: FiltersBarProps) {
   const annotatorSelectOptions = useMemo(() => {
     const base = [{ value: "", label: "All annotators" }];
@@ -190,6 +198,37 @@ export default function FiltersBar({
           Reset
         </button>
       </div>
+      <div
+        style={{
+          display: "flex",
+          gap: "8px",
+          flexWrap: "wrap",
+          marginLeft: "auto",
+          paddingTop: "8px",
+        }}
+      >
+        <button
+          type="button"
+          onClick={onResync}
+          style={primaryButtonStyle}
+        >
+          Re-sync
+        </button>
+        <button
+          type="button"
+          onClick={onExportCsv}
+          style={secondaryButtonStyle}
+        >
+          Export All CSV
+        </button>
+        <button
+          type="button"
+          onClick={onToggleAnnotatorView}
+          style={secondaryButtonStyle}
+        >
+          {annotatorViewEnabled ? "Hide" : "Show"} Per-Annotator View
+        </button>
+      </div>
     </div>
   );
 }
@@ -217,3 +256,22 @@ function FilterField({
   );
 }
 
+const primaryButtonStyle: React.CSSProperties = {
+  background: "#1d4ed8",
+  color: "#ffffff",
+  border: "none",
+  borderRadius: "6px",
+  padding: "8px 14px",
+  cursor: "pointer",
+  fontSize: "0.85rem",
+};
+
+const secondaryButtonStyle: React.CSSProperties = {
+  background: "#e2e8f0",
+  color: "#0f172a",
+  border: "none",
+  borderRadius: "6px",
+  padding: "8px 14px",
+  cursor: "pointer",
+  fontSize: "0.85rem",
+};

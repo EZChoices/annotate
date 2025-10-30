@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import {
+  Cell,
   Legend,
   Pie,
   PieChart,
   ResponsiveContainer,
   Tooltip,
-  Cell,
 } from "recharts";
+import ChartCard from "./ChartCard";
 
 interface BreakdownRow {
   dialect?: string;
@@ -14,7 +15,7 @@ interface BreakdownRow {
   count: number;
 }
 
-interface PieOrTreeChartProps {
+interface DistributionChartProps {
   dialectData: BreakdownRow[];
   countryData: BreakdownRow[];
   loading?: boolean;
@@ -32,21 +33,21 @@ const COLORS = [
 ];
 
 const MODES = [
-  { id: "dialect", label: "Dialect" },
-  { id: "country", label: "Country" },
+  { id: "dialect", label: "By Dialect" },
+  { id: "country", label: "By Country" },
 ] as const;
 
-export default function PieOrTreeChart({
+export default function DistributionChart({
   dialectData,
   countryData,
   loading = false,
-}: PieOrTreeChartProps) {
+}: DistributionChartProps) {
   const [mode, setMode] = useState<(typeof MODES)[number]["id"]>("dialect");
 
   const { data, title } = useMemo(() => {
     if (mode === "country") {
       return {
-        title: "Breakdown by Country",
+        title: "Distribution by Country",
         data: Array.isArray(countryData)
           ? countryData.map((row) => ({
               name: row.country || "Unknown",
@@ -56,7 +57,7 @@ export default function PieOrTreeChart({
       };
     }
     return {
-      title: "Breakdown by Dialect",
+      title: "Distribution by Dialect",
       data: Array.isArray(dialectData)
         ? dialectData.map((row) => ({
             name: row.dialect || "Unknown",
@@ -69,26 +70,11 @@ export default function PieOrTreeChart({
   const hasData = data.some((row) => row.value > 0);
 
   return (
-    <div
-      style={{
-        background: "#ffffff",
-        borderRadius: "12px",
-        border: "1px solid #e2e8f0",
-        padding: "16px",
-        boxShadow: "0 8px 20px -18px rgba(15, 23, 42, 0.45)",
-        minHeight: "260px",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: "12px",
-        }}
-      >
-        <div style={{ fontWeight: 700, color: "#0f172a" }}>{title}</div>
-        <div style={{ display: "flex", gap: "8px" }}>
+    <ChartCard
+      title={title}
+      loading={loading}
+      action={
+        <div style={{ display: "flex", gap: "6px" }}>
           {MODES.map((option) => (
             <button
               key={option.id}
@@ -108,36 +94,33 @@ export default function PieOrTreeChart({
             </button>
           ))}
         </div>
-      </div>
-      <div style={{ width: "100%", height: "200px" }}>
-        {loading ? (
-          <EmptyState message="Loading breakdown…" />
-        ) : hasData ? (
-          <ResponsiveContainer>
-            <PieChart>
-              <Pie
-                dataKey="value"
-                nameKey="name"
-                data={data}
-                outerRadius={80}
-                innerRadius={40}
-              >
-                {data.map((entry, index) => (
-                  <Cell
-                    key={`cell-${entry.name}-${index}`}
-                    fill={COLORS[index % COLORS.length]}
-                  />
-                ))}
-              </Pie>
-              <Tooltip />
-              <Legend />
-            </PieChart>
-          </ResponsiveContainer>
-        ) : (
-          <EmptyState message="No breakdown data available." />
-        )}
-      </div>
-    </div>
+      }
+    >
+      {hasData ? (
+        <ResponsiveContainer>
+          <PieChart>
+            <Pie
+              dataKey="value"
+              nameKey="name"
+              data={data}
+              outerRadius={90}
+              innerRadius={50}
+            >
+              {data.map((entry, index) => (
+                <Cell
+                  key={`cell-${entry.name}-${index}`}
+                  fill={COLORS[index % COLORS.length]}
+                />
+              ))}
+            </Pie>
+            <Tooltip />
+            <Legend />
+          </PieChart>
+        </ResponsiveContainer>
+      ) : (
+        <EmptyState message="No distribution data for this filter set." />
+      )}
+    </ChartCard>
   );
 }
 

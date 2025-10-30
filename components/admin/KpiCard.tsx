@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import type { MetricValue } from "../../lib/adminQueries";
 
 type TrendMode = "up-good" | "down-good" | "neutral";
@@ -18,11 +19,26 @@ const ACCENT_MAP: Record<
   NonNullable<KpiCardProps["accent"]>,
   { background: string; border: string }
 > = {
-  slate: { background: "linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)", border: "#cbd5f5" },
-  emerald: { background: "linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)", border: "#bbf7d0" },
-  blue: { background: "linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)", border: "#bfdbfe" },
-  amber: { background: "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)", border: "#fde68a" },
-  rose: { background: "linear-gradient(135deg, #fdf2f8 0%, #fce7f3 100%)", border: "#fbcfe8" },
+  slate: {
+    background: "linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)",
+    border: "#cbd5f5",
+  },
+  emerald: {
+    background: "linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)",
+    border: "#bbf7d0",
+  },
+  blue: {
+    background: "linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)",
+    border: "#bfdbfe",
+  },
+  amber: {
+    background: "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)",
+    border: "#fde68a",
+  },
+  rose: {
+    background: "linear-gradient(135deg, #fdf2f8 0%, #fce7f3 100%)",
+    border: "#fbcfe8",
+  },
 };
 
 function defaultValueFormatter(value: number | null): string {
@@ -57,25 +73,34 @@ export default function KpiCard({
   const delta = !loading ? metric?.delta : null;
   const hasDelta = delta != null && !Number.isNaN(delta);
 
+  const isPositive = (delta ?? 0) > 0;
+  const isNegative = (delta ?? 0) < 0;
+  const isImproving =
+    trendMode === "neutral"
+      ? false
+      : trendMode === "up-good"
+      ? isPositive
+      : trendMode === "down-good"
+      ? isNegative
+      : false;
+  const isDeclining =
+    trendMode === "neutral"
+      ? false
+      : trendMode === "up-good"
+      ? isNegative
+      : trendMode === "down-good"
+      ? isPositive
+      : false;
+
   let deltaColor = "#64748b";
-  let deltaLabel = "";
   if (hasDelta) {
-    const isPositive = delta! > 0;
-    const isNegative = delta! < 0;
-    const isGood =
-      trendMode === "neutral"
-        ? isPositive
-        : trendMode === "up-good"
-        ? isPositive
-        : trendMode === "down-good"
-        ? isNegative
-        : false;
-
-    if (isGood) deltaColor = "#16a34a";
-    else if (delta && !isGood) deltaColor = "#dc2626";
-
-    deltaLabel = formatDelta(delta!);
+    if (isImproving) deltaColor = "#16a34a";
+    else if (isDeclining) deltaColor = "#dc2626";
+    else deltaColor = "#f59e0b";
   }
+
+  const arrow = hasDelta ? (delta! > 0 ? "▲" : delta! < 0 ? "▼" : "▬") : null;
+  const deltaLabel = hasDelta ? formatDelta(delta!) : "";
 
   return (
     <div
@@ -96,12 +121,21 @@ export default function KpiCard({
         {title}
       </div>
       <div style={{ display: "flex", alignItems: "baseline", gap: "12px" }}>
-        <div style={{ fontSize: "2.0rem", fontWeight: 700, color: "#0f172a" }}>
-          {valueDisplay}
-        </div>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={loading ? "loading" : valueDisplay}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.25 }}
+            style={{ fontSize: "2.0rem", fontWeight: 700, color: "#0f172a" }}
+          >
+            {valueDisplay}
+          </motion.div>
+        </AnimatePresence>
         {hasDelta ? (
           <div style={{ fontSize: "0.85rem", fontWeight: 600, color: deltaColor }}>
-            {deltaLabel}
+            {arrow ? `${arrow} ${deltaLabel}` : deltaLabel}
           </div>
         ) : null}
       </div>
@@ -111,4 +145,3 @@ export default function KpiCard({
     </div>
   );
 }
-

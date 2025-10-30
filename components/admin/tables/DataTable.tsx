@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { InputHTMLAttributes } from "react";
+import type { InputHTMLAttributes, ReactNode } from "react";
 import {
   ColumnDef,
   flexRender,
@@ -12,13 +12,15 @@ import {
 } from "@tanstack/react-table";
 
 interface DataTableProps<TData> {
-  title: string;
+  title?: string;
   data: TData[];
   columns: ColumnDef<TData, any>[];
   emptyMessage?: string;
   defaultSorting?: SortingState;
   getRowId?: (row: TData, index: number, parent?: { id: string }) => string;
   onSelectionChange?: (rows: TData[]) => void;
+  actions?: ReactNode;
+  loading?: boolean;
 }
 
 const containerStyle: React.CSSProperties = {
@@ -55,6 +57,8 @@ export default function DataTable<TData>({
   defaultSorting = [],
   getRowId,
   onSelectionChange,
+  actions,
+  loading = false,
 }: DataTableProps<TData>) {
   const [sorting, setSorting] = useState<SortingState>(defaultSorting);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
@@ -114,9 +118,28 @@ export default function DataTable<TData>({
 
   return (
     <div style={containerStyle}>
-      <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: "12px" }}>
-        {title}
-      </div>
+      {(title || actions) && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: "12px",
+            marginBottom: "12px",
+          }}
+        >
+          <div
+            style={{
+              fontWeight: 700,
+              color: "#0f172a",
+              fontSize: "1rem",
+            }}
+          >
+            {title}
+          </div>
+          {actions}
+        </div>
+      )}
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
@@ -152,7 +175,20 @@ export default function DataTable<TData>({
             ))}
           </thead>
           <tbody>
-            {hasData ? (
+            {loading ? (
+              <tr>
+                <td
+                  colSpan={columns.length + 1}
+                  style={{
+                    ...cellStyle,
+                    textAlign: "center",
+                    color: "#94a3b8",
+                  }}
+                >
+                  Loading…
+                </td>
+              </tr>
+            ) : hasData ? (
               rows.map((row) => (
                 <tr key={row.id}>
                   {row.getVisibleCells().map((cell) => (
@@ -202,4 +238,5 @@ function IndeterminateCheckbox({
     />
   );
 }
+
 

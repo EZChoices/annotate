@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 interface AnnotatorDrilldownProps {
   annotators: string[];
+  selectedAnnotator?: string;
 }
 
 const SESSION_KEY = "ea_stage2_session_stats";
@@ -111,15 +112,21 @@ function useSessionStats(): SessionStats | null {
 
 export default function AnnotatorDrilldown({
   annotators,
+  selectedAnnotator,
 }: AnnotatorDrilldownProps) {
   const [selected, setSelected] = useState<string>(
-    annotators?.[0] || "anonymous"
+    selectedAnnotator || annotators?.[0] || "anonymous"
   );
   const [items, setItems] = useState<ManifestItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const sessionStats = useSessionStats();
+
+  useEffect(() => {
+    if (!selectedAnnotator) return;
+    setSelected(selectedAnnotator);
+  }, [selectedAnnotator]);
 
   useEffect(() => {
     if (!selected) return;
@@ -403,4 +410,3 @@ function SessionBlock({ stats }: { stats: SessionStats | null }) {
     </div>
   );
 }
-
