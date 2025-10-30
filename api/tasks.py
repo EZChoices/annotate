@@ -968,29 +968,100 @@ async def get_tasks(
             _normalize_probability(DEFAULT_ROUTING_CONFIG["annotator_daily_cap"]) or 1.0
         )
 
+    schema_meta: Dict[str, Any] = {
+        "contacted_supabase": False,
+        "table": KEEP_TABLE,
+        "error_type": None,
+        "keep_rows": 0,
+        "skipped_missing_transcript": 0,
+    }
+    diag: Dict[str, Any] = {}
+
+    def _warn(message: str) -> None:
+        if message and os.environ.get("NODE_ENV") != "production":
+            print(f"[tasks] warning: {message}")
+
+    def _empty_response() -> JSONResponse:
+        payload = {
+            "items": [],
+            "__diag": diag or None,
+            "__meta": schema_meta,
+        }
+        return JSONResponse(payload, headers=CACHE_HEADERS)
+
+    if not SUPABASE_URL or not SUPABASE_KEY or not KEEP_TABLE:
+        schema_meta["error_type"] = "missing_table"
+        diag["error"] = (
+            "Supabase configuration incomplete. "
+            "Ensure SUPABASE_URL, SUPABASE_KEY, and SUPABASE_KEEP_TABLE are set."
+        )
+        _warn(diag["error"])
+        return _empty_response()
+
     if BUNNY_KEEP_URL and SUPABASE_URL and SUPABASE_KEY:
         try:
-            keep_endpoint = f"{SUPABASE_URL}/rest/v1/{KEEP_TABLE}?{DECISION_COL}=eq.{KEEP_VALUE}&select={FILE_COL}"
-            if PREFILL_DIA:
-                keep_endpoint += f",{PREFILL_DIA}"
-            if PREFILL_TR_VTT:
-                keep_endpoint += f",{PREFILL_TR_VTT}"
-            if PREFILL_TR_CTM:
-                keep_endpoint += f",{PREFILL_TR_CTM}"
-            if PREFILL_TL_VTT:
-                keep_endpoint += f",{PREFILL_TL_VTT}"
-            if PREFILL_CS_VTT:
-                keep_endpoint += f",{PREFILL_CS_VTT}"
-            if KEEP_AUDIO_COL:
-                keep_endpoint += f",{KEEP_AUDIO_COL}"
+            select_columns: List[str] = [FILE_COL, DECISION_COL]
+            optional_columns = [
+                PREFILL_DIA,
+                PREFILL_TR_VTT,
+                PREFILL_TR_CTM,
+                PREFILL_TL_VTT,
+                PREFILL_CS_VTT,
+                KEEP_AUDIO_COL,
+            ]
+            for col in optional_columns:
+                if col and col not in select_columns:
+                    select_columns.append(col)
+
+            select_clause = ",".join(select_columns)
+
+            keep_endpoint = (
+                f"{SUPABASE_URL}/rest/v1/{KEEP_TABLE}"
+                f"?{DECISION_COL}=eq.{KEEP_VALUE}"
+                f"&select={select_clause}"
+                f"&limit={max(1, min(limit, 500))}"
+            )
 
             headers = _supabase_headers()
             _dbg("fetch.keep", endpoint=keep_endpoint)
             keep_resp = requests.get(keep_endpoint, headers=headers, timeout=20)
+            schema_meta["contacted_supabase"] = True
             _dbg("fetch.keep.done", status=keep_resp.status_code)
-            keep_resp.raise_for_status()
+            if keep_resp.status_code >= 400:
+                error_message = ""
+                try:
+                    supabase_json = keep_resp.json()
+                    error_message = supabase_json.get("message") or supabase_json.get("error", "")
+                except Exception:
+                    error_message = keep_resp.text or keep_resp.reason
+                error_message = (error_message or "").strip() or "Supabase query failed."
+                lowered = error_message.lower()
+                if (
+                    keep_resp.status_code == 404
+                    or "does not exist" in lowered
+                    or "missing from-clause" in lowered
+                ):
+                    schema_meta["error_type"] = "missing_table"
+                    diag["error"] = f'Supabase table "{KEEP_TABLE}" does not exist.'
+                else:
+                    missing_columns = [
+                        col
+                        for col in select_columns
+                        if col.lower() in lowered and "column" in lowered
+                    ]
+                    if missing_columns:
+                        schema_meta["error_type"] = "missing_columns"
+                        diag["error"] = f"Missing columns: {', '.join(sorted(set(missing_columns)))}"
+                        diag["missing_columns"] = sorted(set(missing_columns))
+                    else:
+                        schema_meta["error_type"] = "query_error"
+                        diag["error"] = error_message
+                _warn(diag.get("error", error_message))
+                return _empty_response()
+
             rows = keep_resp.json()
             keep_rows_total = len(rows) if isinstance(rows, list) else None
+            schema_meta["keep_rows"] = keep_rows_total or 0
 
             assign_endpoint = (
                 f"{SUPABASE_URL}/rest/v1/{ASSIGN2_TABLE}?select={ASSIGN2_FILE_COL},{ASSIGN2_USER_COL},{ASSIGN2_TIME_COL}"
@@ -1291,14 +1362,11 @@ async def get_tasks(
                     except Exception:
                         pass
             _dbg("supabase.fetch.error", error=error_info)
-            return JSONResponse(
-                {
-                    "__diag": "supabase_error_fallback",
-                    "error": error_info,
-                    "manifest": _seed_manifest(annotator_id, stage),
-                },
-                headers=CACHE_HEADERS,
-            )
+            schema_meta["error_type"] = "query_error"
+            diag["error"] = "Supabase fetch failed; see __diag.details for context."
+            diag["details"] = error_info
+            _warn(diag["error"])
+            return _empty_response()
 
     selected_entries_total = len(selected_entries)
     selected_entries_count = len(items)
@@ -1311,20 +1379,28 @@ async def get_tasks(
     }
     if skipped_assets:
         manifest_meta["skipped_assets"] = skipped_assets
+    schema_meta["skipped_missing_transcript"] = skipped_missing_transcript
+    if keep_rows_total is not None:
+        schema_meta["keep_rows"] = keep_rows_total
+    manifest_meta.update(schema_meta)
 
     if not items and seed_fallback and not use_seed:
         _dbg("no_items_fallback", reason=manifest_meta)
-        return JSONResponse(
-            {
-                "__diag": "no_items_fallback",
+        fallback_payload = {
+            "items": [],
+            "__diag": {
+                "message": "no_items_fallback",
                 "reason": manifest_meta,
-                "manifest": _seed_manifest(annotator_id, stage),
             },
-            headers=CACHE_HEADERS,
-        )
+            "__meta": schema_meta,
+            "manifest": _seed_manifest(annotator_id, stage),
+        }
+        return JSONResponse(fallback_payload, headers=CACHE_HEADERS)
 
     manifest: Dict[str, Any] = {"annotator_id": annotator_id, "stage": stage, "items": items}
     manifest["__meta"] = manifest_meta
+    if diag:
+        manifest["__diag"] = diag
     if use_seed:
         manifest["__seed"] = _seed_manifest(annotator_id, stage)
     return JSONResponse(manifest, headers=CACHE_HEADERS)
