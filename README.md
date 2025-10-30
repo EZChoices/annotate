@@ -188,3 +188,16 @@ Audio proxy env:
 ## Acceptance Tests
 
 - Update `config/routing.json`, set `p_base` to `0.20`, then reload the Stage 2 dashboard and request a fresh manifest. The share of clips flagged for double-pass review in that manifest should increase relative to the prior run (allowing for randomness).
+
+## Admin Dashboard
+
+![Admin Dashboard](docs/images/admin-dashboard.png)
+
+The read-only admin console is available at `/admin`. It surfaces live KPIs for clip throughput, funnel health, annotator activity, and recent operational alerts.
+
+- **Server-side stats** are exposed via `GET /api/admin/stats`, using Supabase tables `clips`, `annotations`, `qa_reviews`, `flags`, and `annotators`. The handler accepts optional `from`, `to`, `stage`, `priority`, `dialect`, `country`, and `annotatorId` query parameters for filtering.
+- **Status mapping** canonicalises database status strings to the dashboard stages described in `lib/statusMap.js`. Update the `NORMALIZED_STATUS_MAP` if your schema uses different labels.
+- **Running locally**: install new dependencies with `npm install`, then start Next.js via `npm run dev` and visit `http://localhost:3000/admin`. Provide `SUPABASE_URL` and `SUPABASE_KEY` in your environment before launching the dev server to see live data.
+- **Exports**: the dashboard supports CSV and JSONL downloads for the current view as well as selected rows in the operations tables. All timestamps render in the Europe/Paris timezone on the client.
+
+> Screenshot placeholder: update `docs/images/admin-dashboard.png` with a current capture after wiring the dashboard to production data.
