@@ -292,7 +292,8 @@ export default function AdminDashboard() {
             </h1>
             {data?.timeWindow ? (
               <p style={{ margin: 0, color: "#475569" }}>
-                Window: {formatDateTime(data.timeWindow.from)} ->{" "}
+                Window: {formatDateTime(data.timeWindow.from)}
+                {" -> "}
                 {formatDateTime(data.timeWindow.to)}
                 {isValidating ? " - updating..." : ""}
               </p>
