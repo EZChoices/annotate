@@ -949,9 +949,10 @@ async def get_config() -> JSONResponse:
 async def get_tasks(
     stage: int = Query(2),
     annotator_id: str = Query("anonymous"),
-    limit: int = Query(10, ge=1, le=200),
+    limit: int = Query(10, ge=1),
     seed_fallback: bool = Query(True),
     use_seed: bool = Query(False),
+    include_missing_prefill: bool = Query(False),
 ):
     items: List[Dict[str, Any]] = []
     keep_rows_total: Optional[int] = None
@@ -998,6 +999,9 @@ async def get_tasks(
         _warn(diag["error"])
         return _empty_response()
 
+    allow_missing_prefill = include_missing_prefill or (not seed_fallback)
+    fetch_limit = max(1, limit)
+
     if BUNNY_KEEP_URL and SUPABASE_URL and SUPABASE_KEY:
         try:
             select_columns: List[str] = [FILE_COL, DECISION_COL]
@@ -1019,7 +1023,7 @@ async def get_tasks(
                 f"{SUPABASE_URL}/rest/v1/{KEEP_TABLE}"
                 f"?{DECISION_COL}=eq.{KEEP_VALUE}"
                 f"&select={select_clause}"
-                f"&limit={max(1, min(limit, 500))}"
+                f"&limit={max(1, min(fetch_limit, 5000))}"
             )
 
             headers = _supabase_headers()
@@ -1106,7 +1110,7 @@ async def get_tasks(
             }
 
             for row in available_rows:
-                if len(selected_entries) >= limit:
+                if len(selected_entries) >= fetch_limit:
                     break
                 fname = row.get(FILE_COL)
                 if not fname or fname in selected_files:
@@ -1114,14 +1118,14 @@ async def get_tasks(
                 selected_entries.append({"row": row, "cell": _derive_primary_cell(row)})
                 selected_files.add(fname)
 
-            if len(selected_entries) < limit and rows:
+            if len(selected_entries) < fetch_limit and rows:
                 pool = [
                     r
                     for r in rows
                     if all(r is not entry["row"] for entry in selected_entries)
                 ]
                 random.shuffle(pool)
-                for row in pool[: max(0, limit - len(selected_entries))]:
+                for row in pool[: max(0, fetch_limit - len(selected_entries))]:
                     selected_entries.append(
                         {"row": row, "cell": _derive_primary_cell(row)}
                     )
@@ -1138,7 +1142,7 @@ async def get_tasks(
                     gold_rows = []
 
             candidate_entries = list(selected_entries)
-            if limit and rows and len(candidate_entries) < limit * 2:
+            if fetch_limit and rows and len(candidate_entries) < fetch_limit * 2:
                 existing_ids = {id(entry["row"]) for entry in candidate_entries}
                 extras: List[Dict[str, Any]] = []
                 for row in rows:
@@ -1146,7 +1150,7 @@ async def get_tasks(
                         continue
                     extras.append({"row": row, "cell": _derive_primary_cell(row)})
                 random.shuffle(extras)
-                max_extras = max(limit * 3 - len(candidate_entries), 0)
+                max_extras = max(fetch_limit * 3 - len(candidate_entries), 0)
                 if max_extras:
                     candidate_entries.extend(extras[:max_extras])
 
@@ -1160,7 +1164,7 @@ async def get_tasks(
             base = BUNNY_KEEP_URL.rstrip("/")
 
             for entry in candidate_entries:
-                if len(items) >= limit:
+                if len(items) >= fetch_limit:
                     break
                 row_ref = entry.get("row")
                 if not isinstance(row_ref, dict):
@@ -1320,17 +1324,19 @@ async def get_tasks(
                 if not has_transcript:
                     skipped_missing_transcript += 1
                     skipped_assets.append(fname)
-                    continue
+                    if not allow_missing_prefill:
+                        continue
 
                 items.append(manifest_item)
                 seen_assets.add(fname)
-                assignment_rows.append(
-                    {
-                        ASSIGN2_FILE_COL: fname,
-                        ASSIGN2_USER_COL: annotator_id,
-                        ASSIGN2_TIME_COL: datetime.utcnow().isoformat(),
-                    }
-                )
+                if seed_fallback:
+                    assignment_rows.append(
+                        {
+                            ASSIGN2_FILE_COL: fname,
+                            ASSIGN2_USER_COL: annotator_id,
+                            ASSIGN2_TIME_COL: datetime.utcnow().isoformat(),
+                        }
+                    )
 
             if assignment_rows:
                 try:
