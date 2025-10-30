@@ -1,14 +1,19 @@
 import {
-  BarChart,
   Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
+  BarChart,
   CartesianGrid,
   ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
 } from "recharts";
 
-const STAGE_LABELS = {
+interface FunnelDatum {
+  stage: string;
+  count: number;
+}
+
+const STAGE_LABELS: Record<string, string> = {
   RIGHTS: "Rights",
   TRIAGE: "Triage",
   ANNOTATE: "Annotate",
@@ -18,7 +23,17 @@ const STAGE_LABELS = {
   DUP: "Duplicates",
 };
 
-export default function FunnelChart({ data }) {
+interface FunnelChartProps {
+  data: FunnelDatum[];
+  title?: string;
+  loading?: boolean;
+}
+
+export default function FunnelChart({
+  data,
+  title = "Funnel",
+  loading = false,
+}: FunnelChartProps) {
   const chartData = Array.isArray(data)
     ? data.map((row) => ({
         ...row,
@@ -31,18 +46,20 @@ export default function FunnelChart({ data }) {
     <div
       style={{
         background: "#ffffff",
-        borderRadius: "8px",
+        borderRadius: "12px",
         border: "1px solid #e2e8f0",
         padding: "16px",
-        boxShadow: "0 1px 2px rgba(15, 23, 42, 0.08)",
+        boxShadow: "0 8px 20px -18px rgba(15, 23, 42, 0.45)",
         minHeight: "260px",
       }}
     >
-      <div style={{ fontWeight: 600, color: "#0f172a", marginBottom: "12px" }}>
-        Funnel
+      <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: "12px" }}>
+        {title}
       </div>
       <div style={{ width: "100%", height: "200px" }}>
-        {hasData ? (
+        {loading ? (
+          <EmptyState message="Loading funnel…" />
+        ) : hasData ? (
           <ResponsiveContainer>
             <BarChart
               data={chartData}
@@ -54,7 +71,7 @@ export default function FunnelChart({ data }) {
               <YAxis
                 type="category"
                 dataKey="stageLabel"
-                width={120}
+                width={140}
                 tick={{ fontSize: 12 }}
               />
               <Tooltip />
@@ -69,7 +86,7 @@ export default function FunnelChart({ data }) {
   );
 }
 
-function EmptyState({ message }) {
+function EmptyState({ message }: { message: string }) {
   return (
     <div
       style={{

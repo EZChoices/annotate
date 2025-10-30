@@ -1,32 +1,51 @@
 import {
-  LineChart,
+  CartesianGrid,
   Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  Tooltip,
-  CartesianGrid,
-  ResponsiveContainer,
 } from "recharts";
 
-export default function TimeSeriesChart({ data }) {
+interface TimeSeriesPoint {
+  date: string;
+  completedCount: number;
+}
+
+interface TimeSeriesChartProps {
+  title: string;
+  data: TimeSeriesPoint[];
+  loading?: boolean;
+  height?: number;
+}
+
+export default function TimeSeriesChart({
+  title,
+  data,
+  loading = false,
+  height = 220,
+}: TimeSeriesChartProps) {
   const hasData = Array.isArray(data) && data.length > 0;
 
   return (
     <div
       style={{
         background: "#ffffff",
-        borderRadius: "8px",
+        borderRadius: "12px",
         border: "1px solid #e2e8f0",
         padding: "16px",
-        boxShadow: "0 1px 2px rgba(15, 23, 42, 0.08)",
-        minHeight: "260px",
+        boxShadow: "0 8px 20px -18px rgba(15, 23, 42, 0.45)",
+        minHeight: height + 60,
       }}
     >
-      <div style={{ fontWeight: 600, color: "#0f172a", marginBottom: "12px" }}>
-        Throughput (30d)
+      <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: "12px" }}>
+        {title}
       </div>
-      <div style={{ width: "100%", height: "200px" }}>
-        {hasData ? (
+      <div style={{ width: "100%", height }}>
+        {loading ? (
+          <EmptyState message="Loading throughput…" />
+        ) : hasData ? (
           <ResponsiveContainer>
             <LineChart data={data}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
@@ -50,7 +69,7 @@ export default function TimeSeriesChart({ data }) {
   );
 }
 
-function EmptyState({ message }) {
+function EmptyState({ message }: { message: string }) {
   return (
     <div
       style={{

@@ -1,20 +1,35 @@
 import { useEffect, useMemo, useState } from "react";
+import type { InputHTMLAttributes } from "react";
 import {
+  ColumnDef,
   flexRender,
   getCoreRowModel,
   getSortedRowModel,
+  RowSelectionState,
+  SortingState,
+  Table,
   useReactTable,
 } from "@tanstack/react-table";
 
-const containerStyle = {
+interface DataTableProps<TData> {
+  title: string;
+  data: TData[];
+  columns: ColumnDef<TData, any>[];
+  emptyMessage?: string;
+  defaultSorting?: SortingState;
+  getRowId?: (row: TData, index: number, parent?: { id: string }) => string;
+  onSelectionChange?: (rows: TData[]) => void;
+}
+
+const containerStyle: React.CSSProperties = {
   background: "#ffffff",
-  borderRadius: "8px",
+  borderRadius: "12px",
   border: "1px solid #e2e8f0",
   padding: "16px",
-  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.08)",
+  boxShadow: "0 8px 20px -18px rgba(15, 23, 42, 0.45)",
 };
 
-const headerCellStyle = {
+const headerCellStyle: React.CSSProperties = {
   textAlign: "left",
   fontSize: "0.75rem",
   textTransform: "uppercase",
@@ -22,31 +37,32 @@ const headerCellStyle = {
   letterSpacing: "0.05em",
   padding: "8px 12px",
   borderBottom: "1px solid #e2e8f0",
+  cursor: "pointer",
 };
 
-const cellStyle = {
+const cellStyle: React.CSSProperties = {
   padding: "10px 12px",
   borderBottom: "1px solid #e2e8f0",
   fontSize: "0.9rem",
   color: "#0f172a",
 };
 
-export default function DataTable({
+export default function DataTable<TData>({
   title,
   data,
   columns,
   emptyMessage,
-  defaultSorting,
+  defaultSorting = [],
   getRowId,
   onSelectionChange,
-}) {
-  const [sorting, setSorting] = useState(defaultSorting || []);
-  const [rowSelection, setRowSelection] = useState({});
+}: DataTableProps<TData>) {
+  const [sorting, setSorting] = useState<SortingState>(defaultSorting);
+  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
 
-  const selectionColumn = useMemo(
+  const selectionColumn: ColumnDef<TData, unknown> = useMemo(
     () => ({
       id: "__select",
-      header: ({ table }) => (
+      header: ({ table }: { table: Table<TData> }) => (
         <IndeterminateCheckbox
           checked={table.getIsAllRowsSelected()}
           indeterminate={table.getIsSomeRowsSelected()}
@@ -61,6 +77,7 @@ export default function DataTable({
           onChange={row.getToggleSelectedHandler()}
         />
       ),
+      enableSorting: false,
       size: 32,
     }),
     []
@@ -68,15 +85,19 @@ export default function DataTable({
 
   const table = useReactTable({
     data: Array.isArray(data) ? data : [],
-    columns: [selectionColumn, ...(columns || [])],
+    columns: [selectionColumn, ...columns],
     state: { sorting, rowSelection },
     onSortingChange: setSorting,
     onRowSelectionChange: setRowSelection,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
+    getCoreRowModel: getCoreRowModel<TData>(),
+    getSortedRowModel: getSortedRowModel<TData>(),
     getRowId:
       getRowId ||
-      ((row, index) => row.id || row.clipId || row.clip_id || String(index)),
+      ((row, index) =>
+        (row as any)?.id ||
+        (row as any)?.clipId ||
+        (row as any)?.clip_id ||
+        String(index)),
     enableRowSelection: true,
   });
 
@@ -93,7 +114,7 @@ export default function DataTable({
 
   return (
     <div style={containerStyle}>
-      <div style={{ fontWeight: 600, color: "#0f172a", marginBottom: "12px" }}>
+      <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: "12px" }}>
         {title}
       </div>
       <div style={{ overflowX: "auto" }}>
@@ -106,7 +127,9 @@ export default function DataTable({
                     key={header.id}
                     style={{
                       ...headerCellStyle,
-                      width: header.column.getSize(),
+                      cursor: header.column.getCanSort()
+                        ? "pointer"
+                        : "default",
                     }}
                     onClick={
                       header.column.getCanSort()
@@ -145,8 +168,12 @@ export default function DataTable({
             ) : (
               <tr>
                 <td
-                  colSpan={(columns?.length || 0) + 1}
-                  style={{ ...cellStyle, textAlign: "center", color: "#94a3b8" }}
+                  colSpan={columns.length + 1}
+                  style={{
+                    ...cellStyle,
+                    textAlign: "center",
+                    color: "#94a3b8",
+                  }}
                 >
                   {emptyMessage || "No records found."}
                 </td>
@@ -159,8 +186,11 @@ export default function DataTable({
   );
 }
 
-function IndeterminateCheckbox({ indeterminate, ...props }) {
-  const refCallback = (input) => {
+function IndeterminateCheckbox({
+  indeterminate,
+  ...props
+}: { indeterminate?: boolean } & InputHTMLAttributes<HTMLInputElement>) {
+  const refCallback = (input: HTMLInputElement | null) => {
     if (input) input.indeterminate = Boolean(indeterminate);
   };
   return (

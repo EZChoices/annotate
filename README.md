@@ -189,15 +189,17 @@ Audio proxy env:
 
 - Update `config/routing.json`, set `p_base` to `0.20`, then reload the Stage 2 dashboard and request a fresh manifest. The share of clips flagged for double-pass review in that manifest should increase relative to the prior run (allowing for randomness).
 
-## Admin Dashboard
+## Admin Dashboard – Global Project Health Snapshot
 
 ![Admin Dashboard](docs/images/admin-dashboard.png)
 
-The read-only admin console is available at `/admin`. It surfaces live KPIs for clip throughput, funnel health, annotator activity, and recent operational alerts.
+Project managers can visit `/admin` for a live, aggregated view of annotation health:
 
-- **Server-side stats** are exposed via `GET /api/admin/stats`, using Supabase tables `clips`, `annotations`, `qa_reviews`, `flags`, and `annotators`. The handler accepts optional `from`, `to`, `stage`, `priority`, `dialect`, `country`, and `annotatorId` query parameters for filtering.
-- **Status mapping** canonicalises database status strings to the dashboard stages described in `lib/statusMap.js`. Update the `NORMALIZED_STATUS_MAP` if your schema uses different labels.
-- **Running locally**: install new dependencies with `npm install`, then start Next.js via `npm run dev` and visit `http://localhost:3000/admin`. Provide `SUPABASE_URL` and `SUPABASE_KEY` in your environment before launching the dev server to see live data.
-- **Exports**: the dashboard supports CSV and JSONL downloads for the current view as well as selected rows in the operations tables. All timestamps render in the Europe/Paris timezone on the client.
+- **KPIs & Trends** – Total inventory, completion percentage (by clip count and hours), QA fail deltas, active annotators, throughput, turnaround time, and stuck counts all render in the hero KPI row. Green/red deltas compare the last seven days with the previous period.
+- **Visual analytics** – Funnel, 30-day throughput line, dialect/country distribution, prefill coverage, and a leaderboard bar chart help spot bottlenecks quickly.
+- **Operations tables** – Sortable, selectable tables list stuck clips and recent flags. Each table exports CSV or JSONL for selected rows, and the global search box filters by clip ID or annotator.
+- **Per-annotator drilldown** – A collapsible details panel reuses the Stage-2 manifest/session widgets. Selecting an annotator fetches their manifest health and local session stats in real time.
+- **Environment signals** – A Supabase status badge, human friendly error banner, “Last data sync” timestamp (Europe/Paris), and a manual “Re-sync” button clarify backend health.
+- **API contract** – The dashboard calls `GET /api/admin/stats` (App Router route) which aggregates Supabase tables `clips`, `annotations`, `qa_reviews`, `flags`, and `annotators`. Filters include `from`, `to`, `stage`, `priority`, `dialect`, `country`, and `annotatorId`.
 
-> Screenshot placeholder: update `docs/images/admin-dashboard.png` with a current capture after wiring the dashboard to production data.
+> The screenshot is a placeholder. Swap `docs/images/admin-dashboard.png` with a fresh capture once the dashboard is connected to live data.

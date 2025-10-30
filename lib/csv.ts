@@ -1,20 +1,24 @@
-function escapeCsvValue(value) {
+type Row = Record<string, unknown>;
+
+function escapeCsvValue(value: unknown): string {
   if (value == null) return "";
   const str =
-    typeof value === "object" ? JSON.stringify(value) : String(value ?? "");
+    typeof value === "object" && value !== null
+      ? JSON.stringify(value)
+      : String(value ?? "");
   if (/[",\n]/.test(str)) {
     return `"${str.replace(/"/g, '""')}"`;
   }
   return str;
 }
 
-export function arrayToCSV(rows) {
+export function arrayToCSV(rows: Row[]): string {
   if (!Array.isArray(rows) || rows.length === 0) return "";
   const headers = Array.from(
     rows.reduce((set, row) => {
       Object.keys(row || {}).forEach((key) => set.add(key));
       return set;
-    }, new Set())
+    }, new Set<string>())
   );
   const lines = [headers.join(",")];
   rows.forEach((row) => {
@@ -24,14 +28,14 @@ export function arrayToCSV(rows) {
   return lines.join("\n");
 }
 
-export function arrayToJSONL(rows) {
+export function arrayToJSONL(rows: Row[]): string {
   if (!Array.isArray(rows) || rows.length === 0) return "";
   return rows
     .map((row) => JSON.stringify(row ?? {}, (_key, value) => value ?? null))
     .join("\n");
 }
 
-function downloadBlob(filename, mimeType, content) {
+function downloadBlob(filename: string, mimeType: string, content: string) {
   if (typeof window === "undefined" || !window?.URL?.createObjectURL) return;
   const blob = new Blob([content], { type: mimeType });
   const url = window.URL.createObjectURL(blob);
@@ -44,13 +48,13 @@ function downloadBlob(filename, mimeType, content) {
   window.URL.revokeObjectURL(url);
 }
 
-export function exportAsCSV(filename, rows) {
+export function exportAsCSV(filename: string, rows: Row[]) {
   const csv = arrayToCSV(rows);
   if (!csv) return;
   downloadBlob(filename, "text/csv;charset=utf-8", csv);
 }
 
-export function exportAsJSONL(filename, rows) {
+export function exportAsJSONL(filename: string, rows: Row[]) {
   const jsonl = arrayToJSONL(rows);
   if (!jsonl) return;
   downloadBlob(filename, "application/json", `${jsonl}\n`);

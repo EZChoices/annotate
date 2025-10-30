@@ -1,12 +1,24 @@
 import { useMemo, useState } from "react";
 import {
-  PieChart,
+  Legend,
   Pie,
+  PieChart,
+  ResponsiveContainer,
   Tooltip,
   Cell,
-  ResponsiveContainer,
-  Legend,
 } from "recharts";
+
+interface BreakdownRow {
+  dialect?: string;
+  country?: string;
+  count: number;
+}
+
+interface PieOrTreeChartProps {
+  dialectData: BreakdownRow[];
+  countryData: BreakdownRow[];
+  loading?: boolean;
+}
 
 const COLORS = [
   "#6366f1",
@@ -22,10 +34,14 @@ const COLORS = [
 const MODES = [
   { id: "dialect", label: "Dialect" },
   { id: "country", label: "Country" },
-];
+] as const;
 
-export default function PieOrTreeChart({ dialectData, countryData }) {
-  const [mode, setMode] = useState("dialect");
+export default function PieOrTreeChart({
+  dialectData,
+  countryData,
+  loading = false,
+}: PieOrTreeChartProps) {
+  const [mode, setMode] = useState<(typeof MODES)[number]["id"]>("dialect");
 
   const { data, title } = useMemo(() => {
     if (mode === "country") {
@@ -56,10 +72,10 @@ export default function PieOrTreeChart({ dialectData, countryData }) {
     <div
       style={{
         background: "#ffffff",
-        borderRadius: "8px",
+        borderRadius: "12px",
         border: "1px solid #e2e8f0",
         padding: "16px",
-        boxShadow: "0 1px 2px rgba(15, 23, 42, 0.08)",
+        boxShadow: "0 8px 20px -18px rgba(15, 23, 42, 0.45)",
         minHeight: "260px",
       }}
     >
@@ -71,7 +87,7 @@ export default function PieOrTreeChart({ dialectData, countryData }) {
           marginBottom: "12px",
         }}
       >
-        <div style={{ fontWeight: 600, color: "#0f172a" }}>{title}</div>
+        <div style={{ fontWeight: 700, color: "#0f172a" }}>{title}</div>
         <div style={{ display: "flex", gap: "8px" }}>
           {MODES.map((option) => (
             <button
@@ -94,7 +110,9 @@ export default function PieOrTreeChart({ dialectData, countryData }) {
         </div>
       </div>
       <div style={{ width: "100%", height: "200px" }}>
-        {hasData ? (
+        {loading ? (
+          <EmptyState message="Loading breakdown…" />
+        ) : hasData ? (
           <ResponsiveContainer>
             <PieChart>
               <Pie
@@ -123,7 +141,7 @@ export default function PieOrTreeChart({ dialectData, countryData }) {
   );
 }
 
-function EmptyState({ message }) {
+function EmptyState({ message }: { message: string }) {
   return (
     <div
       style={{

@@ -1,6 +1,24 @@
 import { useMemo } from "react";
 import { CANONICAL_STATUS } from "../../lib/statusMap";
 
+interface Filters {
+  from?: string;
+  to?: string;
+  stage?: string;
+  priority?: string;
+  dialect?: string;
+  country?: string;
+  annotatorId?: string;
+}
+
+interface FiltersBarProps {
+  filters: Filters;
+  onChange: (next: Filters) => void;
+  annotatorOptions?: string[];
+  searchQuery: string;
+  onSearchChange: (value: string) => void;
+}
+
 const stageOptions = [
   { value: "", label: "All statuses" },
   { value: CANONICAL_STATUS.STAGE0_RIGHTS, label: "Stage 0 - Rights" },
@@ -21,18 +39,24 @@ const priorityOptions = [
   { value: "3", label: "P3" },
 ];
 
-function toInputDate(value) {
+function toInputDate(value?: string): string {
   if (!value) return "";
-  const date = value instanceof Date ? value : new Date(value);
+  const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return date.toISOString().slice(0, 10);
 }
 
-export default function FiltersBar({ filters, onChange, annotatorOptions }) {
+export default function FiltersBar({
+  filters,
+  onChange,
+  annotatorOptions,
+  searchQuery,
+  onSearchChange,
+}: FiltersBarProps) {
   const annotatorSelectOptions = useMemo(() => {
     const base = [{ value: "", label: "All annotators" }];
     if (!Array.isArray(annotatorOptions)) return base;
-    const seen = new Set();
+    const seen = new Set<string>();
     annotatorOptions.forEach((id) => {
       if (!id || seen.has(id)) return;
       seen.add(id);
@@ -41,7 +65,7 @@ export default function FiltersBar({ filters, onChange, annotatorOptions }) {
     return base;
   }, [annotatorOptions]);
 
-  const setFilter = (key, value) => {
+  const setFilter = (key: keyof Filters, value?: string) => {
     const next = { ...(filters || {}) };
     if (value) {
       if (key === "from" || key === "to") {
@@ -53,10 +77,10 @@ export default function FiltersBar({ filters, onChange, annotatorOptions }) {
     } else {
       delete next[key];
     }
-    onChange?.(next);
+    onChange(next);
   };
 
-  const resetFilters = () => onChange?.({});
+  const resetFilters = () => onChange({});
 
   return (
     <div
@@ -66,12 +90,21 @@ export default function FiltersBar({ filters, onChange, annotatorOptions }) {
         gap: "12px",
         alignItems: "flex-end",
         background: "#ffffff",
-        borderRadius: "8px",
+        borderRadius: "12px",
         border: "1px solid #e2e8f0",
         padding: "16px",
-        boxShadow: "0 1px 2px rgba(15, 23, 42, 0.08)",
+        boxShadow: "0 8px 20px -18px rgba(15, 23, 42, 0.45)",
       }}
     >
+      <FilterField label="Search">
+        <input
+          type="text"
+          placeholder="Search clip ID or annotator…"
+          value={searchQuery}
+          onChange={(event) => onSearchChange(event.target.value)}
+          style={{ minWidth: "220px" }}
+        />
+      </FilterField>
       <FilterField label="From">
         <input
           type="date"
@@ -101,9 +134,7 @@ export default function FiltersBar({ filters, onChange, annotatorOptions }) {
       <FilterField label="Priority">
         <select
           value={filters?.priority || ""}
-          onChange={(event) =>
-            setFilter("priority", event.target.value || undefined)
-          }
+          onChange={(event) => setFilter("priority", event.target.value || undefined)}
         >
           {priorityOptions.map((opt) => (
             <option key={opt.value || "all"} value={opt.value}>
@@ -163,11 +194,26 @@ export default function FiltersBar({ filters, onChange, annotatorOptions }) {
   );
 }
 
-function FilterField({ label, children }) {
+function FilterField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
-    <label style={{ display: "flex", flexDirection: "column", fontSize: "0.8rem", color: "#475569" }}>
-      <span style={{ marginBottom: "4px", fontWeight: 600 }}>{label}</span>
+    <label
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        fontSize: "0.8rem",
+        color: "#475569",
+        gap: "4px",
+      }}
+    >
+      <span style={{ fontWeight: 600 }}>{label}</span>
       {children}
     </label>
   );
 }
+

@@ -1,20 +1,26 @@
 import { useMemo, useState } from "react";
 import {
-  useReactTable,
+  flexRender,
   getCoreRowModel,
   getSortedRowModel,
-  flexRender,
+  SortingState,
+  useReactTable,
 } from "@tanstack/react-table";
+import type { AnnotatorLeaderboardRow } from "../../lib/adminQueries";
 
-const tableContainerStyle = {
+interface LeaderboardTableProps {
+  data: AnnotatorLeaderboardRow[];
+}
+
+const tableContainerStyle: React.CSSProperties = {
   background: "#ffffff",
-  borderRadius: "8px",
+  borderRadius: "12px",
   border: "1px solid #e2e8f0",
   padding: "16px",
-  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.08)",
+  boxShadow: "0 8px 20px -18px rgba(15, 23, 42, 0.45)",
 };
 
-const headerCellStyle = {
+const headerCellStyle: React.CSSProperties = {
   textAlign: "left",
   fontSize: "0.75rem",
   textTransform: "uppercase",
@@ -22,49 +28,51 @@ const headerCellStyle = {
   letterSpacing: "0.05em",
   padding: "8px 12px",
   borderBottom: "1px solid #e2e8f0",
+  cursor: "pointer",
 };
 
-const cellStyle = {
+const cellStyle: React.CSSProperties = {
   padding: "10px 12px",
   borderBottom: "1px solid #e2e8f0",
   fontSize: "0.9rem",
   color: "#0f172a",
 };
 
-export default function LeaderboardTable({ data }) {
-  const [sorting, setSorting] = useState([
+export default function LeaderboardTable({ data }: LeaderboardTableProps) {
+  const [sorting, setSorting] = useState<SortingState>([
     { id: "clipsDone", desc: true },
   ]);
 
   const columns = useMemo(
     () => [
       {
-        accessorKey: "annotator",
+        accessorKey: "annotator" as const,
         header: "Annotator",
-        cell: (info) => info.getValue() || "Unknown",
+        cell: (info: any) => info.getValue() || "Unknown",
       },
       {
-        accessorKey: "clipsDone",
+        accessorKey: "clipsDone" as const,
         header: "Clips",
-        enableSorting: true,
       },
       {
-        accessorKey: "hoursDone",
+        accessorKey: "hoursDone" as const,
         header: "Hours",
-        enableSorting: true,
-        cell: (info) => (info.getValue() ?? 0).toFixed(2),
+        cell: (info: any) =>
+          new Intl.NumberFormat("en-US", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          }).format(info.getValue() ?? 0),
       },
       {
-        accessorKey: "qaPassRate",
+        accessorKey: "qaPassRate" as const,
         header: "QA Pass Rate",
-        enableSorting: true,
-        cell: (info) => `${Math.round((info.getValue() || 0) * 100)}%`,
+        cell: (info: any) =>
+          `${Math.round((info.getValue() ?? 0) * 100)}%`,
       },
       {
-        accessorKey: "avgTurnaroundMin",
+        accessorKey: "avgTurnaroundMin" as const,
         header: "Avg Turnaround (min)",
-        enableSorting: true,
-        cell: (info) => info.getValue() ?? "—",
+        cell: (info: any) => info.getValue() ?? "—",
       },
     ],
     []
@@ -75,8 +83,8 @@ export default function LeaderboardTable({ data }) {
     columns,
     state: { sorting },
     onSortingChange: setSorting,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
+    getCoreRowModel: getCoreRowModel<AnnotatorLeaderboardRow>(),
+    getSortedRowModel: getSortedRowModel<AnnotatorLeaderboardRow>(),
   });
 
   const rows = table.getRowModel().rows;
@@ -84,7 +92,7 @@ export default function LeaderboardTable({ data }) {
 
   return (
     <div style={tableContainerStyle}>
-      <div style={{ fontWeight: 600, color: "#0f172a", marginBottom: "12px" }}>
+      <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: "12px" }}>
         Annotator Leaderboard (30d)
       </div>
       <div style={{ overflowX: "auto" }}>
@@ -95,7 +103,10 @@ export default function LeaderboardTable({ data }) {
                 {headerGroup.headers.map((header) => (
                   <th
                     key={header.id}
-                    style={headerCellStyle}
+                    style={{
+                      ...headerCellStyle,
+                      cursor: header.column.getCanSort() ? "pointer" : "default",
+                    }}
                     onClick={
                       header.column.getCanSort()
                         ? header.column.getToggleSortingHandler()
@@ -122,14 +133,24 @@ export default function LeaderboardTable({ data }) {
                 <tr key={row.id} style={{ background: "#ffffff" }}>
                   {row.getVisibleCells().map((cell) => (
                     <td key={cell.id} style={cellStyle}>
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      {flexRender(
+                        cell.column.columnDef.cell,
+                        cell.getContext()
+                      )}
                     </td>
                   ))}
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={columns.length} style={{ ...cellStyle, textAlign: "center", color: "#94a3b8" }}>
+                <td
+                  colSpan={columns.length}
+                  style={{
+                    ...cellStyle,
+                    textAlign: "center",
+                    color: "#94a3b8",
+                  }}
+                >
                   No annotator activity in the selected window.
                 </td>
               </tr>
