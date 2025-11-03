@@ -949,7 +949,7 @@ async def get_config() -> JSONResponse:
 async def get_tasks(
     stage: int = Query(2),
     annotator_id: str = Query("anonymous"),
-    limit: int = Query(10, ge=1),
+    limit: Optional[int] = Query(None, ge=0),
     seed_fallback: bool = Query(True),
     use_seed: bool = Query(False),
     include_missing_prefill: bool = Query(False),
@@ -1000,7 +1000,7 @@ async def get_tasks(
         return _empty_response()
 
     allow_missing_prefill = include_missing_prefill or (not seed_fallback)
-    fetch_limit = max(1, limit)
+    fetch_limit = None if (limit is None or limit == 0) else limit
 
     if BUNNY_KEEP_URL and SUPABASE_URL and SUPABASE_KEY:
         try:
@@ -1019,53 +1019,90 @@ async def get_tasks(
 
             select_clause = ",".join(select_columns)
 
-            keep_endpoint = (
+            base_endpoint = (
                 f"{SUPABASE_URL}/rest/v1/{KEEP_TABLE}"
                 f"?{DECISION_COL}=eq.{KEEP_VALUE}"
                 f"&select={select_clause}"
-                f"&limit={max(1, min(fetch_limit, 5000))}"
             )
 
-            headers = _supabase_headers()
-            _dbg("fetch.keep", endpoint=keep_endpoint)
-            keep_resp = requests.get(keep_endpoint, headers=headers, timeout=20)
-            schema_meta["contacted_supabase"] = True
-            _dbg("fetch.keep.done", status=keep_resp.status_code)
-            if keep_resp.status_code >= 400:
-                error_message = ""
-                try:
-                    supabase_json = keep_resp.json()
-                    error_message = supabase_json.get("message") or supabase_json.get("error", "")
-                except Exception:
-                    error_message = keep_resp.text or keep_resp.reason
-                error_message = (error_message or "").strip() or "Supabase query failed."
-                lowered = error_message.lower()
-                if (
-                    keep_resp.status_code == 404
-                    or "does not exist" in lowered
-                    or "missing from-clause" in lowered
-                ):
-                    schema_meta["error_type"] = "missing_table"
-                    diag["error"] = f'Supabase table "{KEEP_TABLE}" does not exist.'
-                else:
-                    missing_columns = [
-                        col
-                        for col in select_columns
-                        if col.lower() in lowered and "column" in lowered
-                    ]
-                    if missing_columns:
-                        schema_meta["error_type"] = "missing_columns"
-                        diag["error"] = f"Missing columns: {', '.join(sorted(set(missing_columns)))}"
-                        diag["missing_columns"] = sorted(set(missing_columns))
-                    else:
-                        schema_meta["error_type"] = "query_error"
-                        diag["error"] = error_message
-                _warn(diag.get("error", error_message))
-                return _empty_response()
+            all_rows: List[Dict[str, Any]] = []
+            total_reported: Optional[int] = None
+            offset = 0
+            chunk_size = 1000
 
-            rows = keep_resp.json()
-            keep_rows_total = len(rows) if isinstance(rows, list) else None
-            schema_meta["keep_rows"] = keep_rows_total or 0
+            while True:
+                if fetch_limit is None:
+                    page_limit = chunk_size
+                else:
+                    remaining = fetch_limit - len(all_rows)
+                    if remaining <= 0:
+                        break
+                    page_limit = min(chunk_size, remaining)
+
+                paged_endpoint = f"{base_endpoint}&limit={page_limit}&offset={offset}"
+                headers = _supabase_headers()
+                headers["Prefer"] = "count=exact"
+                _dbg("fetch.keep", endpoint=paged_endpoint)
+                keep_resp = requests.get(paged_endpoint, headers=headers, timeout=20)
+                schema_meta["contacted_supabase"] = True
+                _dbg("fetch.keep.done", status=keep_resp.status_code)
+                if keep_resp.status_code >= 400:
+                    error_message = ""
+                    try:
+                        supabase_json = keep_resp.json()
+                        error_message = supabase_json.get("message") or supabase_json.get("error", "")
+                    except Exception:
+                        error_message = keep_resp.text or keep_resp.reason
+                    error_message = (error_message or "").strip() or "Supabase query failed."
+                    lowered = error_message.lower()
+                    if (
+                        keep_resp.status_code == 404
+                        or "does not exist" in lowered
+                        or "missing from-clause" in lowered
+                    ):
+                        schema_meta["error_type"] = "missing_table"
+                        diag["error"] = f'Supabase table "{KEEP_TABLE}" does not exist.'
+                    else:
+                        missing_columns = [
+                            col
+                            for col in select_columns
+                            if col.lower() in lowered and "column" in lowered
+                        ]
+                        if missing_columns:
+                            schema_meta["error_type"] = "missing_columns"
+                            diag["error"] = f"Missing columns: {', '.join(sorted(set(missing_columns)))}"
+                            diag["missing_columns"] = sorted(set(missing_columns))
+                        else:
+                            schema_meta["error_type"] = "query_error"
+                            diag["error"] = error_message
+                    _warn(diag.get("error", error_message))
+                    return _empty_response()
+
+                page_rows = keep_resp.json()
+                if isinstance(page_rows, list):
+                    all_rows.extend(page_rows)
+                else:
+                    page_rows = []
+
+                if total_reported is None:
+                    content_range = keep_resp.headers.get("Content-Range")
+                    if content_range and "/" in content_range:
+                        try:
+                            total_reported = int(content_range.split("/")[-1])
+                        except ValueError:
+                            total_reported = None
+
+                if fetch_limit is not None and len(all_rows) >= fetch_limit:
+                    break
+
+                if len(page_rows) < page_limit:
+                    break
+
+                offset += page_limit
+
+            rows = all_rows
+            keep_rows_total = total_reported if total_reported is not None else len(rows)
+            schema_meta["keep_rows"] = keep_rows_total or len(rows)
 
             assign_endpoint = (
                 f"{SUPABASE_URL}/rest/v1/{ASSIGN2_TABLE}?select={ASSIGN2_FILE_COL},{ASSIGN2_USER_COL},{ASSIGN2_TIME_COL}"
@@ -1110,7 +1147,7 @@ async def get_tasks(
             }
 
             for row in available_rows:
-                if len(selected_entries) >= fetch_limit:
+                if fetch_limit is not None and len(selected_entries) >= fetch_limit:
                     break
                 fname = row.get(FILE_COL)
                 if not fname or fname in selected_files:
@@ -1118,23 +1155,28 @@ async def get_tasks(
                 selected_entries.append({"row": row, "cell": _derive_primary_cell(row)})
                 selected_files.add(fname)
 
-            if len(selected_entries) < fetch_limit and rows:
+            if rows and (fetch_limit is None or len(selected_entries) < fetch_limit):
                 pool = [
                     r
                     for r in rows
                     if all(r is not entry["row"] for entry in selected_entries)
                 ]
                 random.shuffle(pool)
-                for row in pool[: max(0, fetch_limit - len(selected_entries))]:
-                    selected_entries.append(
-                        {"row": row, "cell": _derive_primary_cell(row)}
-                    )
+                if fetch_limit is None:
+                    for row in pool:
+                        selected_entries.append({"row": row, "cell": _derive_primary_cell(row)})
+                else:
+                    take = max(0, fetch_limit - len(selected_entries))
+                    for row in pool[:take]:
+                        selected_entries.append(
+                            {"row": row, "cell": _derive_primary_cell(row)}
+                        )
 
 
             gold_rows: List[Dict[str, Any]] = []
             if GOLD_TABLE and GOLD_RATE > 0:
                 try:
-                    gold_ep = f"{SUPABASE_URL}/rest/v1/{GOLD_TABLE}?select={GOLD_FILE_COL}&limit={max(1, limit)}"
+                    gold_ep = f"{SUPABASE_URL}/rest/v1/{GOLD_TABLE}?select={GOLD_FILE_COL}&limit={max(1, (fetch_limit or 1000))}"
                     gold_resp = requests.get(gold_ep, headers=headers, timeout=15)
                     if gold_resp.ok:
                         gold_rows = gold_resp.json()
@@ -1142,7 +1184,7 @@ async def get_tasks(
                     gold_rows = []
 
             candidate_entries = list(selected_entries)
-            if fetch_limit and rows and len(candidate_entries) < fetch_limit * 2:
+            if fetch_limit is not None and rows and len(candidate_entries) < fetch_limit * 2:
                 existing_ids = {id(entry["row"]) for entry in candidate_entries}
                 extras: List[Dict[str, Any]] = []
                 for row in rows:
@@ -1164,7 +1206,7 @@ async def get_tasks(
             base = BUNNY_KEEP_URL.rstrip("/")
 
             for entry in candidate_entries:
-                if len(items) >= fetch_limit:
+                if fetch_limit is not None and len(items) >= fetch_limit:
                     break
                 row_ref = entry.get("row")
                 if not isinstance(row_ref, dict):

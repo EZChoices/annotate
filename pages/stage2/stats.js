@@ -120,7 +120,9 @@ export default function Stage2StatsPage() {
       setError(null);
       try {
         const res = await fetch(
-          `/api/tasks?stage=2&annotator_id=${encodeURIComponent(annotator)}&limit=1000&seed_fallback=false`,
+          `/api/tasks?stage=2&annotator_id=${encodeURIComponent(
+            annotator
+          )}&seed_fallback=false&include_missing_prefill=true`,
           { signal: controller.signal }
         );
         if (!res.ok) {
