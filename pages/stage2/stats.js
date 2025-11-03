@@ -76,6 +76,7 @@ export default function Stage2StatsPage() {
   const [prefillFilter, setPrefillFilter] = useState("any");
   const [searchTerm, setSearchTerm] = useState("");
   const [page, setPage] = useState(1);
+  const [pageInput, setPageInput] = useState("1");
 
   const sessionStats = useSessionStats();
 
@@ -188,6 +189,17 @@ export default function Stage2StatsPage() {
     setPage(1);
   };
 
+  const handlePageJump = (event) => {
+    event.preventDefault();
+    const numeric = Number.parseInt(pageInput, 10);
+    if (Number.isNaN(numeric)) {
+      setPageInput(String(currentPage || 1));
+      return;
+    }
+    const safeTarget = Math.min(Math.max(numeric, 1), totalPages || 1);
+    setPage(safeTarget);
+  };
+
   const totalItems = summary?.total ?? 0;
   const withTranscript = summary?.withTranscript ?? 0;
   const withTranslation = summary?.withTranslation ?? 0;
@@ -243,6 +255,10 @@ export default function Stage2StatsPage() {
     keys.sort();
     return ["all", ...keys];
   }, [stage1Counts]);
+
+  useEffect(() => {
+    setPageInput(String(currentPage || 1));
+  }, [currentPage]);
 
   return (
     <>
@@ -506,6 +522,18 @@ export default function Stage2StatsPage() {
             <span>
               Page {currentPage} of {totalPages}
             </span>
+            <form className="page-jump" onSubmit={handlePageJump}>
+              <label htmlFor="page-jump-input" className="sr-only">Jump to page</label>
+              <input
+                id="page-jump-input"
+                type="number"
+                min="1"
+                max={Math.max(1, totalPages)}
+                value={pageInput}
+                onChange={(e) => setPageInput(e.target.value)}
+              />
+              <button type="submit" className="secondary-button">Go</button>
+            </form>
             <button
               type="button"
               onClick={() => setPage((prev) => Math.max(1, Math.min(prev - 1, totalPages)))}
@@ -629,6 +657,29 @@ export default function Stage2StatsPage() {
         .pagination span {
           font-size: 0.9rem;
           color: #374151;
+        }
+        .page-jump {
+          display: flex;
+          align-items: center;
+          gap: 0.4rem;
+        }
+        .page-jump input {
+          width: 4rem;
+          border: 1px solid #d1d5db;
+          border-radius: 8px;
+          padding: 0.35rem 0.5rem;
+          text-align: center;
+        }
+        .sr-only {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          padding: 0;
+          margin: -1px;
+          overflow: hidden;
+          clip: rect(0, 0, 0, 0);
+          white-space: nowrap;
+          border: 0;
         }
         .pagination button {
           background: #1f2937;
