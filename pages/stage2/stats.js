@@ -3,23 +3,7 @@ import Head from "next/head";
 
 const SESSION_KEY = "ea_stage2_session_stats";
 const ANNOTATOR_KEY = "ea_stage2_annotator_id";
-
-function extractItems(payload) {
-  if (payload && Array.isArray(payload.items)) return payload.items;
-  if (payload && payload.manifest && Array.isArray(payload.manifest.items)) {
-    return payload.manifest.items;
-  }
-  return [];
-}
-
-function countByStatus(items, key) {
-  const counts = {};
-  items.forEach((item) => {
-    const value = (item && item[key]) || "unknown";
-    counts[value] = (counts[value] || 0) + 1;
-  });
-  return counts;
-}
+const ITEMS_PER_PAGE = 250;
 
 function formatPercent(part, total) {
   if (!total) return "0%";
@@ -28,12 +12,23 @@ function formatPercent(part, total) {
 }
 
 function formatDate(iso) {
-  if (!iso) return "—";
+  if (!iso) return "-";
   const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "—";
+  if (Number.isNaN(date.getTime())) return "-";
   return `${date.toLocaleDateString()} ${date
     .toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
     .replace(/\u202f/g, " ")}`;
+}
+
+function formatStatusLabel(label) {
+  if (!label) return "Unknown";
+  return label
+    .toString()
+    .replace(/[_-]+/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function useSessionStats() {
@@ -71,10 +66,16 @@ export default function Stage2StatsPage() {
   const [annotator, setAnnotator] = useState("anonymous");
   const [inputAnnotator, setInputAnnotator] = useState("anonymous");
   const [items, setItems] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [meta, setMeta] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [showMissingOnly, setShowMissingOnly] = useState(false);
   const [envNames, setEnvNames] = useState(null);
+  const [stage0Filter, setStage0Filter] = useState("all");
+  const [stage1Filter, setStage1Filter] = useState("all");
+  const [prefillFilter, setPrefillFilter] = useState("any");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [page, setPage] = useState(1);
 
   const sessionStats = useSessionStats();
 
@@ -111,6 +112,10 @@ export default function Stage2StatsPage() {
   }, []);
 
   useEffect(() => {
+    setPage(1);
+  }, [stage0Filter, stage1Filter, prefillFilter, searchTerm]);
+
+  useEffect(() => {
     if (!annotator) return;
     let active = true;
     const controller = new AbortController();
@@ -119,23 +124,36 @@ export default function Stage2StatsPage() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(
-          `/api/tasks?stage=2&annotator_id=${encodeURIComponent(
-            annotator
-          )}&seed_fallback=false&include_missing_prefill=true`,
-          { signal: controller.signal }
-        );
+        const params = new URLSearchParams({
+          stage: String(2),
+          annotator_id: annotator,
+          page: String(page),
+          page_size: String(ITEMS_PER_PAGE),
+          seed_fallback: "false",
+          include_missing_prefill: "true",
+        });
+        if (stage0Filter !== "all") params.set("stage0", stage0Filter);
+        if (stage1Filter !== "all") params.set("stage1", stage1Filter);
+        if (prefillFilter !== "any") params.set("prefill_filter", prefillFilter);
+        if (searchTerm.trim()) params.set("search", searchTerm.trim());
+
+        const res = await fetch(`/api/tasks?${params.toString()}`, {
+          signal: controller.signal,
+        });
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
         }
         const payload = await res.json();
         if (!active) return;
-        const extracted = extractItems(payload);
-        setItems(extracted);
+        setItems(Array.isArray(payload.items) ? payload.items : []);
+        setSummary(payload.__summary || null);
+        setMeta(payload.__meta || null);
         setLoading(false);
       } catch (err) {
         if (!active) return;
         setItems([]);
+        setSummary(null);
+        setMeta(null);
         setError(err && err.message ? err.message : String(err));
         setLoading(false);
       }
@@ -146,50 +164,13 @@ export default function Stage2StatsPage() {
       active = false;
       controller.abort();
     };
-  }, [annotator]);
-
-  const summary = useMemo(() => {
-    const total = items.length;
-    const withTranscript = items.filter(
-      (item) => item && item.prefill && item.prefill.transcript_vtt_url
-    ).length;
-    const withTranslation = items.filter(
-      (item) => item && item.prefill && item.prefill.translation_vtt_url
-    ).length;
-    const withCodeSwitch = items.filter(
-      (item) => item && item.prefill && item.prefill.code_switch_vtt_url
-    ).length;
-    const withDiar = items.filter(
-      (item) => item && item.prefill && item.prefill.diarization_rttm_url
-    ).length;
-    const gold = items.filter((item) => item && item.is_gold).length;
-    return {
-      total,
-      withTranscript,
-      withTranslation,
-      withCodeSwitch,
-      withDiar,
-      missingTranscript: total - withTranscript,
-      gold,
-      stage0: countByStatus(items, "stage0_status"),
-      stage1: countByStatus(items, "stage1_status"),
-    };
-  }, [items]);
-
-  const filteredItems = useMemo(() => {
-    if (!showMissingOnly) return items;
-    return items.filter(
-      (item) =>
-        !item ||
-        !item.prefill ||
-        !(item.prefill.transcript_vtt_url || item.prefill.translation_vtt_url || item.prefill.code_switch_vtt_url)
-    );
-  }, [items, showMissingOnly]);
+  }, [annotator, page, stage0Filter, stage1Filter, prefillFilter, searchTerm]);
 
   const handleAnnotatorSubmit = (event) => {
     event.preventDefault();
     const next = (inputAnnotator || "").trim() || "anonymous";
     setAnnotator(next);
+    setPage(1);
     if (typeof window !== "undefined") {
       try {
         window.localStorage.setItem(ANNOTATOR_KEY, next);
@@ -198,6 +179,70 @@ export default function Stage2StatsPage() {
       }
     }
   };
+
+  const handleResetFilters = () => {
+    setStage0Filter("all");
+    setStage1Filter("all");
+    setPrefillFilter("any");
+    setSearchTerm("");
+    setPage(1);
+  };
+
+  const totalItems = summary?.total ?? 0;
+  const withTranscript = summary?.withTranscript ?? 0;
+  const withTranslation = summary?.withTranslation ?? 0;
+  const withDiar = summary?.withDiar ?? 0;
+  const missingTranscript = summary?.missingTranscript ?? Math.max(totalItems - withTranscript, 0);
+  const stage0Counts = summary?.stage0 || {};
+  const stage1Counts = summary?.stage1 || {};
+  const totalPages = meta?.total_pages ?? 1;
+  const currentPage = meta?.page ?? page;
+  const effectivePageSize = meta?.page_size ?? ITEMS_PER_PAGE;
+  const filteredCount = summary?.total ?? meta?.filtered_rows ?? 0;
+  const availableCount = meta?.keep_rows ?? meta?.available_rows ?? null;
+  const pageStart = filteredCount === 0 ? 0 : (currentPage - 1) * effectivePageSize + 1;
+  const pageEnd =
+    filteredCount === 0 ? 0 : Math.min(filteredCount, pageStart + items.length - 1);
+  const hasItems = items.length > 0;
+  const hasFiltersApplied =
+    stage0Filter !== "all" || stage1Filter !== "all" || prefillFilter !== "any" || !!searchTerm.trim();
+  const metaSkipped = meta?.skipped_missing_transcript ?? 0;
+  const emptyMessage = loading
+    ? "Loading manifest..."
+    : hasFiltersApplied
+    ? "No clips match the current filters."
+    : "No manifest items found.";
+  const tableMetaLine = (() => {
+    if (!summary && !meta) return loading ? "Loading manifest..." : "";
+    if (!filteredCount) {
+      return loading
+        ? "Loading manifest..."
+        : hasFiltersApplied
+        ? "No clips match the current filters."
+        : "No manifest clips available yet.";
+    }
+    const parts = [
+      `Showing ${pageStart.toLocaleString()}–${pageEnd.toLocaleString()} of ${filteredCount.toLocaleString()} clips`,
+    ];
+    if (availableCount != null && availableCount !== filteredCount) {
+      parts.push(`Keep table total: ${availableCount.toLocaleString()}`);
+    }
+    if (metaSkipped) {
+      parts.push(`Skipped missing transcript: ${metaSkipped.toLocaleString()}`);
+    }
+    return parts.join(" • ");
+  })();
+
+  const stage0Options = useMemo(() => {
+    const keys = Object.keys(stage0Counts || {});
+    keys.sort();
+    return ["all", ...keys];
+  }, [stage0Counts]);
+  const stage1Options = useMemo(() => {
+    const keys = Object.keys(stage1Counts || {});
+    keys.sort();
+    return ["all", ...keys];
+  }, [stage1Counts]);
 
   return (
     <>
@@ -244,68 +289,72 @@ export default function Stage2StatsPage() {
             <div className="stat-grid">
               <div className="stat">
                 <span className="label">Total items</span>
-                <span className="value">{summary.total}</span>
+                <span className="value">{totalItems.toLocaleString()}</span>
               </div>
               <div className="stat">
                 <span className="label">Prefill transcript</span>
                 <span className="value">
-                  {summary.withTranscript} ({formatPercent(summary.withTranscript, summary.total)})
+                  {withTranscript.toLocaleString()} ({formatPercent(withTranscript, totalItems)})
                 </span>
               </div>
               <div className="stat">
                 <span className="label">Missing transcript</span>
-                <span className="value alert">
-                  {summary.missingTranscript} ({formatPercent(summary.missingTranscript, summary.total)})
+                <span className={`value ${missingTranscript ? "alert" : ""}`}>
+                  {missingTranscript.toLocaleString()} ({formatPercent(missingTranscript, totalItems)})
                 </span>
               </div>
               <div className="stat">
                 <span className="label">Prefill translation</span>
                 <span className="value">
-                  {summary.withTranslation} ({formatPercent(summary.withTranslation, summary.total)})
+                  {withTranslation.toLocaleString()} ({formatPercent(withTranslation, totalItems)})
                 </span>
               </div>
               <div className="stat">
                 <span className="label">Prefill diarization</span>
                 <span className="value">
-                  {summary.withDiar} ({formatPercent(summary.withDiar, summary.total)})
+                  {withDiar.toLocaleString()} ({formatPercent(withDiar, totalItems)})
                 </span>
-              </div>
-              <div className="stat">
-                <span className="label">Gold clips</span>
-                <span className="value">{summary.gold}</span>
               </div>
             </div>
             <div className="status-grid">
               <div>
-                <h3>Stage 0 status</h3>
+                <h3>Stage 0 status</h3>
                 <ul>
-                  {Object.entries(summary.stage0).map(([status, count]) => (
-                    <li key={status}>
-                      <span className="status-label">{status}</span>
-                      <span className="status-value">
-                        {count} ({formatPercent(count, summary.total)})
-                      </span>
-                    </li>
-                  ))}
+                  {Object.keys(stage0Counts).length === 0 ? (
+                    <li className="status-empty">No data yet.</li>
+                  ) : (
+                    Object.entries(stage0Counts).map(([status, count]) => (
+                      <li key={status}>
+                        <span className="status-label">{formatStatusLabel(status)}</span>
+                        <span className="status-value">
+                          {count.toLocaleString()} ({formatPercent(count, totalItems)})
+                        </span>
+                      </li>
+                    ))
+                  )}
                 </ul>
               </div>
               <div>
-                <h3>Stage 1 status</h3>
+                <h3>Stage 1 status</h3>
                 <ul>
-                  {Object.entries(summary.stage1).map(([status, count]) => (
-                    <li key={status}>
-                      <span className="status-label">{status}</span>
-                      <span className="status-value">
-                        {count} ({formatPercent(count, summary.total)})
-                      </span>
-                    </li>
-                  ))}
+                  {Object.keys(stage1Counts).length === 0 ? (
+                    <li className="status-empty">No data yet.</li>
+                  ) : (
+                    Object.entries(stage1Counts).map(([status, count]) => (
+                      <li key={status}>
+                        <span className="status-label">{formatStatusLabel(status)}</span>
+                        <span className="status-value">
+                          {count.toLocaleString()} ({formatPercent(count, totalItems)})
+                        </span>
+                      </li>
+                    ))
+                  )}
                 </ul>
               </div>
             </div>
           </div>
 
-          <div className="card">
+        <div className="card">
             <h2>Your Session</h2>
             {sessionStats ? (
               <>
@@ -356,16 +405,48 @@ export default function Stage2StatsPage() {
 
         <section className="card">
           <header className="table-header">
-            <h2>Manifest Items</h2>
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={showMissingOnly}
-                onChange={(e) => setShowMissingOnly(e.target.checked)}
-              />
-              Show only clips missing any prefill
-            </label>
+            <div>
+              <h2>Manifest Items</h2>
+              {tableMetaLine ? <p className="table-meta">{tableMetaLine}</p> : null}
+            </div>
+            <div className="table-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={handleResetFilters}
+                disabled={!hasFiltersApplied}
+              >
+                Reset filters
+              </button>
+            </div>
           </header>
+
+          <div className="filters-row">
+            <select value={stage0Filter} onChange={(e) => setStage0Filter(e.target.value)}>
+              {stage0Options.map((status) => (
+                <option key={status} value={status}>
+                  {status === "all" ? "Stage 0: All statuses" : `Stage 0: ${formatStatusLabel(status)}`}
+                </option>
+              ))}
+            </select>
+            <select value={stage1Filter} onChange={(e) => setStage1Filter(e.target.value)}>
+              {stage1Options.map((status) => (
+                <option key={status} value={status}>
+                  {status === "all" ? "Stage 1: All statuses" : `Stage 1: ${formatStatusLabel(status)}`}
+                </option>
+              ))}
+            </select>
+            <select value={prefillFilter} onChange={(e) => setPrefillFilter(e.target.value)}>
+              <option value="any">Prefill: Any</option>
+              <option value="missing">Prefill: Missing transcript</option>
+            </select>
+            <input
+              type="search"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search asset or cell"
+            />
+          </div>
 
           <div className="table-wrapper">
             <table>
@@ -383,39 +464,62 @@ export default function Stage2StatsPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredItems.length === 0 ? (
+                {!hasItems ? (
                   <tr>
                     <td colSpan={9} className="empty">
-                      {showMissingOnly
-                        ? "All clips currently have at least one prefill asset."
-                        : "No manifest items found."}
+                      {tableMetaLine || emptyMessage}
                     </td>
                   </tr>
                 ) : (
-                  filteredItems.map((item, idx) => {
-                    const hasTranscript = item?.prefill?.transcript_vtt_url ? "✅" : "—";
-                    const hasTranslation = item?.prefill?.translation_vtt_url ? "✅" : "—";
-                    const hasCS = item?.prefill?.code_switch_vtt_url ? "✅" : "—";
-                    const hasDiar = item?.prefill?.diarization_rttm_url ? "✅" : "—";
+                  items.map((item, idx) => {
+                    const assetId = item?.asset_id || "unknown";
+                    const rowNumber = pageStart ? pageStart + idx : idx + 1;
+                    const stage0 = item?.stage0_status ? formatStatusLabel(item.stage0_status) : "-";
+                    const stage1 = item?.stage1_status ? formatStatusLabel(item.stage1_status) : "-";
+                    const prefill = item?.prefill || {};
+                    const hasTranscript = Boolean(prefill.transcript_vtt_url);
+                    const hasTranslation = Boolean(prefill.translation_vtt_url);
+                    const hasCS = Boolean(prefill.code_switch_vtt_url);
+                    const hasDiar = Boolean(prefill.diarization_rttm_url);
                     return (
-                      <tr key={item?.asset_id || idx}>
-                        <td>{idx + 1}</td>
+                      <tr key={assetId || idx}>
+                        <td>{rowNumber}</td>
                         <td>
-                          <code>{item?.asset_id || "unknown"}</code>
+                          <code>{assetId}</code>
                         </td>
-                        <td>{item?.stage0_status || "—"}</td>
-                        <td>{item?.stage1_status || "—"}</td>
-                        <td className={hasTranscript === "—" ? "missing" : ""}>{hasTranscript}</td>
-                        <td className={hasTranslation === "—" ? "missing" : ""}>{hasTranslation}</td>
-                        <td className={hasCS === "—" ? "missing" : ""}>{hasCS}</td>
-                        <td className={hasDiar === "—" ? "missing" : ""}>{hasDiar}</td>
-                        <td>{item?.assigned_cell || "—"}</td>
+                        <td>{stage0}</td>
+                        <td>{stage1}</td>
+                        <td className={hasTranscript ? "" : "missing"}>{hasTranscript ? "yes" : "no"}</td>
+                        <td className={hasTranslation ? "" : "missing"}>{hasTranslation ? "yes" : "no"}</td>
+                        <td className={hasCS ? "" : "missing"}>{hasCS ? "yes" : "no"}</td>
+                        <td className={hasDiar ? "" : "missing"}>{hasDiar ? "yes" : "no"}</td>
+                        <td>{item?.assigned_cell || "-"}</td>
                       </tr>
                     );
                   })
                 )}
               </tbody>
             </table>
+          </div>
+
+          <div className="pagination">
+            <span>
+              Page {currentPage} of {totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage((prev) => Math.max(1, Math.min(prev - 1, totalPages)))}
+              disabled={currentPage <= 1}
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              onClick={() => setPage((prev) => Math.max(1, Math.min(prev + 1, totalPages)))}
+              disabled={currentPage >= totalPages}
+            >
+              Next
+            </button>
           </div>
         </section>
       </main>
@@ -476,6 +580,23 @@ export default function Stage2StatsPage() {
           flex-wrap: wrap;
           gap: 1rem;
         }
+        .table-actions {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+        .secondary-button {
+          background: #f3f4f6;
+          color: #1f2937;
+          border: 1px solid #d1d5db;
+        }
+        .secondary-button:hover:not([disabled]) {
+          background: #e5e7eb;
+        }
+        .secondary-button[disabled] {
+          cursor: not-allowed;
+          opacity: 0.6;
+        }
         .table-meta {
           margin: 0.3rem 0 0;
           font-size: 0.85rem;
@@ -504,6 +625,10 @@ export default function Stage2StatsPage() {
           justify-content: flex-end;
           gap: 0.75rem;
           margin-top: 1rem;
+        }
+        .pagination span {
+          font-size: 0.9rem;
+          color: #374151;
         }
         .pagination button {
           background: #1f2937;
@@ -577,6 +702,11 @@ export default function Stage2StatsPage() {
           padding: 0.35rem 0;
           border-bottom: 1px dashed #e5e7eb;
           font-size: 0.95rem;
+        }
+        .status-grid li.status-empty {
+          justify-content: flex-start;
+          color: #6b7280;
+          font-style: italic;
         }
         .status-label {
           color: #4b5563;
@@ -662,3 +792,4 @@ export default function Stage2StatsPage() {
     </>
   );
 }
+

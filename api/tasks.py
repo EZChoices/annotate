@@ -4,6 +4,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
 import json
 import os
+import math
 import random
 from datetime import timedelta
 from urllib.parse import quote
@@ -194,6 +195,27 @@ def _seed_manifest(annotator_id: str, stage: int) -> Dict[str, Any]:
     }
 
 
+
+def _count_status(items: List[Dict[str, Any]], key: str) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for item in items:
+        value = item.get(key) if isinstance(item, dict) else None
+        normalized = str(value).lower() if value is not None else "unknown"
+        counts[normalized] = counts.get(normalized, 0) + 1
+    return counts
+
+
+def _pick_status(*values: Any, default: str = "validated") -> str:
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, str):
+            text = value.strip()
+        else:
+            text = str(value).strip()
+        if text:
+            return text
+    return default
 def _prefill_local_url(fname: str, filename: str) -> Optional[str]:
     if not fname or not filename:
         return None
@@ -953,6 +975,12 @@ async def get_tasks(
     seed_fallback: bool = Query(True),
     use_seed: bool = Query(False),
     include_missing_prefill: bool = Query(False),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(250, ge=1, le=1000),
+    stage0: Optional[str] = Query(None),
+    stage1: Optional[str] = Query(None),
+    prefill_filter: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
 ):
     items: List[Dict[str, Any]] = []
     keep_rows_total: Optional[int] = None
@@ -1204,6 +1232,10 @@ async def get_tasks(
             assignment_rows = []
             seen_assets: set = set()
             base = BUNNY_KEEP_URL.rstrip("/")
+            stage0_target = stage0.lower() if stage0 else None
+            stage1_target = stage1.lower() if stage1 else None
+            search_target = search.lower().strip() if search else None
+            prefill_mode = (prefill_filter or "").lower()
 
             for entry in candidate_entries:
                 if fetch_limit is not None and len(items) >= fetch_limit:
@@ -1243,6 +1275,21 @@ async def get_tasks(
                 if review_status == "locked":
                     continue
 
+                stage0_status = _pick_status(
+                    r.get("stage0_status") if isinstance(r, dict) else None,
+                    row_ref.get("stage0_status") if isinstance(row_ref, dict) else None,
+                    meta.get("stage0_status"),
+                )
+                stage1_status = _pick_status(
+                    r.get("stage1_status") if isinstance(r, dict) else None,
+                    row_ref.get("stage1_status") if isinstance(row_ref, dict) else None,
+                    meta.get("stage1_status"),
+                )
+                if stage0_target and stage0_status.lower() != stage0_target:
+                    continue
+                if stage1_target and stage1_status.lower() != stage1_target:
+                    continue
+
                 assignments_meta = meta.get("assignments") if isinstance(meta.get("assignments"), list) else []
                 normalized_assignments: List[Dict[str, Any]] = []
                 previous_annotators: List[str] = []
@@ -1272,6 +1319,25 @@ async def get_tasks(
                     continue
                 if second_pass_recorded or len(normalized_assignments) >= MAX_PASSES_PER_ASSET:
                     continue
+
+                if search_target:
+                    haystack_parts: List[str] = []
+                    haystack_parts.append(fname.lower())
+                    if isinstance(assigned_cell, str) and assigned_cell:
+                        haystack_parts.append(assigned_cell.lower())
+                    if previous_annotators:
+                        haystack_parts.append(
+                            " ".join(
+                                annot.lower()
+                                for annot in previous_annotators
+                                if isinstance(annot, str) and annot
+                            )
+                        )
+                    haystack_parts.append(stage0_status.lower())
+                    haystack_parts.append(stage1_status.lower())
+                    haystack = " ".join(part for part in haystack_parts if part)
+                    if search_target not in haystack:
+                        continue
 
                 eligible_for_second = bool(normalized_assignments) and not is_gold
                 pass_number = 1
@@ -1349,11 +1415,11 @@ async def get_tasks(
                         "translation_vtt_url": _resolve_prefill_url(r, PREFILL_TL_VTT, fname, "translation.vtt"),
                         "code_switch_vtt_url": _resolve_prefill_url(r, PREFILL_CS_VTT, fname, "code_switch_spans.json"),
                         "events_vtt_url": _resolve_prefill_url(r, "events_vtt_url", fname, "events.vtt"),
-                        "emotion_vtt_url": _resolve_prefill_url(r, "emotion_vtt_url", fname, "emotion.vtt"),
+                    "emotion_vtt_url": _resolve_prefill_url(r, "emotion_vtt_url", fname, "emotion.vtt"),
                     },
                     "is_gold": is_gold,
-                    "stage0_status": "validated",
-                    "stage1_status": "validated",
+                    "stage0_status": stage0_status,
+                    "stage1_status": stage1_status,
                     "language_hint": "ar",
                     "notes": None,
                     "assigned_cell": assigned_cell,
@@ -1362,6 +1428,13 @@ async def get_tasks(
                     "previous_annotators": previous_annotators,
                 }
                 prefill_block = manifest_item.get("prefill") or {}
+                core_prefill_present = bool(
+                    prefill_block.get("transcript_vtt_url")
+                    or prefill_block.get("translation_vtt_url")
+                    or prefill_block.get("code_switch_vtt_url")
+                )
+                if prefill_mode == "missing" and core_prefill_present:
+                    continue
                 has_transcript = bool(prefill_block.get("transcript_vtt_url")) or bool(prefill_block.get("translation_vtt_url"))
                 if not has_transcript:
                     skipped_missing_transcript += 1
@@ -1417,12 +1490,56 @@ async def get_tasks(
             return _empty_response()
 
     selected_entries_total = len(selected_entries)
-    selected_entries_count = len(items)
+    total_items = len(items)
+
+    effective_page_size = max(1, page_size)
+    total_pages = max(1, math.ceil(total_items / effective_page_size)) if total_items else 1
+    current_page = min(page, total_pages)
+    start_index = (current_page - 1) * effective_page_size
+    end_index = start_index + effective_page_size
+    page_items = items[start_index:end_index] if total_items else []
+    selected_entries_count = len(page_items)
+
+    def _prefill_stats(entries: List[Dict[str, Any]]) -> Dict[str, int]:
+        stats = {
+            "withTranscript": 0,
+            "withTranslation": 0,
+            "withCodeSwitch": 0,
+            "withDiar": 0,
+        }
+        for entry in entries:
+            prefill = entry.get("prefill") or {}
+            if prefill.get("transcript_vtt_url"):
+                stats["withTranscript"] += 1
+            if prefill.get("translation_vtt_url"):
+                stats["withTranslation"] += 1
+            if prefill.get("code_switch_vtt_url"):
+                stats["withCodeSwitch"] += 1
+            if prefill.get("diarization_rttm_url"):
+                stats["withDiar"] += 1
+        return stats
+
+    stats = _prefill_stats(items)
+    summary_payload = {
+        "total": total_items,
+        "withTranscript": stats["withTranscript"],
+        "withTranslation": stats["withTranslation"],
+        "withCodeSwitch": stats["withCodeSwitch"],
+        "withDiar": stats["withDiar"],
+        "missingTranscript": total_items - stats["withTranscript"],
+        "stage0": _count_status(items, "stage0_status"),
+        "stage1": _count_status(items, "stage1_status"),
+    }
+
     manifest_meta: Dict[str, Any] = {
         "keep_rows": keep_rows_total,
         "available_rows": available_rows_total,
         "selected_entries": selected_entries_total,
         "delivered": selected_entries_count,
+        "total_items": total_items,
+        "page": current_page,
+        "page_size": effective_page_size,
+        "total_pages": total_pages,
         "skipped_missing_transcript": skipped_missing_transcript,
     }
     if skipped_assets:
@@ -1430,9 +1547,10 @@ async def get_tasks(
     schema_meta["skipped_missing_transcript"] = skipped_missing_transcript
     if keep_rows_total is not None:
         schema_meta["keep_rows"] = keep_rows_total
+    schema_meta["filtered_rows"] = total_items
     manifest_meta.update(schema_meta)
 
-    if not items and seed_fallback and not use_seed:
+    if total_items == 0 and seed_fallback and not use_seed:
         _dbg("no_items_fallback", reason=manifest_meta)
         fallback_payload = {
             "items": [],
@@ -1445,8 +1563,9 @@ async def get_tasks(
         }
         return JSONResponse(fallback_payload, headers=CACHE_HEADERS)
 
-    manifest: Dict[str, Any] = {"annotator_id": annotator_id, "stage": stage, "items": items}
+    manifest: Dict[str, Any] = {"annotator_id": annotator_id, "stage": stage, "items": page_items}
     manifest["__meta"] = manifest_meta
+    manifest["__summary"] = summary_payload
     if diag:
         manifest["__diag"] = diag
     if use_seed:
