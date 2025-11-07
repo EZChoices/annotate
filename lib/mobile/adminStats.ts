@@ -197,11 +197,14 @@ async function averageEwma(
 ) {
   const { data, error } = await supabase
     .from("contributor_stats")
-    .select("avg_value:avg(ewma_agreement)")
-    .single();
-  if (error && error.code !== "PGRST116") throw error;
-  const avg = (data as { avg_value?: number } | null)?.avg_value;
-  return Number.isFinite(avg) ? Number(avg) : 0;
+    .select("ewma_agreement");
+  if (error) throw error;
+  if (!data || data.length === 0) return 0;
+  const sum = data.reduce(
+    (acc, row) => acc + (row.ewma_agreement ?? 0),
+    0
+  );
+  return sum / data.length;
 }
 
 async function computeGoldenAccuracy(
