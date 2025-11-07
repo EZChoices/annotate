@@ -203,3 +203,12 @@ Project managers can visit `/admin` for a live, aggregated view of annotation he
 - **API contract** – The dashboard calls `GET /api/admin/stats` (App Router route) which aggregates Supabase tables `clips`, `annotations`, `qa_reviews`, `flags`, and `annotators`. Filters include `from`, `to`, `stage`, `priority`, `dialect`, `country`, and `annotatorId`.
 
 > The screenshot is a placeholder. Swap `docs/images/admin-dashboard.png` with a fresh capture once the dashboard is connected to live data.
+## Mobile microtask schema
+
+The new contributor/bundle/task data model lives in `docs/mobile_tasks.sql`. Apply it with a Supabase service-role session so the tables, indexes, pricing seeds, and RLS policies are created. After running the SQL:
+
+- configure Supabase env vars (`SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) plus the mobile flags (`NEXT_PUBLIC_ENABLE_MOBILE_TASKS`, `MOBILE_TASKS_ENABLED`).
+- tune optional knobs via env vars: `MOBILE_GOLDEN_RATIO`, `MOBILE_TARGET_VOTES`, `MOBILE_MIN_GREENS_SKIP_QA`, `MOBILE_MIN_GREENS_REVIEW`, `MOBILE_BUNDLE_SIZE`, `MOBILE_LEASE_MINUTES`, `MOBILE_BUNDLE_TTL_MINUTES`.
+- onboard contributors by inserting into `public.contributors` (capabilities JSON, feature flags) or by running the invite flow.
+
+Reference the SQL file for the exact schema of `contributors`, `media_assets`, `clips`, `tasks`, `task_bundles`, `task_assignments`, `task_responses`, consensus, pricing, payouts, telemetry, and `idempotency_keys` (used to dedupe retries).
