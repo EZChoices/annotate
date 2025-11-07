@@ -132,6 +132,7 @@ export default function Stage2StatsPage() {
           page_size: String(ITEMS_PER_PAGE),
           seed_fallback: "false",
           include_missing_prefill: "true",
+          stats_view: "1",
         });
         if (stage0Filter !== "all") params.set("stage0", stage0Filter);
         if (stage1Filter !== "all") params.set("stage1", stage1Filter);

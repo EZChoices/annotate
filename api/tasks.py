@@ -216,6 +216,192 @@ def _pick_status(*values: Any, default: str = "validated") -> str:
         if text:
             return text
     return default
+
+
+def _normalize_status(value: Any, fallback: str = "unknown") -> str:
+    if value is None:
+        return fallback
+    text = str(value).strip()
+    return text or fallback
+
+
+def _build_stats_view_payload(
+    rows: List[Dict[str, Any]],
+    *,
+    annotator_id: str,
+    stage: int,
+    page: int,
+    page_size: int,
+    keep_rows_total: int,
+    schema_meta: Dict[str, Any],
+    stage0_filter: Optional[str],
+    stage1_filter: Optional[str],
+    prefill_filter: Optional[str],
+    search: Optional[str],
+    allow_missing_prefill: bool,
+) -> Dict[str, Any]:
+    stage0_target = (stage0_filter or "").strip().lower()
+    if not stage0_target or stage0_target == "all":
+        stage0_target = None
+    stage1_target = (stage1_filter or "").strip().lower()
+    if not stage1_target or stage1_target == "all":
+        stage1_target = None
+    prefill_mode = (prefill_filter or "any").strip().lower()
+    search_target = (search or "").strip().lower()
+    if not search_target:
+        search_target = None
+
+    stats = {
+        "withTranscript": 0,
+        "withTranslation": 0,
+        "withCodeSwitch": 0,
+        "withDiar": 0,
+    }
+    stage0_counts: Dict[str, int] = {}
+    stage1_counts: Dict[str, int] = {}
+    skipped_missing_transcript = 0
+    filtered_items: List[Dict[str, Any]] = []
+    base_media = BUNNY_KEEP_URL.rstrip("/") if BUNNY_KEEP_URL else None
+
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        fname = row.get(FILE_COL)
+        if not fname:
+            continue
+        fname = str(fname)
+        stage0_status = _normalize_status(row.get("stage0_status"))
+        stage1_status = _normalize_status(row.get("stage1_status"))
+        stage0_key = stage0_status.lower()
+        stage1_key = stage1_status.lower()
+        if stage0_target and stage0_key != stage0_target:
+            continue
+        if stage1_target and stage1_key != stage1_target:
+            continue
+
+        assigned_cell = _derive_primary_cell(row)
+        prefill = {
+            "diarization_rttm_url": _resolve_prefill_url(row, PREFILL_DIA, fname, "diarization.rttm"),
+            "transcript_vtt_url": _resolve_prefill_url(row, PREFILL_TR_VTT, fname, "transcript.vtt"),
+            "transcript_ctm_url": _resolve_prefill_url(row, PREFILL_TR_CTM, fname, None),
+            "translation_vtt_url": _resolve_prefill_url(row, PREFILL_TL_VTT, fname, "translation.vtt"),
+            "code_switch_vtt_url": _resolve_prefill_url(row, PREFILL_CS_VTT, fname, "code_switch_spans.json"),
+            "events_vtt_url": _resolve_prefill_url(row, "events_vtt_url", fname, "events.vtt"),
+            "emotion_vtt_url": _resolve_prefill_url(row, "emotion_vtt_url", fname, "emotion.vtt"),
+        }
+        transcript_available = bool(prefill.get("transcript_vtt_url"))
+        has_translation = bool(prefill.get("translation_vtt_url"))
+        has_code_switch = bool(prefill.get("code_switch_vtt_url"))
+        has_diar = bool(prefill.get("diarization_rttm_url"))
+        has_any_text_prefill = transcript_available or has_translation or has_code_switch
+        has_transcript_or_translation = transcript_available or has_translation
+
+        if not has_transcript_or_translation:
+            skipped_missing_transcript += 1
+            if not allow_missing_prefill:
+                continue
+        if prefill_mode == "missing" and has_any_text_prefill:
+            continue
+
+        if search_target:
+            haystack_parts = [
+                fname.lower(),
+                assigned_cell.lower() if isinstance(assigned_cell, str) else "",
+                stage0_key,
+                stage1_key,
+            ]
+            haystack = " ".join(part for part in haystack_parts if part)
+            if search_target not in haystack:
+                continue
+
+        stats["withTranscript"] += 1 if transcript_available else 0
+        stats["withTranslation"] += 1 if has_translation else 0
+        stats["withCodeSwitch"] += 1 if has_code_switch else 0
+        stats["withDiar"] += 1 if has_diar else 0
+        stage0_counts[stage0_key] = stage0_counts.get(stage0_key, 0) + 1
+        stage1_counts[stage1_key] = stage1_counts.get(stage1_key, 0) + 1
+
+        media_url = None
+        if base_media:
+            media_url = f"{base_media}/{fname.lstrip('/')}"
+        audio_url = f"/api/proxy_audio?file={quote(fname)}"
+        if KEEP_AUDIO_COL and row.get(KEEP_AUDIO_COL):
+            audio_url = row.get(KEEP_AUDIO_COL)
+        elif AUDIO_PROXY_BASE:
+            name_no_ext = fname.rsplit(".", 1)[0]
+            audio_url = (
+                AUDIO_PROXY_BASE.rstrip("/")
+                + "/"
+                + name_no_ext
+                + (AUDIO_PROXY_EXT if AUDIO_PROXY_EXT.startswith(".") else ("." + AUDIO_PROXY_EXT))
+            )
+
+        manifest_item = {
+            "asset_id": fname,
+            "media": {
+                "audio_proxy_url": audio_url or media_url,
+                "video_hls_url": media_url if media_url and media_url.endswith(".m3u8") else None,
+                "poster_url": None,
+            },
+            "prefill": prefill,
+            "stage0_status": stage0_status,
+            "stage1_status": stage1_status,
+            "language_hint": row.get("language_hint") or row.get("language") or "unknown",
+            "notes": row.get("notes"),
+            "assigned_cell": assigned_cell,
+            "double_pass_target": False,
+            "pass_number": 1,
+            "previous_annotators": [],
+            "is_gold": False,
+        }
+        filtered_items.append(manifest_item)
+
+    total_items = len(filtered_items)
+    effective_page_size = max(1, page_size)
+    total_pages = max(1, math.ceil(total_items / effective_page_size)) if total_items else 1
+    current_page = min(max(page, 1), total_pages)
+    start_index = (current_page - 1) * effective_page_size
+    end_index = start_index + effective_page_size
+    page_items = filtered_items[start_index:end_index] if filtered_items else []
+
+    summary_payload = {
+        "total": total_items,
+        "withTranscript": stats["withTranscript"],
+        "withTranslation": stats["withTranslation"],
+        "withCodeSwitch": stats["withCodeSwitch"],
+        "withDiar": stats["withDiar"],
+        "missingTranscript": total_items - stats["withTranscript"],
+        "stage0": stage0_counts,
+        "stage1": stage1_counts,
+    }
+
+    schema_meta["skipped_missing_transcript"] = skipped_missing_transcript
+    schema_meta["filtered_rows"] = total_items
+    manifest_meta = dict(schema_meta)
+    manifest_meta.update(
+        {
+            "keep_rows": keep_rows_total,
+            "available_rows": keep_rows_total,
+            "available_rows_total": keep_rows_total,
+            "selected_entries": total_items,
+            "delivered": len(page_items),
+            "total_items": total_items,
+            "page": current_page,
+            "page_size": effective_page_size,
+            "total_pages": total_pages,
+            "filtered_rows": total_items,
+            "skipped_missing_transcript": skipped_missing_transcript,
+        }
+    )
+
+    manifest = {
+        "annotator_id": annotator_id,
+        "stage": stage,
+        "items": page_items,
+        "__summary": summary_payload,
+        "__meta": manifest_meta,
+    }
+    return manifest
 def _prefill_local_url(fname: str, filename: str) -> Optional[str]:
     if not fname or not filename:
         return None
@@ -981,6 +1167,7 @@ async def get_tasks(
     stage1: Optional[str] = Query(None),
     prefill_filter: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    stats_view: bool = Query(False),
 ):
     items: List[Dict[str, Any]] = []
     keep_rows_total: Optional[int] = None
@@ -1131,6 +1318,23 @@ async def get_tasks(
             rows = all_rows
             keep_rows_total = total_reported if total_reported is not None else len(rows)
             schema_meta["keep_rows"] = keep_rows_total or len(rows)
+
+            if stats_view:
+                manifest = _build_stats_view_payload(
+                    rows,
+                    annotator_id=annotator_id,
+                    stage=stage,
+                    page=page,
+                    page_size=page_size,
+                    keep_rows_total=keep_rows_total or len(rows),
+                    schema_meta=schema_meta,
+                    stage0_filter=stage0,
+                    stage1_filter=stage1,
+                    prefill_filter=prefill_filter,
+                    search=search,
+                    allow_missing_prefill=allow_missing_prefill,
+                )
+                return JSONResponse(manifest, headers=CACHE_HEADERS)
 
             assign_endpoint = (
                 f"{SUPABASE_URL}/rest/v1/{ASSIGN2_TABLE}?select={ASSIGN2_FILE_COL},{ASSIGN2_USER_COL},{ASSIGN2_TIME_COL}"
