@@ -12,6 +12,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.44.4",
     "@tanstack/react-table": "^8.21.3",
+    "cross-fetch": "^4.0.0",
     "date-fns": "^4.1.0",
     "framer-motion": "^12.23.24",
     "next": "^14.2.11",
