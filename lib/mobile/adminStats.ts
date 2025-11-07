@@ -260,29 +260,16 @@ async function loadTopContributors(
   const { data, error } = await supabase
     .from("contributor_stats")
     .select(
-      `
-        contributor_id,
-        ewma_agreement,
-        tasks_total,
-        tasks_agreed,
-        golden_correct,
-        golden_total,
-        contributors:contributors!inner(handle,tier)
-      `
+      "contributor_id, ewma_agreement, tasks_total, tasks_agreed, golden_correct, golden_total"
     )
     .order("tasks_total", { ascending: false })
     .limit(10);
   if (error) throw error;
-  return (data || []).map((row) => {
-    const stats = row as ContributorStatsRow & {
-      contributors?:
-        | { handle: string | null; tier: string | null }
-        | Array<{ handle: string | null; tier: string | null }>
-        | null;
-    };
-    const contributorData = Array.isArray(stats.contributors)
-      ? stats.contributors[0]
-      : stats.contributors ?? null;
+  const statsRows = (data || []) as ContributorStatsRow[];
+  const contributorIds = statsRows.map((row) => row.contributor_id);
+  const contributorMap = await loadContributorsMeta(supabase, contributorIds);
+  return statsRows.map((stats) => {
+    const contributorData = contributorMap.get(stats.contributor_id) ?? null;
     const goldenAccuracy =
       stats.golden_total && stats.golden_total > 0
         ? stats.golden_correct / stats.golden_total
@@ -297,6 +284,24 @@ async function loadTopContributors(
       golden_accuracy: goldenAccuracy,
     };
   });
+}
+
+async function loadContributorsMeta(
+  supabase: ReturnType<typeof getServiceSupabase>,
+  contributorIds: string[]
+) {
+  const map = new Map<string, { handle: string | null; tier: string | null }>();
+  const uniqueIds = Array.from(new Set(contributorIds)).filter(Boolean);
+  if (uniqueIds.length === 0) return map;
+  const { data, error } = await supabase
+    .from("contributors")
+    .select("id, handle, tier")
+    .in("id", uniqueIds);
+  if (error) throw error;
+  for (const row of data || []) {
+    map.set(row.id, { handle: row.handle ?? null, tier: row.tier ?? null });
+  }
+  return map;
 }
 
 async function loadRecentEvents(
