@@ -209,12 +209,16 @@ async function computeGoldenAccuracy(
 ) {
   const { data, error } = await supabase
     .from("contributor_stats")
-    .select("sum_correct:sum(golden_correct), sum_total:sum(golden_total)")
-    .single();
-  if (error && error.code !== "PGRST116") throw error;
-  const totals = data as { sum_correct?: number; sum_total?: number } | null;
-  if (!totals?.sum_total) return null;
-  return totals.sum_correct! / totals.sum_total!;
+    .select("golden_correct, golden_total");
+  if (error) throw error;
+  let sumCorrect = 0;
+  let sumTotal = 0;
+  for (const row of data || []) {
+    sumCorrect += row.golden_correct ?? 0;
+    sumTotal += row.golden_total ?? 0;
+  }
+  if (!sumTotal) return null;
+  return sumCorrect / sumTotal;
 }
 
 async function loadDailyCompletions(
