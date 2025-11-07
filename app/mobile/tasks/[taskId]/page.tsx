@@ -7,6 +7,9 @@ import type {
   TranslationCheckPayload,
   AccentTagPayload,
   EmotionTagPayload,
+  SpeakerContinuityPayload,
+  GestureTagPayload,
+  GestureTagEvent,
 } from "../../../../lib/mobile/types";
 import {
   loadCachedBundles,
@@ -14,27 +17,36 @@ import {
   PendingSubmission,
 } from "../../../../lib/mobile/idb";
 
+const STRUCTURED_TASK_TYPES = new Set([
+  "translation_check",
+  "accent_tag",
+  "emotion_tag",
+  "speaker_continuity",
+  "gesture_tag",
+]);
+
 export default function MobileTaskPage() {
-  const paramValues = useParams<{ taskId: string }>();
-  const taskId = paramValues?.taskId ?? "";
-  const search = useSearchParams();
   const router = useRouter();
+  const params = useParams<{ taskId: string }>();
+  const taskId = params?.taskId ?? "";
+  const search = useSearchParams();
   const assignmentId = search?.get("assignment") || "";
+
   const [task, setTask] = useState<MobileClaimResponse | null>(null);
   const [payloadObj, setPayloadObj] = useState<any | null>(null);
-  const [payloadText, setPayloadText] = useState<string>("");
+  const [payloadText, setPayloadText] = useState<string>("{}");
   const [submitting, setSubmitting] = useState(false);
   const [releasing, setReleasing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [videoVisible, setVideoVisible] = useState(false);
-  const [context, setContext] = useState<any>(null);
+  const [context, setContext] = useState<any | null>(null);
   const [hintOpen, setHintOpen] = useState(false);
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [watchedSec, setWatchedSec] = useState(0);
-  const [durationSec, setDurationSec] = useState(0);
   const [online, setOnline] = useState(
     typeof navigator === "undefined" ? true : navigator.onLine
   );
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [watchedSec, setWatchedSec] = useState(0);
+  const [durationSec, setDurationSec] = useState(0);
 
   useEffect(() => {
     loadCachedBundles().then((bundles) => {
@@ -43,9 +55,9 @@ export default function MobileTaskPage() {
         .find((t) => t.task_id === taskId);
       if (found) {
         setTask(found);
-        const initial = defaultPayload(found.task_type);
-        setPayloadObj(initial);
-        setPayloadText(JSON.stringify(initial, null, 2));
+        const initialPayload = defaultPayload(found.task_type);
+        setPayloadObj(initialPayload);
+        setPayloadText(JSON.stringify(initialPayload, null, 2));
         setDurationSec(
           Math.max(
             1,
@@ -55,6 +67,25 @@ export default function MobileTaskPage() {
       }
     });
   }, [taskId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => setOnline(navigator.onLine);
+    window.addEventListener("online", handler);
+    window.addEventListener("offline", handler);
+    return () => {
+      window.removeEventListener("online", handler);
+      window.removeEventListener("offline", handler);
+    };
+  }, []);
+
+  const isStructured = task ? STRUCTURED_TASK_TYPES.has(task.task_type) : false;
+
+  useEffect(() => {
+    if (isStructured && payloadObj) {
+      setPayloadText(JSON.stringify(payloadObj, null, 2));
+    }
+  }, [isStructured, payloadObj]);
 
   const playbackRatio = useMemo(() => {
     if (!durationSec) return 0;
@@ -70,12 +101,13 @@ export default function MobileTaskPage() {
     }
   };
 
-  const structuredTaskTypes = new Set([
-    "translation_check",
-    "accent_tag",
-    "emotion_tag",
-  ]);
-  const isStructured = task ? structuredTaskTypes.has(task.task_type) : false;
+  const loadContext = async () => {
+    if (!task) return;
+    const response = await fetch(`/api/mobile/context?clip_id=${task.clip.id}`);
+    if (response.ok) {
+      setContext(await response.json());
+    }
+  };
 
   const submit = async () => {
     if (!task || !assignmentId) return;
@@ -83,11 +115,11 @@ export default function MobileTaskPage() {
     setError(null);
     let payloadData: any = null;
     try {
-      if (isStructured) {
-        payloadData = payloadObj ?? {};
-      } else {
-        payloadData = payloadText ? JSON.parse(payloadText) : {};
-      }
+      payloadData = isStructured
+        ? payloadObj
+        : payloadText
+        ? JSON.parse(payloadText)
+        : {};
     } catch {
       setError("Payload must be valid JSON");
       setSubmitting(false);
@@ -142,25 +174,6 @@ export default function MobileTaskPage() {
     }
   };
 
-  const loadContext = async () => {
-    if (!task) return;
-    const response = await fetch(`/api/mobile/context?clip_id=${task.clip.id}`);
-    if (response.ok) {
-      setContext(await response.json());
-    }
-  };
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const handler = () => setOnline(navigator.onLine);
-    window.addEventListener("online", handler);
-    window.addEventListener("offline", handler);
-    return () => {
-      window.removeEventListener("online", handler);
-      window.removeEventListener("offline", handler);
-    };
-  }, []);
-
   const skipTask = async () => {
     if (!assignmentId) return;
     setReleasing(true);
@@ -197,11 +210,20 @@ export default function MobileTaskPage() {
       >
         ← Back to tasks
       </button>
-      <section className="bg-white p-4 rounded-2xl shadow space-y-3">
-        <p className="text-xs text-slate-500 uppercase">{task.task_type}</p>
+
+      <section className="bg-white p-4 rounded-2xl shadow space-y-3 border border-slate-200">
         <div className="flex items-center justify-between">
-          <p className="text-lg font-semibold">Clip preview</p>
-          <span className={`text-xs ${online ? "text-green-600" : "text-amber-600"}`}>
+          <div>
+            <p className="text-xs uppercase tracking-wide text-slate-500">
+              {task.task_type}
+            </p>
+            <h2 className="text-lg font-semibold">Clip preview</h2>
+          </div>
+          <span
+            className={`text-xs font-semibold ${
+              online ? "text-green-600" : "text-amber-600"
+            }`}
+          >
             {online ? "Online" : "Offline"}
           </span>
         </div>
@@ -233,10 +255,7 @@ export default function MobileTaskPage() {
           Watched {(watchedSec || 0).toFixed(1)}s · Playback ratio{" "}
           {(playbackRatio * 100).toFixed(0)}%
         </p>
-        <button
-          className="text-sm text-blue-600"
-          onClick={loadContext}
-        >
+        <button className="text-sm text-blue-600" onClick={loadContext}>
           Load extended context
         </button>
         {context ? (
@@ -260,13 +279,14 @@ export default function MobileTaskPage() {
           </div>
         ) : null}
       </section>
-      <section className="bg-white p-4 rounded-2xl shadow space-y-3">
+
+      <section className="bg-white p-4 rounded-2xl shadow space-y-3 border border-slate-200">
         <p className="font-semibold">Answer</p>
         {isStructured && payloadObj ? (
           <StructuredForm
-            task={task}
+            taskType={task.task_type}
             payload={payloadObj}
-            onChange={setPayloadObj}
+            onChange={(updated) => setPayloadObj(updated)}
           />
         ) : (
           <textarea
@@ -293,44 +313,36 @@ export default function MobileTaskPage() {
           </button>
         </div>
       </section>
+
+      {!isStructured && (
+        <section className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+          <p className="text-xs uppercase tracking-wide text-slate-500">
+            Payload preview
+          </p>
+          <pre className="text-[11px] bg-slate-50 mt-2 rounded-lg p-3 overflow-x-auto">
+            {payloadText}
+          </pre>
+        </section>
+      )}
     </main>
   );
 }
 
-function defaultPayload(taskType: string) {
-  switch (taskType) {
-    case "translation_check":
-      return { approved: true, edit: "", notes: "" } as TranslationCheckPayload;
-    case "accent_tag":
-      return {
-        speaker: "A",
-        region: "American",
-        country: "",
-        confidence: 0.5,
-      } as AccentTagPayload;
-    case "emotion_tag":
-      return {
-        speaker: "A",
-        emotion_primary: "Neutral",
-        confidence: 0.5,
-      } as EmotionTagPayload;
-    case "gesture_tag":
-      return { events: [] };
-    default:
-      return {};
-  }
-}
-
 function StructuredForm({
-  task,
+  taskType,
   payload,
   onChange,
 }: {
-  task: MobileClaimResponse;
+  taskType: string;
   payload: any;
   onChange: (value: any) => void;
 }) {
-  if (task.task_type === "translation_check") {
+  const [newGesture, setNewGesture] = useState<{
+    label: string;
+    t: string;
+  }>({ label: "", t: "" });
+
+  if (taskType === "translation_check") {
     const value = payload as TranslationCheckPayload;
     return (
       <div className="space-y-3">
@@ -375,7 +387,7 @@ function StructuredForm({
     );
   }
 
-  if (task.task_type === "accent_tag") {
+  if (taskType === "accent_tag") {
     const value = payload as AccentTagPayload;
     const options = ["American", "British", "Australian", "Indian", "Other"];
     return (
@@ -423,7 +435,7 @@ function StructuredForm({
     );
   }
 
-  if (task.task_type === "emotion_tag") {
+  if (taskType === "emotion_tag") {
     const value = payload as EmotionTagPayload;
     const options = ["Happy", "Neutral", "Angry", "Sad", "Surprised", "Other"];
     return (
@@ -479,11 +491,168 @@ function StructuredForm({
     );
   }
 
+  if (taskType === "speaker_continuity") {
+    const value = payload as SpeakerContinuityPayload;
+    return (
+      <div className="space-y-3">
+        <input
+          className="w-full border rounded-lg p-2 text-sm"
+          placeholder="Current speaker label (e.g., A)"
+          value={value.speaker ?? ""}
+          onChange={(event) =>
+            onChange({ ...value, speaker: event.target.value })
+          }
+        />
+        <input
+          className="w-full border rounded-lg p-2 text-sm"
+          placeholder="Same as clip ID (optional)"
+          value={value.same_as_clip ?? ""}
+          onChange={(event) =>
+            onChange({ ...value, same_as_clip: event.target.value })
+          }
+        />
+        <div className="flex flex-col gap-2">
+          <label className="text-sm font-medium">Confidence</label>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.1}
+            value={value.confidence ?? 0.5}
+            onChange={(event) =>
+              onChange({
+                ...value,
+                confidence: Number.parseFloat(event.target.value),
+              })
+            }
+          />
+        </div>
+        <textarea
+          className="w-full border rounded-lg p-2 text-sm"
+          placeholder="Notes (optional)"
+          value={value.notes ?? ""}
+          onChange={(event) =>
+            onChange({ ...value, notes: event.target.value })
+          }
+        />
+      </div>
+    );
+  }
+
+  if (taskType === "gesture_tag") {
+    const value = payload as GestureTagPayload;
+    const events = value.events ?? [];
+    const updateEvents = (next: GestureTagEvent[]) =>
+      onChange({ ...value, events: next });
+
+    return (
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <p className="text-sm font-medium">Gestures</p>
+          {events.length === 0 ? (
+            <p className="text-xs text-slate-500">
+              No gesture events recorded yet.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {events.map((event, idx) => (
+                <li
+                  key={`${event.label}-${event.t}-${idx}`}
+                  className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                >
+                  <span>
+                    <span className="font-semibold">{event.label}</span> at{" "}
+                    {(event.t / 1000).toFixed(1)}s
+                  </span>
+                  <button
+                    type="button"
+                    className="text-red-600 text-xs"
+                    onClick={() =>
+                      updateEvents(events.filter((_, i) => i !== idx))
+                    }
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="rounded-lg border border-slate-200 p-3 space-y-2">
+          <p className="text-sm font-medium">Add gesture</p>
+          <input
+            className="w-full border rounded-lg p-2 text-sm"
+            placeholder="Label (e.g., head nod)"
+            value={newGesture.label}
+            onChange={(event) =>
+              setNewGesture((prev) => ({ ...prev, label: event.target.value }))
+            }
+          />
+          <input
+            className="w-full border rounded-lg p-2 text-sm"
+            placeholder="Timestamp ms"
+            value={newGesture.t}
+            onChange={(event) =>
+              setNewGesture((prev) => ({ ...prev, t: event.target.value }))
+            }
+          />
+          <button
+            type="button"
+            className="w-full bg-slate-800 text-white rounded-lg py-2 text-sm font-semibold disabled:opacity-60"
+            disabled={!newGesture.label}
+            onClick={() => {
+              const timestamp = Number.parseInt(newGesture.t || "0", 10) || 0;
+              updateEvents([
+                ...events,
+                { label: newGesture.label.trim(), t: timestamp },
+              ]);
+              setNewGesture({ label: "", t: "" });
+            }}
+          >
+            Add
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <textarea
       className="w-full min-h-[200px] border rounded-lg p-2 font-mono text-sm"
-      defaultValue={JSON.stringify(payload, null, 2)}
+      value={JSON.stringify(payload, null, 2)}
       readOnly
     />
   );
 }
+
+function defaultPayload(taskType: string) {
+  switch (taskType) {
+    case "translation_check":
+      return { approved: true, edit: "", notes: "" } as TranslationCheckPayload;
+    case "accent_tag":
+      return {
+        speaker: "A",
+        region: "American",
+        country: "",
+        confidence: 0.5,
+      } as AccentTagPayload;
+    case "emotion_tag":
+      return {
+        speaker: "A",
+        emotion_primary: "Neutral",
+        confidence: 0.5,
+      } as EmotionTagPayload;
+    case "speaker_continuity":
+      return {
+        speaker: "A",
+        same_as_clip: "",
+        confidence: 0.5,
+        notes: "",
+      } as SpeakerContinuityPayload;
+    case "gesture_tag":
+      return { events: [] } as GestureTagPayload;
+    default:
+      return {};
+  }
+}
+

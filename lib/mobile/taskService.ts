@@ -19,6 +19,7 @@ import type {
   TaskType,
 } from "./types";
 import { hasTaskTypeCapability, parseCapabilities } from "./capabilities";
+import { persistAnnotationPayload } from "./storage";
 import { MobileApiError } from "./errors";
 import { logMobileEvent } from "./events";
 
@@ -328,6 +329,19 @@ export async function submitAssignment(
     throw new MobileApiError("LEASE_EXPIRED", 410, "Assignment expired");
   }
 
+  const { data: taskRow, error: taskError } = await supabase
+    .from("tasks")
+    .select("*")
+    .eq("id", assignment.task_id)
+    .single();
+  if (taskError || !taskRow) {
+    throw new MobileApiError(
+      "SERVER_ERROR",
+      500,
+      "Task metadata missing"
+    );
+  }
+
   validatePlayback(body);
 
   await supabase
@@ -349,9 +363,18 @@ export async function submitAssignment(
     })
     .eq("id", assignment.id);
 
+  await persistAnnotationPayload({
+    clipId: taskRow.clip_id,
+    taskId: assignment.task_id,
+    taskType: taskRow.task_type,
+    contributorId: contributor.id,
+    payload: body.payload,
+  });
+
   const normalized = normalizePayload(body.payload);
   const consensus = await recomputeConsensus(
     supabase,
+    taskRow,
     assignment.task_id,
     body.payload,
     contributor.id,
@@ -531,16 +554,24 @@ function validatePlayback(body: MobileTaskResponseBody) {
 
 async function recomputeConsensus(
   supabase: Supabase,
+  taskRow: Database["public"]["Tables"]["tasks"]["Row"] | null,
   taskId: string,
   latestPayload: any,
   submittingContributorId: string,
   normalizedSubmission: string
 ) {
-  const { data: task } = await supabase
-    .from("tasks")
-    .select("*")
-    .eq("id", taskId)
-    .single();
+  let task = taskRow;
+  if (!task) {
+    const { data, error } = await supabase
+      .from("tasks")
+      .select("*")
+      .eq("id", taskId)
+      .single();
+    if (error || !data) {
+      throw new MobileApiError("SERVER_ERROR", 500, "Task missing");
+    }
+    task = data;
+  }
 
   const { data: responses } = await supabase
     .from("task_responses")

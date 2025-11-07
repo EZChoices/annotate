@@ -211,4 +211,23 @@ The new contributor/bundle/task data model lives in `docs/mobile_tasks.sql`. App
 - tune optional knobs via env vars: `MOBILE_GOLDEN_RATIO`, `MOBILE_TARGET_VOTES`, `MOBILE_MIN_GREENS_SKIP_QA`, `MOBILE_MIN_GREENS_REVIEW`, `MOBILE_BUNDLE_SIZE`, `MOBILE_LEASE_MINUTES`, `MOBILE_BUNDLE_TTL_MINUTES`.
 - onboard contributors by inserting into `public.contributors` (capabilities JSON, feature flags) or by running the invite flow.
 
-Reference the SQL file for the exact schema of `contributors`, `media_assets`, `clips`, `tasks`, `task_bundles`, `task_assignments`, `task_responses`, consensus, pricing, payouts, telemetry, and `idempotency_keys` (used to dedupe retries).
+Reference the SQL file for the exact schema of `contributors`, `media_assets`, `clips`, `tasks`, `task_bundles`, `task_assignments`, `task_responses`, consensus, pricing, payouts, telemetry, and `idempotency_keys` (used to dedupe retries). If you want to archive raw payloads to Supabase Storage, set:
+
+```
+MOBILE_ANNOTATION_BUCKET=annotations
+MOBILE_ANNOTATION_PREFIX=annotations   # optional
+```
+
+When set, every `/api/mobile/tasks/submit` call writes the payload JSON to `storage://<bucket>/<prefix>/<clip>/<task>/<task_id>.json`.
+
+To monitor contributor throughput, visit `/admin/mobile` (feature-flag friendly) which consumes `/api/admin/mobile/stats`. The stats endpoint queries the same tables to surface KPIs, daily throughput, leaderboards, and recent telemetry events.
+
+## Stitching datasets
+
+Once tasks reach `auto_approved` or `complete`, run the stitch script to rebuild per-asset bundles for training or QA review:
+
+```
+SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/stitch_dataset.js
+```
+
+Output defaults to `stitch_output/` (override via `MOBILE_STITCH_OUTPUT`). Every asset file contains the clip list plus all approved task payloads; `manifest.json` lists all generated bundles so Dagster/Airflow can sync downstream.
