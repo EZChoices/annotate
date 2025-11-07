@@ -49,6 +49,8 @@ const STATUS_PENDING = "pending";
 const STATUS_IN_PROGRESS = "in_progress";
 const STATUS_NEEDS_REVIEW = "needs_review";
 const STATUS_AUTO_APPROVED = "auto_approved";
+const isMissingRelationError = (error: any) =>
+  error && (error.code === "42P01" || error.code === "PGRST116");
 
 export async function fetchMobileAdminStats(): Promise<MobileAdminStats> {
   const now = new Date();
@@ -138,7 +140,10 @@ async function countTasksByStatus(supabase: ReturnType<typeof getServiceSupabase
     .from("tasks")
     .select("*", { count: "exact", head: true })
     .eq("status", status);
-  if (error) throw error;
+  if (error) {
+    if (isMissingRelationError(error)) return 0;
+    throw error;
+  }
   return count ?? 0;
 }
 
@@ -151,7 +156,10 @@ async function countActiveAssignments(
     .select("*", { count: "exact", head: true })
     .eq("state", "leased")
     .gt("lease_expires_at", nowIso);
-  if (error) throw error;
+  if (error) {
+    if (isMissingRelationError(error)) return 0;
+    throw error;
+  }
   return count ?? 0;
 }
 
@@ -159,7 +167,10 @@ async function countContributors(supabase: ReturnType<typeof getServiceSupabase>
   const { count, error } = await supabase
     .from("contributors")
     .select("*", { count: "exact", head: true });
-  if (error) throw error;
+  if (error) {
+    if (isMissingRelationError(error)) return 0;
+    throw error;
+  }
   return count ?? 0;
 }
 
@@ -171,7 +182,10 @@ async function countActiveContributors(
     .from("contributor_stats")
     .select("*", { count: "exact", head: true })
     .gt("last_active", sinceIso);
-  if (error) throw error;
+  if (error) {
+    if (isMissingRelationError(error)) return 0;
+    throw error;
+  }
   return count ?? 0;
 }
 
@@ -183,7 +197,10 @@ async function countActiveBundles(
     .from("task_bundles")
     .select("created_at, ttl_minutes")
     .eq("state", "active");
-  if (error) throw error;
+  if (error) {
+    if (isMissingRelationError(error)) return 0;
+    throw error;
+  }
   if (!data) return 0;
   return data.filter((bundle) => {
     const expires = new Date(bundle.created_at);
@@ -198,7 +215,10 @@ async function averageEwma(
   const { data, error } = await supabase
     .from("contributor_stats")
     .select("ewma_agreement");
-  if (error) throw error;
+  if (error) {
+    if (isMissingRelationError(error)) return 0;
+    throw error;
+  }
   if (!data || data.length === 0) return 0;
   const sum = data.reduce(
     (acc, row) => acc + (row.ewma_agreement ?? 0),
@@ -213,7 +233,10 @@ async function computeGoldenAccuracy(
   const { data, error } = await supabase
     .from("contributor_stats")
     .select("golden_correct, golden_total");
-  if (error) throw error;
+  if (error) {
+    if (isMissingRelationError(error)) return null;
+    throw error;
+  }
   let sumCorrect = 0;
   let sumTotal = 0;
   for (const row of data || []) {
@@ -234,7 +257,10 @@ async function loadDailyCompletions(
     .gte("decided_at", sinceIso)
     .order("decided_at", { ascending: true })
     .limit(5000);
-  if (error) throw error;
+  if (error) {
+    if (isMissingRelationError(error)) return [];
+    throw error;
+  }
   const bucket = new Map<
     string,
     { autoApproved: number; needsReview: number }
@@ -264,7 +290,10 @@ async function loadTopContributors(
     )
     .order("tasks_total", { ascending: false })
     .limit(10);
-  if (error) throw error;
+  if (error) {
+    if (isMissingRelationError(error)) return [];
+    throw error;
+  }
   const statsRows = (data || []) as ContributorStatsRow[];
   const contributorIds = statsRows.map((row) => row.contributor_id);
   const contributorMap = await loadContributorsMeta(supabase, contributorIds);
@@ -297,7 +326,10 @@ async function loadContributorsMeta(
     .from("contributors")
     .select("id, handle, tier")
     .in("id", uniqueIds);
-  if (error) throw error;
+  if (error) {
+    if (isMissingRelationError(error)) return map;
+    throw error;
+  }
   for (const row of data || []) {
     map.set(row.id, { handle: row.handle ?? null, tier: row.tier ?? null });
   }
@@ -312,7 +344,10 @@ async function loadRecentEvents(
     .select("id, contributor_id, name, props, ts")
     .order("ts", { ascending: false })
     .limit(25);
-  if (error) throw error;
+  if (error) {
+    if (isMissingRelationError(error)) return [];
+    throw error;
+  }
   return (data || []).map((event) => ({
     id: event.id!,
     contributor_id: event.contributor_id,
