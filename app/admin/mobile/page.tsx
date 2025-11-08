@@ -1,6 +1,7 @@
 import { fetchMobileAdminStats } from "../../../lib/mobile/adminStats";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export default async function MobileAdminPage() {
   const stats = await fetchMobileAdminStats();
@@ -200,4 +201,3 @@ export default async function MobileAdminPage() {
     </main>
   );
 }
-
