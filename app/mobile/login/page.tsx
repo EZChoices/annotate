@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, Suspense, useEffect, useState } from "react";
+import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
 import { useMobileAuth } from "../../../components/mobile/MobileAuthProvider";
 
 export default function MobileLoginPage() {
@@ -32,6 +32,18 @@ function MobileLoginForm() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
+
+  const redirectTo = useMemo(() => {
+    const envUrl = process.env.NEXT_PUBLIC_APP_URL;
+    if (envUrl) {
+      return `${envUrl.replace(/\/$/, "")}/mobile/login`;
+    }
+    if (typeof window !== "undefined") {
+      return `${window.location.origin}/mobile/login`;
+    }
+    return "/mobile/login";
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -39,6 +51,22 @@ function MobileLoginForm() {
     if (cachedEmail) {
       setEmail(cachedEmail);
       setStep("verify");
+    }
+
+    const hash = window.location.hash.startsWith("#")
+      ? window.location.hash.slice(1)
+      : "";
+    if (hash) {
+      const params = new URLSearchParams(hash);
+      const codeParam = params.get("error_code");
+      const descParam = params.get("error_description");
+      if (codeParam || descParam) {
+        setLinkError(
+          descParam?.replace(/\+/g, " ") ||
+            "Authentication link is invalid or expired."
+        );
+      }
+      window.location.hash = "";
     }
   }, []);
 
@@ -58,10 +86,7 @@ function MobileLoginForm() {
         email,
         options: {
           shouldCreateUser: true,
-          emailRedirectTo:
-            typeof window !== "undefined"
-              ? `${window.location.origin}/mobile/login`
-              : undefined,
+          emailRedirectTo: redirectTo,
         },
       });
       if (otpError) throw otpError;
@@ -166,6 +191,7 @@ function MobileLoginForm() {
 
       {message ? <p className="text-sm text-green-600">{message}</p> : null}
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
+      {linkError ? <p className="text-sm text-amber-600">{linkError}</p> : null}
 
       <div className="text-center text-xs text-slate-500">
         Problems signing in? Email{" "}
