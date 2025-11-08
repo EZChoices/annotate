@@ -12,28 +12,28 @@ import {
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  try {
-    assertMobileFeatureEnabled();
-    const countParam = Number(req.nextUrl.searchParams.get("count"));
-    const count = Number.isFinite(countParam) && countParam > 0
+  const countParam = Number(req.nextUrl.searchParams.get("count"));
+  const requestedCount =
+    Number.isFinite(countParam) && countParam > 0
       ? Math.min(Math.trunc(countParam), 10)
       : MOBILE_DEFAULT_BUNDLE_SIZE;
-
+  try {
+    assertMobileFeatureEnabled();
     if (isMobileMockMode()) {
-      return NextResponse.json(generateMockBundle(count), {
+      return NextResponse.json(generateMockBundle(requestedCount), {
         headers: { "x-mobile-mock-data": "true" },
       });
     }
 
     const { contributor, supabase } = await requireContributor(req);
-    const bundle = await claimBundle(contributor, supabase, count);
+    const bundle = await claimBundle(contributor, supabase, requestedCount);
     return NextResponse.json(bundle);
   } catch (error) {
     if (error instanceof MobileApiError && error.code === "VALIDATION_FAILED") {
       return errorResponse(error);
     }
     console.warn("[mobile/bundle] falling back to mock data", error);
-    return NextResponse.json(generateMockBundle(count), {
+    return NextResponse.json(generateMockBundle(requestedCount), {
       headers: { "x-mobile-mock-data": "true" },
     });
   }
