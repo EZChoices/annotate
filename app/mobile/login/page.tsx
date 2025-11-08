@@ -62,16 +62,18 @@ function MobileLoginForm() {
     if (!hash) return;
 
     const params = new URLSearchParams(hash);
-    const hasTokens = params.has("access_token") || params.has("refresh_token");
-    if (hasTokens) {
+    const accessToken = params.get("access_token");
+    const refreshToken = params.get("refresh_token");
+    if (accessToken && refreshToken) {
       (async () => {
         setLoading(true);
         try {
-          const { error: linkErr } = await supabase.auth.getSessionFromUrl({
-            storeSession: true,
+          const { error: sessionError } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
           });
-          if (linkErr) {
-            setLinkError(linkErr.message);
+          if (sessionError) {
+            setLinkError(sessionError.message);
           } else {
             setMessage("Link confirmed. Redirecting you to your tasks.");
             router.replace(nextParam);
