@@ -113,6 +113,7 @@ async function getOrCreateContributor(
 }
 
 const ANON_CONTRIBUTOR_ID = "00000000-0000-4000-8000-000000000042";
+const ANON_EMAIL = "anonymous@dialectdata.test";
 
 async function getOrCreateAnonymousContributor(
   supabase: ReturnType<typeof getServiceSupabase>
@@ -127,12 +128,22 @@ async function getOrCreateAnonymousContributor(
     return data;
   }
 
+  const { data: byEmail } = await supabase
+    .from("contributors")
+    .select("*")
+    .eq("email", ANON_EMAIL)
+    .maybeSingle();
+
+  if (byEmail) {
+    return data;
+  }
+
   const { data: inserted, error } = await supabase
     .from("contributors")
     .upsert(
       {
         id: ANON_CONTRIBUTOR_ID,
-        email: "anonymous@dialectdata.test",
+        email: ANON_EMAIL,
         handle: "mobile-anonymous",
         feature_flags: { mobile_tasks: true },
         role: "contributor",
@@ -143,10 +154,18 @@ async function getOrCreateAnonymousContributor(
     .single();
 
   if (error || !inserted) {
+    const fallback = await supabase
+      .from("contributors")
+      .select("*")
+      .eq("email", ANON_EMAIL)
+      .maybeSingle();
+    if (fallback.data) {
+      return fallback.data;
+    }
     throw new MobileApiError(
       "SERVER_ERROR",
       500,
-      "Unable to create anonymous contributor"
+      `Unable to create anonymous contributor: ${error?.message ?? "unknown"}`
     );
   }
 
