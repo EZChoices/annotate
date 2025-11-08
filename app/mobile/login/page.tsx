@@ -52,23 +52,50 @@ function MobileLoginForm() {
       setEmail(cachedEmail);
       setStep("verify");
     }
+  }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || !supabase) return;
     const hash = window.location.hash.startsWith("#")
       ? window.location.hash.slice(1)
       : "";
-    if (hash) {
-      const params = new URLSearchParams(hash);
-      const codeParam = params.get("error_code");
-      const descParam = params.get("error_description");
-      if (codeParam || descParam) {
-        setLinkError(
-          descParam?.replace(/\+/g, " ") ||
-            "Authentication link is invalid or expired."
-        );
-      }
+    if (!hash) return;
+
+    const params = new URLSearchParams(hash);
+    const hasTokens = params.has("access_token") || params.has("refresh_token");
+    if (hasTokens) {
+      (async () => {
+        setLoading(true);
+        try {
+          const { error: linkErr } = await supabase.auth.getSessionFromUrl({
+            storeSession: true,
+          });
+          if (linkErr) {
+            setLinkError(linkErr.message);
+          } else {
+            setMessage("Link confirmed. Redirecting you to your tasks.");
+            router.replace(nextParam);
+          }
+        } catch (err: any) {
+          setLinkError(err.message || "Failed to confirm magic link.");
+        } finally {
+          window.location.hash = "";
+          setLoading(false);
+        }
+      })();
+      return;
+    }
+
+    const codeParam = params.get("error_code");
+    const descParam = params.get("error_description");
+    if (codeParam || descParam) {
+      setLinkError(
+        descParam?.replace(/\+/g, " ") ||
+          "Authentication link is invalid or expired."
+      );
       window.location.hash = "";
     }
-  }, []);
+  }, [nextParam, router, supabase]);
 
   useEffect(() => {
     if (status === "ready" && session) {
@@ -93,7 +120,9 @@ function MobileLoginForm() {
       if (typeof window !== "undefined") {
         window.localStorage.setItem("dd-mobile-email", email);
       }
-      setMessage("We sent you a 6-digit code. Enter it below to finish signing in.");
+      setMessage(
+        "We sent you a 6-digit code. Enter it below to finish signing in."
+      );
       setStep("verify");
     } catch (err: any) {
       setError(err.message || "Failed to send code");
@@ -114,7 +143,7 @@ function MobileLoginForm() {
         type: "email",
       });
       if (verifyError) throw verifyError;
-      setMessage("Success! Redirecting you to your tasks…");
+      setMessage("Success! Redirecting you to your tasks.");
       router.replace(nextParam);
     } catch (err: any) {
       setError(err.message || "Invalid code");
@@ -136,7 +165,9 @@ function MobileLoginForm() {
       </div>
 
       {status === "loading" ? (
-        <p className="text-center text-sm text-slate-500">Checking existing session…</p>
+        <p className="text-center text-sm text-slate-500">
+          Checking existing session…
+        </p>
       ) : null}
 
       <form className="space-y-3" onSubmit={sendCode}>
@@ -158,7 +189,7 @@ function MobileLoginForm() {
           disabled={!email || loading}
           className="w-full rounded-lg bg-slate-900 py-3 text-sm font-semibold text-white disabled:opacity-60"
         >
-          {loading ? "Sending…" : "Send code"}
+          {loading ? "Sending..." : "Send code"}
         </button>
       </form>
 
@@ -174,7 +205,7 @@ function MobileLoginForm() {
             pattern="[0-9]*"
             required
             className="w-full rounded-lg border border-slate-300 p-3 text-center text-lg tracking-[0.5em]"
-            placeholder="••••••"
+            placeholder="000000"
             value={code}
             onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))}
             maxLength={6}
@@ -184,7 +215,7 @@ function MobileLoginForm() {
             disabled={code.length !== 6 || loading}
             className="w-full rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {loading ? "Verifying…" : "Verify & continue"}
+            {loading ? "Verifying..." : "Verify & continue"}
           </button>
         </form>
       ) : null}
