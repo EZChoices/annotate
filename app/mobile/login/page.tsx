@@ -2,10 +2,26 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, Suspense, useEffect, useState } from "react";
 import { useMobileAuth } from "../../../components/mobile/MobileAuthProvider";
 
 export default function MobileLoginPage() {
+  return (
+    <Suspense fallback={<LoginFallback />}>
+      <MobileLoginForm />
+    </Suspense>
+  );
+}
+
+function LoginFallback() {
+  return (
+    <main className="mx-auto max-w-md space-y-4 p-6 text-center">
+      <p className="text-sm text-slate-500">Loading login form…</p>
+    </main>
+  );
+}
+
+function MobileLoginForm() {
   const { supabase, session, status } = useMobileAuth();
   const router = useRouter();
   const search = useSearchParams();

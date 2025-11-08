@@ -4,6 +4,8 @@ import { requireContributor } from "../../../../lib/mobile/auth";
 import { getClipContext } from "../../../../lib/mobile/taskService";
 import { errorResponse, MobileApiError } from "../../../../lib/mobile/errors";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
   try {
     assertMobileFeatureEnabled();
@@ -30,4 +32,3 @@ export async function GET(req: NextRequest) {
     );
   }
 }
-

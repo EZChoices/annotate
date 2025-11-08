@@ -5,6 +5,8 @@ import { claimBundle } from "../../../../lib/mobile/taskService";
 import { errorResponse, MobileApiError } from "../../../../lib/mobile/errors";
 import { MOBILE_DEFAULT_BUNDLE_SIZE } from "../../../../lib/mobile/constants";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
   try {
     assertMobileFeatureEnabled();
@@ -26,4 +28,3 @@ export async function GET(req: NextRequest) {
     );
   }
 }
-
