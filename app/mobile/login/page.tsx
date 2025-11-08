@@ -21,6 +21,12 @@ function LoginFallback() {
   );
 }
 
+interface DiagnosticSnapshot {
+  origin: string | null;
+  hash: string | null;
+  updatedAt: string;
+}
+
 function MobileLoginForm() {
   const { supabase, session, status } = useMobileAuth();
   const router = useRouter();
@@ -33,6 +39,22 @@ function MobileLoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
+  const [clientDiagnostics, setClientDiagnostics] = useState<DiagnosticSnapshot>(
+    {
+      origin: null,
+      hash: null,
+      updatedAt: new Date().toISOString(),
+    }
+  );
+
+  const envDiagnostics = useMemo(
+    () => ({
+      appUrl: process.env.NEXT_PUBLIC_APP_URL || "(unset)",
+      hasSupabaseUrl: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL),
+      hasSupabaseAnonKey: Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
+    }),
+    []
+  );
 
   const redirectTo = useMemo(() => {
     const envUrl = process.env.NEXT_PUBLIC_APP_URL;
@@ -43,6 +65,11 @@ function MobileLoginForm() {
       return `${window.location.origin}/mobile/login`;
     }
     return "/mobile/login";
+    setClientDiagnostics({
+      origin: window.location.origin,
+      hash: window.location.hash || null,
+      updatedAt: new Date().toISOString(),
+    });
   }, []);
 
   useEffect(() => {
@@ -103,7 +130,24 @@ function MobileLoginForm() {
     if (status === "ready" && session) {
       router.replace(nextParam);
     }
-  }, [nextParam, router, session, status]);
+    if (typeof window !== "undefined") {
+      setClientDiagnostics({
+        origin: window.location.origin,
+        hash: window.location.hash || null,
+        updatedAt: new Date().toISOString(),
+      });
+      console.info("[mobile/login] diagnostics", {
+        env: envDiagnostics,
+        client: {
+          origin: window.location.origin,
+          hash: window.location.hash || null,
+        },
+        status,
+        hasSession: Boolean(session),
+        linkError,
+      });
+    }
+  }, [envDiagnostics, linkError, nextParam, router, session, status]);
 
   const sendCode = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -225,6 +269,52 @@ function MobileLoginForm() {
       {message ? <p className="text-sm text-green-600">{message}</p> : null}
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
       {linkError ? <p className="text-sm text-amber-600">{linkError}</p> : null}
+
+      <details className="rounded-lg border border-slate-200 bg-white/70 p-4 text-left text-xs text-slate-600">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-700">
+          Troubleshooting details
+        </summary>
+        <dl className="mt-3 space-y-1">
+          <div className="flex justify-between gap-3">
+            <dt>Supabase URL</dt>
+            <dd className="font-mono">
+              {envDiagnostics.hasSupabaseUrl ? "set" : "missing"}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt>Supabase anon key</dt>
+            <dd className="font-mono">
+              {envDiagnostics.hasSupabaseAnonKey ? "set" : "missing"}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt>App URL</dt>
+            <dd className="font-mono">{envDiagnostics.appUrl}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt>Client origin</dt>
+            <dd className="font-mono">{clientDiagnostics.origin ?? "n/a"}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt>Hash fragment</dt>
+            <dd className="font-mono break-all">
+              {clientDiagnostics.hash ?? "(empty)"}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt>Auth status</dt>
+            <dd className="font-mono">{status}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt>Session detected</dt>
+            <dd className="font-mono">{session ? "yes" : "no"}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt>Last update</dt>
+            <dd className="font-mono">{clientDiagnostics.updatedAt}</dd>
+          </div>
+        </dl>
+      </details>
 
       <div className="text-center text-xs text-slate-500">
         Problems signing in? Email{" "}
