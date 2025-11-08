@@ -49,7 +49,7 @@ export default function MobileTaskPage() {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [watchedSec, setWatchedSec] = useState(0);
   const [durationSec, setDurationSec] = useState(0);
-  const { fetchWithAuth, session, status } = useMobileAuth();
+  const { fetchWithAuth, session, status, mode } = useMobileAuth();
 
   useEffect(() => {
     loadCachedBundles().then((bundles) => {
@@ -86,31 +86,32 @@ export default function MobileTaskPage() {
     `/mobile/tasks/${taskId}` + (assignmentId ? `?assignment=${assignmentId}` : "");
   const loginHref = `/mobile/login?next=${encodeURIComponent(nextPath)}`;
 
-  if (status === "loading") {
-    return (
-      <main className="p-6 text-center space-y-3">
-        <p className="text-sm text-slate-500">Checking session…</p>
-      </main>
-    );
-  }
+  if (mode === "otp") {
+    if (status === "loading") {
+      return (
+        <main className="p-6 text-center space-y-3">
+          <p className="text-sm text-slate-500">Checking session…</p>
+        </main>
+      );
+    }
 
-  if (!session) {
-    return (
-      <main className="max-w-md mx-auto p-6 space-y-4 text-center">
-        <h1 className="text-2xl font-semibold">Sign in to keep working</h1>
-        <p className="text-sm text-slate-500">
-          Your session expired. Re-authenticate to resume this task.
-        </p>
-        <Link
-          href={loginHref}
-          className="inline-flex w-full justify-center rounded-lg bg-blue-600 py-3 font-semibold text-white"
-        >
-          Go to OTP login
-        </Link>
-      </main>
-    );
+    if (!session) {
+      return (
+        <main className="max-w-md mx-auto p-6 space-y-4 text-center">
+          <h1 className="text-2xl font-semibold">Sign in to keep working</h1>
+          <p className="text-sm text-slate-500">
+            Your session expired. Re-authenticate to resume this task.
+          </p>
+          <Link
+            href={loginHref}
+            className="inline-flex w-full justify-center rounded-lg bg-blue-600 py-3 font-semibold text-white"
+          >
+            Go to OTP login
+          </Link>
+        </main>
+      );
+    }
   }
-
   const isStructured = task ? STRUCTURED_TASK_TYPES.has(task.task_type) : false;
 
   useEffect(() => {

@@ -18,7 +18,7 @@ export default function MobileHomePage() {
   const [online, setOnline] = useState(
     typeof navigator === "undefined" ? true : navigator.onLine
   );
-  const { fetchWithAuth, session, status } = useMobileAuth();
+  const { fetchWithAuth, session, status, mode } = useMobileAuth();
 
   useEffect(() => {
     if (!ENABLED) return;
@@ -46,29 +46,31 @@ export default function MobileHomePage() {
     );
   }
 
-  if (status === "loading") {
-    return (
-      <main className="p-6 text-center space-y-3">
-        <p className="text-sm text-slate-500">Checking session…</p>
-      </main>
-    );
-  }
+  if (mode === "otp") {
+    if (status === "loading") {
+      return (
+        <main className="p-6 text-center space-y-3">
+          <p className="text-sm text-slate-500">Checking session…</p>
+        </main>
+      );
+    }
 
-  if (!session) {
-    return (
-      <main className="max-w-md mx-auto p-6 space-y-4 text-center">
-        <h1 className="text-2xl font-semibold">Sign in to continue</h1>
-        <p className="text-sm text-slate-500">
-          Use the one-time passcode login to fetch and submit mobile tasks.
-        </p>
-        <Link
-          href="/mobile/login"
-          className="inline-flex w-full justify-center rounded-lg bg-blue-600 py-3 font-semibold text-white"
-        >
-          Launch OTP Login
-        </Link>
-      </main>
-    );
+    if (!session) {
+      return (
+        <main className="max-w-md mx-auto p-6 space-y-4 text-center">
+          <h1 className="text-2xl font-semibold">Sign in to continue</h1>
+          <p className="text-sm text-slate-500">
+            Use the one-time passcode login to fetch and submit mobile tasks.
+          </p>
+          <Link
+            href="/mobile/login"
+            className="inline-flex w-full justify-center rounded-lg bg-blue-600 py-3 font-semibold text-white"
+          >
+            Launch OTP Login
+          </Link>
+        </main>
+      );
+    }
   }
 
   const flatTasks = bundles.flatMap((bundle) =>
@@ -110,20 +112,15 @@ export default function MobileHomePage() {
       >
         {loading ? "Loading…" : "Get Tasks"}
       </button>
-      {error ? (
-        <p className="text-sm text-red-600">{error}</p>
-      ) : null}
+      {error ? <p className="text-sm text-red-600">{error}</p> : null}
       <section className="space-y-3">
         {flatTasks.length === 0 ? (
           <p className="text-center text-sm text-slate-500">
-            No cached tasks yet. Tap &ldquo;Get Tasks&rdquo; to start.
+            No cached tasks yet. Tap “Get Tasks” to start.
           </p>
         ) : (
           flatTasks.map(({ bundle_id, task }) => (
-            <TaskCard
-              key={`${bundle_id}:${task.assignment_id}`}
-              task={task}
-            />
+            <TaskCard key={`${bundle_id}:${task.assignment_id}`} task={task} />
           ))
         )}
       </section>

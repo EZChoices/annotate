@@ -24,15 +24,18 @@ export async function requireContributor(
   const token = authHeader.startsWith("Bearer ")
     ? authHeader.slice(7).trim()
     : null;
+  const supabase = getServiceSupabase();
+
   if (!token) {
-    throw new MobileApiError(
-      "UNAUTHORIZED",
-      401,
-      "Missing Authorization header"
-    );
+    const contributor = await getOrCreateAnonymousContributor(supabase);
+    return {
+      contributor,
+      supabase,
+      accessToken: "anonymous-bypass",
+      userId: contributor.id,
+    };
   }
 
-  const supabase = getServiceSupabase();
   const { data, error }: AuthUserResponse = await supabase.auth.getUser(token);
   if (error || !data?.user) {
     throw new MobileApiError("UNAUTHORIZED", 401, "Invalid session token");
@@ -103,6 +106,47 @@ async function getOrCreateContributor(
       "FORBIDDEN",
       403,
       "Contributor profile not found"
+    );
+  }
+
+  return inserted;
+}
+
+const ANON_CONTRIBUTOR_ID = "00000000-0000-4000-8000-000000000042";
+
+async function getOrCreateAnonymousContributor(
+  supabase: ReturnType<typeof getServiceSupabase>
+) {
+  const { data } = await supabase
+    .from("contributors")
+    .select("*")
+    .eq("id", ANON_CONTRIBUTOR_ID)
+    .maybeSingle();
+
+  if (data) {
+    return data;
+  }
+
+  const { data: inserted, error } = await supabase
+    .from("contributors")
+    .upsert(
+      {
+        id: ANON_CONTRIBUTOR_ID,
+        email: "anonymous@dialectdata.test",
+        handle: "mobile-anonymous",
+        feature_flags: { mobile_tasks: true },
+        role: "contributor",
+      },
+      { onConflict: "id" }
+    )
+    .select("*")
+    .single();
+
+  if (error || !inserted) {
+    throw new MobileApiError(
+      "SERVER_ERROR",
+      500,
+      "Unable to create anonymous contributor"
     );
   }
 

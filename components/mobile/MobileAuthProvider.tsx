@@ -14,27 +14,39 @@ import type { Database } from "../../types/supabase";
 import { getBrowserSupabase } from "../../lib/mobile/browserClient";
 
 type MobileAuthStatus = "loading" | "ready";
+type MobileAuthMode = "otp" | "bypass";
 
 export interface MobileAuthContextValue {
   status: MobileAuthStatus;
   session: Session | null;
   user: Session["user"] | null;
-  supabase: SupabaseClient<Database>;
+  supabase: SupabaseClient<Database> | null;
   fetchWithAuth: (
     input: RequestInfo | URL,
     init?: RequestInit
   ) => Promise<Response>;
   signOut: () => Promise<void>;
+  mode: MobileAuthMode;
 }
 
 const MobileAuthContext = createContext<MobileAuthContextValue | null>(null);
 
 export function MobileAuthProvider({ children }: { children: ReactNode }) {
-  const supabase = getBrowserSupabase();
+  const hasSupabaseEnv =
+    Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL) &&
+    Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+  const otpEnabled =
+    hasSupabaseEnv &&
+    process.env.NEXT_PUBLIC_ENABLE_MOBILE_LOGIN === "true";
+
+  const supabase = otpEnabled ? getBrowserSupabase() : null;
   const [session, setSession] = useState<Session | null>(null);
-  const [status, setStatus] = useState<MobileAuthStatus>("loading");
+  const [status, setStatus] = useState<MobileAuthStatus>(
+    otpEnabled ? "loading" : "ready"
+  );
 
   useEffect(() => {
+    if (!otpEnabled || !supabase) return;
     let isMounted = true;
     supabase.auth.getSession().then(({ data }) => {
       if (!isMounted) return;
@@ -51,10 +63,13 @@ export function MobileAuthProvider({ children }: { children: ReactNode }) {
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, [supabase]);
+  }, [otpEnabled, supabase]);
 
   const fetchWithAuth = useCallback(
     async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (!otpEnabled || !supabase) {
+        return fetch(input, init);
+      }
       const headers = new Headers(init?.headers ?? undefined);
       const token =
         session?.access_token ||
@@ -67,10 +82,22 @@ export function MobileAuthProvider({ children }: { children: ReactNode }) {
       headers.set("Authorization", `Bearer ${token}`);
       return fetch(input, { ...init, headers });
     },
-    [session?.access_token, supabase]
+    [otpEnabled, session?.access_token, supabase]
   );
 
   const value = useMemo<MobileAuthContextValue>(() => {
+    if (!otpEnabled) {
+      return {
+        status: "ready",
+        session: null,
+        user: null,
+        supabase: null,
+        fetchWithAuth,
+        signOut: async () => {},
+        mode: "bypass",
+      };
+    }
+
     return {
       status,
       session,
@@ -78,10 +105,11 @@ export function MobileAuthProvider({ children }: { children: ReactNode }) {
       supabase,
       fetchWithAuth,
       signOut: async () => {
-        await supabase.auth.signOut();
+        await supabase?.auth.signOut();
       },
+      mode: "otp",
     };
-  }, [fetchWithAuth, session, status, supabase]);
+  }, [fetchWithAuth, otpEnabled, session, status, supabase]);
 
   return (
     <MobileAuthContext.Provider value={value}>

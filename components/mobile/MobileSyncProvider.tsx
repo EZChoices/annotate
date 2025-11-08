@@ -9,18 +9,14 @@ import { registerMobileServiceWorker } from "../../lib/mobile/sw-register";
 import { useMobileAuth } from "./MobileAuthProvider";
 
 export function MobileSyncProvider({ children }: { children: ReactNode }) {
-  const { fetchWithAuth, session, status } = useMobileAuth();
+  const { fetchWithAuth, status } = useMobileAuth();
 
   useEffect(() => {
     registerMobileServiceWorker();
   }, []);
 
   useEffect(() => {
-    if (
-      typeof window === "undefined" ||
-      status === "loading" ||
-      !session
-    ) {
+    if (typeof window === "undefined" || status === "loading") {
       return;
     }
     const flush = async () => {
@@ -62,7 +58,7 @@ export function MobileSyncProvider({ children }: { children: ReactNode }) {
     return () => {
       navigator.serviceWorker?.removeEventListener("message", handler);
     };
-  }, [fetchWithAuth, session, status]);
+  }, [fetchWithAuth, status]);
 
   return <>{children}</>;
 }
