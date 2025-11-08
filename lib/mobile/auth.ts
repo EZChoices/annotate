@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import type { User } from "@supabase/supabase-js";
 import { getServiceSupabase } from "../supabaseServer";
 import type { Database } from "../../types/supabase";
 import { MobileApiError } from "./errors";
@@ -37,20 +38,7 @@ export async function requireContributor(
     throw new MobileApiError("UNAUTHORIZED", 401, "Invalid session token");
   }
 
-  const userId = data.user.id;
-  const { data: contributor, error: contributorError } = await supabase
-    .from("contributors")
-    .select("*")
-    .eq("id", userId)
-    .single();
-
-  if (contributorError || !contributor) {
-    throw new MobileApiError(
-      "FORBIDDEN",
-      403,
-      "Contributor profile not found"
-    );
-  }
+  const contributor = await getOrCreateContributor(supabase, data.user);
 
   if (opts?.requireMobileFlag !== false) {
     const mobileFlag =
@@ -64,6 +52,59 @@ export async function requireContributor(
     }
   }
 
-  return { contributor, supabase, accessToken: token, userId };
+  return { contributor, supabase, accessToken: token, userId: data.user.id };
 }
 
+async function getOrCreateContributor(
+  supabase: ReturnType<typeof getServiceSupabase>,
+  user: User
+) {
+  const { data, error } = await supabase
+    .from("contributors")
+    .select("*")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (error && error.code !== "PGRST116") {
+    throw new MobileApiError(
+      "SERVER_ERROR",
+      500,
+      "Unable to load contributor profile"
+    );
+  }
+
+  if (data) {
+    return data;
+  }
+
+  const handleBase =
+    user.user_metadata?.handle ||
+    user.email?.split("@")[0] ||
+    `user-${user.id.slice(0, 8)}`;
+
+  const handle = String(handleBase)
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "")
+    .slice(0, 40) || `user-${user.id.slice(0, 8)}`;
+
+  const { data: inserted, error: insertError } = await supabase
+    .from("contributors")
+    .insert({
+      id: user.id,
+      email: user.email,
+      handle,
+      feature_flags: { mobile_tasks: true },
+    })
+    .select("*")
+    .single();
+
+  if (insertError || !inserted) {
+    throw new MobileApiError(
+      "FORBIDDEN",
+      403,
+      "Contributor profile not found"
+    );
+  }
+
+  return inserted;
+}

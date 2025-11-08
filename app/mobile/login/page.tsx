@@ -57,7 +57,7 @@ function MobileLoginForm() {
       const { error: otpError } = await supabase.auth.signInWithOtp({
         email,
         options: {
-          shouldCreateUser: false,
+          shouldCreateUser: true,
           emailRedirectTo:
             typeof window !== "undefined"
               ? `${window.location.origin}/mobile/login`
