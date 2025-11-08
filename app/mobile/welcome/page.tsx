@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { MobileBundleResponse } from "../../lib/mobile/types";
-import { cacheBundle } from "../../lib/mobile/idb";
-import { useMobileAuth } from "../../components/mobile/MobileAuthProvider";
+import { cacheBundle } from "../../../lib/mobile/idb";
+import { useMobileAuth } from "../../../components/mobile/MobileAuthProvider";
 
 export default function MobileWelcomePage() {
   const router = useRouter();
