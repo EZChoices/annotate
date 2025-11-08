@@ -1,10 +1,13 @@
 import { randomUUID } from "crypto";
+import { MOBILE_TASKS_ENABLED } from "./constants";
 import type {
   MobileBundleResponse,
   MobileClaimResponse,
   MobileClipPayload,
   TaskType,
 } from "./types";
+
+const TWELVE_SECONDS = 12_000;
 
 const MOCK_CLIPS: Array<{
   clip: MobileClipPayload;
@@ -18,7 +21,7 @@ const MOCK_CLIPS: Array<{
       id: "mock-clip-1",
       asset_id: "mock-asset-1",
       start_ms: 0,
-      end_ms: 45000,
+      end_ms: TWELVE_SECONDS,
       overlap_ms: 2000,
       speakers: ["A"],
       audio_url:
@@ -29,7 +32,7 @@ const MOCK_CLIPS: Array<{
       context_next_clip: null,
     },
     task_type: "translation_check",
-    price_cents: 75,
+    price_cents: 8,
     ai_suggestion: {
       translation: "Hello! Thanks for taking the survey today.",
     },
@@ -38,6 +41,7 @@ const MOCK_CLIPS: Array<{
         "مرحبا! شكرا للمشاركة. نحتاج فقط إلى بعض المعلومات الإضافية منك.",
       translation:
         "Hello! Thanks for taking part. We just need a little more information from you.",
+      window: "±24s",
     },
   },
   {
@@ -45,7 +49,7 @@ const MOCK_CLIPS: Array<{
       id: "mock-clip-2",
       asset_id: "mock-asset-2",
       start_ms: 0,
-      end_ms: 30000,
+      end_ms: TWELVE_SECONDS,
       overlap_ms: 2000,
       speakers: ["A"],
       audio_url:
@@ -56,7 +60,7 @@ const MOCK_CLIPS: Array<{
       context_next_clip: null,
     },
     task_type: "emotion_tag",
-    price_cents: 60,
+    price_cents: 7,
     ai_suggestion: {
       emotion_primary: "Happy",
       confidence: 0.74,
@@ -64,14 +68,15 @@ const MOCK_CLIPS: Array<{
     context: {
       summary:
         "Speaker reminisces about a family celebration and sounds upbeat.",
+      window: "±24s",
     },
   },
   {
     clip: {
       id: "mock-clip-3",
       asset_id: "mock-asset-3",
-      start_ms: 1000,
-      end_ms: 55000,
+      start_ms: 0,
+      end_ms: TWELVE_SECONDS,
       overlap_ms: 2000,
       speakers: ["A", "B"],
       audio_url:
@@ -81,16 +86,17 @@ const MOCK_CLIPS: Array<{
       context_next_clip: null,
     },
     task_type: "speaker_continuity",
-    price_cents: 70,
+    price_cents: 7,
     ai_suggestion: {
       same_as_clip: "previous_segment_12",
       confidence: 0.65,
     },
     context: {
       diarization: [
-        { speaker: "A", from: 0, to: 22 },
-        { speaker: "B", from: 22, to: 46 },
+        { speaker: "A", from: 0, to: 6000 },
+        { speaker: "B", from: 6000, to: 12000 },
       ],
+      window: "±24s",
     },
   },
 ];
@@ -101,12 +107,28 @@ export function isMobileMockMode(): boolean {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
     process.env.SUPABASE_KEY ||
     "";
-  return (
-    process.env.NEXT_PUBLIC_ENABLE_MOBILE_MOCK === "true" ||
-    !serviceKey ||
-    serviceKey === "mock" ||
-    (!!anonKey && serviceKey === anonKey)
-  );
+
+  if (process.env.NEXT_PUBLIC_ENABLE_MOBILE_MOCK === "true") {
+    return true;
+  }
+
+  if (!MOBILE_TASKS_ENABLED) {
+    return true;
+  }
+
+  if (!serviceKey) {
+    return true;
+  }
+
+  if (serviceKey === "mock") {
+    return true;
+  }
+
+  if (!!anonKey && serviceKey === anonKey) {
+    return true;
+  }
+
+  return false;
 }
 
 export function generateMockBundle(

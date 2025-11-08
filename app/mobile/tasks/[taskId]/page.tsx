@@ -274,18 +274,28 @@ export default function MobileTaskPage() {
         ) : (
           <p className="text-sm text-slate-500">Audio unavailable</p>
         )}
-        <button
-          onClick={() => setVideoVisible((prev) => !prev)}
-          className="text-sm text-blue-600"
-        >
-          {videoVisible ? "Hide Video" : "Show Video"}
-        </button>
-        {videoVisible && task.clip.video_url ? (
-          <video
-            controls
-            className="w-full rounded-lg"
-            src={task.clip.video_url}
-          />
+        {task.clip.video_url ? (
+          task.task_type === "gesture_tag" ? (
+            <>
+              <button
+                onClick={() => setVideoVisible((prev) => !prev)}
+                className="text-sm text-blue-600"
+              >
+                {videoVisible ? "Hide Video" : "Show Video"}
+              </button>
+              {videoVisible ? (
+                <video
+                  controls
+                  className="w-full rounded-lg"
+                  src={task.clip.video_url}
+                />
+              ) : null}
+            </>
+          ) : (
+            <p className="text-xs text-slate-500">
+              Video is limited to gesture reviews; audio-first playback enabled.
+            </p>
+          )
         ) : null}
         <p className="text-xs text-slate-500">
           Watched {(watchedSec || 0).toFixed(1)}s · Playback ratio{" "}
@@ -295,9 +305,14 @@ export default function MobileTaskPage() {
           Load extended context
         </button>
         {context ? (
-          <pre className="text-[11px] bg-slate-100 p-2 rounded">
-            {JSON.stringify(context, null, 2)}
-          </pre>
+          <div className="space-y-1">
+            <pre className="text-[11px] bg-slate-100 p-2 rounded">
+              {JSON.stringify(context, null, 2)}
+            </pre>
+            <p className="text-[10px] uppercase tracking-wide text-slate-500">
+              Context window {context.window ?? "±24s"}
+            </p>
+          </div>
         ) : null}
         {task.ai_suggestion ? (
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
@@ -332,22 +347,6 @@ export default function MobileTaskPage() {
           />
         )}
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
-        <div className="flex gap-3">
-          <button
-            onClick={skipTask}
-            disabled={releasing || submitting}
-            className="flex-1 bg-slate-200 text-slate-800 rounded-lg py-3 font-semibold disabled:opacity-60"
-          >
-            {releasing ? "Skipping..." : "Skip"}
-          </button>
-          <button
-            onClick={submit}
-            disabled={submitting}
-            className="flex-1 bg-blue-600 text-white rounded-lg py-3 font-semibold disabled:opacity-60"
-          >
-            {submitting ? "Submitting..." : "Submit"}
-          </button>
-        </div>
       </section>
 
       {!isStructured && (
@@ -690,4 +689,36 @@ function defaultPayload(taskType: string) {
     default:
       return {};
   }
+}
+function TaskActionBar({
+  onSkip,
+  onSubmit,
+  releasing,
+  submitting,
+}: {
+  onSkip: () => void;
+  onSubmit: () => void;
+  releasing: boolean;
+  submitting: boolean;
+}) {
+  return (
+    <div className="fixed inset-x-0 bottom-0 z-30 bg-white/95 px-4 py-3 pb-5 shadow-[0_-4px_24px_rgba(15,23,42,0.18)]">
+      <div className="mx-auto flex max-w-md gap-3">
+        <button
+          onClick={onSkip}
+          disabled={releasing || submitting}
+          className="flex-1 rounded-lg bg-slate-200 py-3 font-semibold text-slate-800 disabled:opacity-60"
+        >
+          {releasing ? "Skipping…" : "Skip"}
+        </button>
+        <button
+          onClick={onSubmit}
+          disabled={submitting}
+          className="flex-1 rounded-lg bg-blue-600 py-3 font-semibold text-white disabled:opacity-60"
+        >
+          {submitting ? "Submitting…" : "Submit"}
+        </button>
+      </div>
+    </div>
+  );
 }

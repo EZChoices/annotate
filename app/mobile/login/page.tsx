@@ -36,12 +36,12 @@ function MobileLoginForm() {
   const redirectTo = useMemo(() => {
     const envUrl = process.env.NEXT_PUBLIC_APP_URL;
     if (envUrl) {
-      return `${envUrl.replace(/\/$/, "")}/mobile/login`;
+      return `${envUrl.replace(/\/$/, "")}/mobile/welcome`;
     }
     if (typeof window !== "undefined") {
-      return `${window.location.origin}/mobile/login`;
+      return `${window.location.origin}/mobile/welcome`;
     }
-    return "/mobile/login";
+    return "/mobile/welcome";
   }, []);
 
   useEffect(() => {
