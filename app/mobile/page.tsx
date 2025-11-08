@@ -1,11 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import type {
   MobileBundleResponse,
   MobileClaimResponse,
 } from "../../lib/mobile/types";
 import { cacheBundle, loadCachedBundles } from "../../lib/mobile/idb";
+import { useMobileAuth } from "../../components/mobile/MobileAuthProvider";
 
 const ENABLED = process.env.NEXT_PUBLIC_ENABLE_MOBILE_TASKS === "true";
 
@@ -16,6 +18,7 @@ export default function MobileHomePage() {
   const [online, setOnline] = useState(
     typeof navigator === "undefined" ? true : navigator.onLine
   );
+  const { fetchWithAuth, session, status } = useMobileAuth();
 
   useEffect(() => {
     if (!ENABLED) return;
@@ -43,6 +46,31 @@ export default function MobileHomePage() {
     );
   }
 
+  if (status === "loading") {
+    return (
+      <main className="p-6 text-center space-y-3">
+        <p className="text-sm text-slate-500">Checking session…</p>
+      </main>
+    );
+  }
+
+  if (!session) {
+    return (
+      <main className="max-w-md mx-auto p-6 space-y-4 text-center">
+        <h1 className="text-2xl font-semibold">Sign in to continue</h1>
+        <p className="text-sm text-slate-500">
+          Use the one-time passcode login to fetch and submit mobile tasks.
+        </p>
+        <Link
+          href="/mobile/login"
+          className="inline-flex w-full justify-center rounded-lg bg-blue-600 py-3 font-semibold text-white"
+        >
+          Launch OTP Login
+        </Link>
+      </main>
+    );
+  }
+
   const flatTasks = bundles.flatMap((bundle) =>
     bundle.tasks.map((task) => ({ bundle_id: bundle.bundle_id, task }))
   );
@@ -51,9 +79,7 @@ export default function MobileHomePage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/mobile/bundle?count=3", {
-        credentials: "include",
-      });
+      const response = await fetchWithAuth("/api/mobile/bundle?count=3");
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
         throw new Error(payload.message || "Failed to fetch bundle");

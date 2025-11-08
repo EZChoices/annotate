@@ -6,19 +6,28 @@ import {
   clearPendingSubmission,
 } from "../../lib/mobile/idb";
 import { registerMobileServiceWorker } from "../../lib/mobile/sw-register";
+import { useMobileAuth } from "./MobileAuthProvider";
 
 export function MobileSyncProvider({ children }: { children: ReactNode }) {
+  const { fetchWithAuth, session, status } = useMobileAuth();
+
   useEffect(() => {
     registerMobileServiceWorker();
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (
+      typeof window === "undefined" ||
+      status === "loading" ||
+      !session
+    ) {
+      return;
+    }
     const flush = async () => {
       const queue = await getPendingSubmissions();
       for (const submission of queue) {
         try {
-          const response = await fetch(submission.endpoint, {
+          const response = await fetchWithAuth(submission.endpoint, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -53,7 +62,7 @@ export function MobileSyncProvider({ children }: { children: ReactNode }) {
     return () => {
       navigator.serviceWorker?.removeEventListener("message", handler);
     };
-  }, []);
+  }, [fetchWithAuth, session, status]);
 
   return <>{children}</>;
 }
