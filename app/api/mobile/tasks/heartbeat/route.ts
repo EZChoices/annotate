@@ -3,7 +3,7 @@ import { assertMobileFeatureEnabled } from "../../../../../lib/mobile/feature";
 import { requireContributor } from "../../../../../lib/mobile/auth";
 import { refreshLease } from "../../../../../lib/mobile/taskService";
 import { errorResponse, MobileApiError } from "../../../../../lib/mobile/errors";
-import { isMobileMockMode } from "../../../../../lib/mobile/mockData";
+import { mockHeartbeat, mockModeActive } from "../../../../../lib/mobile/mockRepo";
 
 export async function POST(req: NextRequest) {
   try {
@@ -17,14 +17,16 @@ export async function POST(req: NextRequest) {
         "assignment_id is required"
       );
     }
-    if (isMobileMockMode()) {
+    const { contributor, supabase } = await requireContributor(req);
+    if (mockModeActive()) {
+      const lease = mockHeartbeat(assignmentId);
       return NextResponse.json({
         ok: true,
-        lease_expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+        lease_expires_at:
+          lease ?? new Date(Date.now() + 5 * 60 * 1000).toISOString(),
         mock: true,
       });
     }
-    const { contributor, supabase } = await requireContributor(req);
     const lease = await refreshLease(
       contributor,
       supabase,

@@ -3,7 +3,7 @@ import { assertMobileFeatureEnabled } from "../../../../../lib/mobile/feature";
 import { requireContributor } from "../../../../../lib/mobile/auth";
 import { releaseAssignment } from "../../../../../lib/mobile/taskService";
 import { errorResponse, MobileApiError } from "../../../../../lib/mobile/errors";
-import { isMobileMockMode } from "../../../../../lib/mobile/mockData";
+import { mockReleaseAssignment, mockModeActive } from "../../../../../lib/mobile/mockRepo";
 
 export async function POST(req: NextRequest) {
   try {
@@ -17,10 +17,11 @@ export async function POST(req: NextRequest) {
         "assignment_id is required"
       );
     }
-    if (isMobileMockMode()) {
+    const { contributor, supabase } = await requireContributor(req);
+    if (mockModeActive()) {
+      mockReleaseAssignment(assignmentId);
       return NextResponse.json({ ok: true, mock: true });
     }
-    const { contributor, supabase } = await requireContributor(req);
     await releaseAssignment(contributor, supabase, assignmentId, body?.reason);
     return NextResponse.json({ ok: true });
   } catch (error) {

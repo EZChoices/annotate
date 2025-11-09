@@ -5,9 +5,10 @@ import { claimBundle } from "../../../../lib/mobile/taskService";
 import { errorResponse, MobileApiError } from "../../../../lib/mobile/errors";
 import { MOBILE_DEFAULT_BUNDLE_SIZE } from "../../../../lib/mobile/constants";
 import {
-  generateMockBundle,
-  isMobileMockMode,
-} from "../../../../lib/mobile/mockData";
+  mockClaimBundle,
+  mockModeActive,
+} from "../../../../lib/mobile/mockRepo";
+import { consumeRateLimit } from "../../../../lib/mobile/rateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -19,13 +20,22 @@ export async function GET(req: NextRequest) {
       : MOBILE_DEFAULT_BUNDLE_SIZE;
   try {
     assertMobileFeatureEnabled();
-    if (isMobileMockMode()) {
-      return NextResponse.json(generateMockBundle(requestedCount), {
+    const { contributor, supabase } = await requireContributor(req);
+    if (
+      !consumeRateLimit(contributor.id, "bundle/hour", 10, 60 * 60 * 1000)
+    ) {
+      return NextResponse.json(
+        { error: "RATE_LIMIT" },
+        { status: 429 }
+      );
+    }
+    if (mockModeActive()) {
+      const mockBundle = mockClaimBundle(contributor.id, requestedCount);
+      return NextResponse.json(mockBundle, {
         headers: { "x-mobile-mock-data": "true" },
       });
     }
 
-    const { contributor, supabase } = await requireContributor(req);
     const bundle = await claimBundle(contributor, supabase, requestedCount);
     return NextResponse.json(bundle);
   } catch (error) {
@@ -33,7 +43,7 @@ export async function GET(req: NextRequest) {
       return errorResponse(error);
     }
     console.warn("[mobile/bundle] falling back to mock data", error);
-    return NextResponse.json(generateMockBundle(requestedCount), {
+    return NextResponse.json(mockClaimBundle("fallback", requestedCount), {
       headers: { "x-mobile-mock-data": "true" },
     });
   }
