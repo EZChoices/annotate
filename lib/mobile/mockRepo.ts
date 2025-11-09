@@ -5,6 +5,7 @@ import {
   getMockContext,
   isMobileMockMode,
 } from "./mockData";
+import { computeConsensus, updateReputation } from "./consensus";
 import type {
   MobileBundleResponse,
   MobileClaimResponse,
@@ -38,6 +39,8 @@ const LEASE_MS = 15 * 60 * 1000;
 const backlog = new Map<string, MobileClaimResponse[]>();
 const assignments = new Map<string, Assignment>();
 const bundles = new Map<string, Bundle>();
+const responses = new Map<string, { contributorId: string; payload: any }[]>();
+const reputation = new Map<string, number>();
 
 function ensureBacklog() {
   if (backlog.size > 0) return;
@@ -177,10 +180,28 @@ export function mockSubmit(
     throw new Error("LEASE_CONFLICT");
   }
   assignment.state = "submitted";
+  const list = responses.get(assignment.task.task_id) || [];
+  list.push({ contributorId: assignment.contributorId, payload });
+  responses.set(assignment.task.task_id, list);
+  const votes = list.map((entry) => ({
+    contributor_id: entry.contributorId,
+    payload: entry.payload,
+    key: JSON.stringify(entry.payload),
+    weight: reputation.get(entry.contributorId) ?? 1,
+  }));
+  const consensus = computeConsensus(votes);
+  for (const entry of votes) {
+    const aligned = entry.key === consensus.label;
+    reputation.set(
+      entry.contributor_id,
+      updateReputation(reputation.get(entry.contributor_id), aligned)
+    );
+  }
   return {
     ok: true,
-    green_count: 3,
+    green_count: consensus.green_count,
     status: "submitted",
+    agreement_score: consensus.agreement_score,
     payload,
   };
 }

@@ -498,6 +498,16 @@ function buildClipPayload(clip: ClipRow | null): MobileClipPayload {
     meta.audio_proxy_url ||
     null;
   const videoUrl = meta.video_url || meta.video || null;
+  const captionsUrl =
+    clip.captions_vtt_url ||
+    meta.captions_vtt_url ||
+    meta.subtitles_vtt_url ||
+    meta.transcript_vtt_url ||
+    null;
+  const captionsPreference =
+    meta.captions_auto_enabled ?? meta.captions_auto ?? meta.auto_captions;
+  const captionsAuto =
+    captionsPreference === undefined ? Boolean(captionsUrl) : Boolean(captionsPreference);
   return {
     id: clip.id,
     asset_id: clip.asset_id,
@@ -507,6 +517,8 @@ function buildClipPayload(clip: ClipRow | null): MobileClipPayload {
     speakers,
     audio_url: audioUrl,
     video_url: videoUrl,
+    captions_vtt_url: captionsUrl,
+    captions_auto_enabled: captionsAuto,
     context_prev_clip: clip.context_prev_clip,
     context_next_clip: clip.context_next_clip,
   };

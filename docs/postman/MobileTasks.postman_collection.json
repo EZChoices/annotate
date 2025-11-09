@@ -1,0 +1,99 @@
+{
+  "info": {
+    "name": "Dialect Data – Mobile Tasks",
+    "_postman_id": "1c2f8ea0-a000-4a9d-bc7a-remote",
+    "description": "Local/mock API flows for the mobile annotation client. Set `baseUrl` to your dev server (default http://localhost:3000).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Peek backlog",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/mobile/peek?cap=accent_tag",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "mobile", "peek"],
+          "query": [{ "key": "cap", "value": "accent_tag" }]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Claim bundle (mock)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/mobile/bundle?count=3",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "mobile", "bundle"],
+          "query": [{ "key": "count", "value": "3" }]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Submit task (mock)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Idempotency-Key", "value": "demo-key-123" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"task_id\": \"mock-task-1\",\n  \"assignment_id\": \"mock-assign-1\",\n  \"payload\": {\"approved\": true},\n  \"duration_ms\": 12000,\n  \"playback_ratio\": 0.92\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/mobile/tasks/submit",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "mobile", "tasks", "submit"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Remote config – list defaults",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/admin/remote-config?key=est_wait_seconds&key=bundle_size&key=captions_default",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "admin", "remote-config"],
+          "query": [
+            { "key": "key", "value": "est_wait_seconds" },
+            { "key": "key", "value": "bundle_size" },
+            { "key": "key", "value": "captions_default" }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Remote config – upsert key",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"key\": \"est_wait_seconds\",\n  \"value\": 25\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/admin/remote-config",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "admin", "remote-config"]
+        }
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    }
+  ]
+}

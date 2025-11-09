@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   MobileClaimResponse,
   TranslationCheckPayload,
@@ -18,6 +18,9 @@ import {
   PendingSubmission,
 } from "../../../../lib/mobile/idb";
 import { useMobileAuth } from "../../../../components/mobile/MobileAuthProvider";
+import { useTranslations } from "../../../../components/mobile/useTranslations";
+import { LocaleToggle } from "../../../../components/mobile/LocaleToggle";
+import { useRemoteConfigValue } from "../../../../components/mobile/useRemoteConfig";
 
 const STRUCTURED_TASK_TYPES = new Set([
   "translation_check",
@@ -26,6 +29,32 @@ const STRUCTURED_TASK_TYPES = new Set([
   "speaker_continuity",
   "gesture_tag",
 ]);
+
+const CONTEXT_WINDOW_LIMIT_SECONDS = 24;
+const CAPTIONS_STORAGE_KEY = "dd-mobile-captions";
+const INPUT_BASE_CLASS =
+  "w-full rounded-lg border border-slate-200 bg-white p-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
+const TEXTAREA_BASE_CLASS = `${INPUT_BASE_CLASS} min-h-[120px]`;
+
+function clampContextPayload(payload: any) {
+  if (!payload || typeof payload !== "object") return null;
+  const clone = JSON.parse(JSON.stringify(payload));
+  if (typeof clone.window_seconds === "number") {
+    clone.window_seconds = Math.min(
+      clone.window_seconds,
+      CONTEXT_WINDOW_LIMIT_SECONDS
+    );
+  }
+  const windowLabel = `+/- ${
+    clone.window_seconds ?? CONTEXT_WINDOW_LIMIT_SECONDS
+  }s`;
+  clone.window = windowLabel;
+  clone.window_label = windowLabel;
+  if ("mock" in clone) {
+    delete (clone as Record<string, unknown>).mock;
+  }
+  return clone;
+}
 
 export default function MobileTaskPage() {
   const router = useRouter();
@@ -42,6 +71,7 @@ export default function MobileTaskPage() {
   const [error, setError] = useState<string | null>(null);
   const [videoVisible, setVideoVisible] = useState(false);
   const [context, setContext] = useState<any | null>(null);
+  const [contextView, setContextView] = useState<"tree" | "json">("tree");
   const [hintOpen, setHintOpen] = useState(false);
   const [online, setOnline] = useState(
     typeof navigator === "undefined" ? true : navigator.onLine
@@ -50,6 +80,13 @@ export default function MobileTaskPage() {
   const [watchedSec, setWatchedSec] = useState(0);
   const [durationSec, setDurationSec] = useState(0);
   const { fetchWithAuth, session, status, mode } = useMobileAuth();
+  const t = useTranslations();
+  const captionsDefault = useRemoteConfigValue<boolean>(
+    "captions_default",
+    true
+  );
+  const [captionsEnabled, setCaptionsEnabled] = useState(true);
+  const [contextCopied, setContextCopied] = useState(false);
 
   useEffect(() => {
     loadCachedBundles().then((bundles) => {
@@ -82,6 +119,27 @@ export default function MobileTaskPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem(CAPTIONS_STORAGE_KEY);
+    const hasCaptions = Boolean(task?.clip.captions_vtt_url);
+    if (stored === "on" || stored === "off") {
+      setCaptionsEnabled(stored === "on" && hasCaptions);
+      return;
+    }
+    const autoEnabled =
+      hasCaptions &&
+      task?.clip.captions_auto_enabled !== false &&
+      captionsDefault !== false;
+    setCaptionsEnabled(autoEnabled);
+  }, [task?.clip.captions_vtt_url, task?.clip.captions_auto_enabled, captionsDefault]);
+
+  useEffect(() => {
+    if (context?.clip_id) {
+      setContextView("tree");
+    }
+  }, [context?.clip_id]);
+
   const nextPath =
     `/mobile/tasks/${taskId}` + (assignmentId ? `?assignment=${assignmentId}` : "");
   const loginHref = `/mobile/login?next=${encodeURIComponent(nextPath)}`;
@@ -90,7 +148,7 @@ export default function MobileTaskPage() {
     if (status === "loading") {
       return (
         <main className="p-6 text-center space-y-3">
-          <p className="text-sm text-slate-500">Checking session…</p>
+          <p className="text-sm text-slate-500">{t("checkingSession")}</p>
         </main>
       );
     }
@@ -98,15 +156,15 @@ export default function MobileTaskPage() {
     if (!session) {
       return (
         <main className="max-w-md mx-auto p-6 space-y-4 text-center">
-          <h1 className="text-2xl font-semibold">Sign in to keep working</h1>
+          <h1 className="text-2xl font-semibold">{t("sessionExpiredTitle")}</h1>
           <p className="text-sm text-slate-500">
-            Your session expired. Re-authenticate to resume this task.
+            {t("sessionExpiredDescription")}
           </p>
           <Link
             href={loginHref}
             className="inline-flex w-full justify-center rounded-lg bg-blue-600 py-3 font-semibold text-white"
           >
-            Go to OTP login
+            {t("goToOtp")}
           </Link>
         </main>
       );
@@ -134,13 +192,49 @@ export default function MobileTaskPage() {
     }
   };
 
+  const enforcePlaybackBounds = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const maxAllowed = Math.max(durationSec, 0);
+    if (audio.currentTime < 0) {
+      audio.currentTime = 0;
+    } else if (maxAllowed && audio.currentTime > maxAllowed) {
+      audio.currentTime = maxAllowed;
+    }
+  };
+
+  const toggleCaptions = () => {
+    if (!task?.clip.captions_vtt_url) return;
+    setCaptionsEnabled((prev) => {
+      const next = !prev;
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(CAPTIONS_STORAGE_KEY, next ? "on" : "off");
+      }
+      return next;
+    });
+  };
+
   const loadContext = async () => {
     if (!task) return;
     const response = await fetchWithAuth(
       `/api/mobile/context?clip_id=${task.clip.id}`
     );
     if (response.ok) {
-      setContext(await response.json());
+      const raw = await response.json();
+      setContext(clampContextPayload(raw));
+    }
+  };
+
+  const copyContext = async () => {
+    if (!context) return;
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        await navigator.clipboard.writeText(JSON.stringify(context, null, 2));
+        setContextCopied(true);
+        setTimeout(() => setContextCopied(false), 1500);
+      }
+    } catch {
+      setContextCopied(false);
     }
   };
 
@@ -156,12 +250,12 @@ export default function MobileTaskPage() {
         ? JSON.parse(payloadText)
         : {};
     } catch {
-      setError("Payload must be valid JSON");
+      setError(t("payloadInvalidJson"));
       setSubmitting(false);
       return;
     }
     if (!payloadData || Object.keys(payloadData).length === 0) {
-      setError("Payload is required");
+      setError(t("payloadRequired"));
       setSubmitting(false);
       return;
     }
@@ -187,11 +281,11 @@ export default function MobileTaskPage() {
       });
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.message || "Submit failed");
+        throw new Error(payload.message || t("submitFailed"));
       }
       router.push("/mobile");
     } catch (err: any) {
-      setError(err.message || "Submit failed. Queued offline.");
+      setError(err.message || t("submitQueuedOffline"));
       await queueSubmission({
         task_id: task.task_id,
         assignment_id: assignmentId,
@@ -224,7 +318,7 @@ export default function MobileTaskPage() {
       });
       router.push("/mobile");
     } catch (err: any) {
-      setError(err.message || "Skip failed");
+      setError(err.message || t("skipFailed"));
     } finally {
       setReleasing(false);
     }
@@ -233,35 +327,60 @@ export default function MobileTaskPage() {
   if (!task) {
     return (
       <main className="p-4 text-center text-sm text-slate-500">
-        Loading task…
+        {t("loadingTask")}
       </main>
     );
   }
 
+  const captionsUrl = task.clip.captions_vtt_url || null;
+  const captionsAvailable = Boolean(captionsUrl);
+  const captionsLabel = !captionsAvailable
+    ? t("captionsUnavailable")
+    : captionsEnabled
+    ? t("captionsOn")
+    : t("captionsOff");
+
   return (
     <main className="p-4 space-y-4">
-      <button
-        className="text-sm text-blue-600"
-        onClick={() => router.push("/mobile")}
-      >
-        ← Back to tasks
-      </button>
+      <div className="flex items-center justify-between">
+        <button
+          className="text-sm font-semibold text-blue-600 transition hover:text-blue-500"
+          onClick={() => router.push("/mobile")}
+        >
+          {t("backToTasks")}
+        </button>
+        <LocaleToggle />
+      </div>
 
-      <section className="bg-white p-4 rounded-2xl shadow space-y-3 border border-slate-200">
+      <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow dark:border-slate-700 dark:bg-slate-900">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-xs uppercase tracking-wide text-slate-500">
+            <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
               {task.task_type}
             </p>
-            <h2 className="text-lg font-semibold">Clip preview</h2>
+            <h2 className="text-lg font-semibold">{t("clipPreview")}</h2>
           </div>
-          <span
-            className={`text-xs font-semibold ${
-              online ? "text-green-600" : "text-amber-600"
-            }`}
-          >
-            {online ? "Online" : "Offline"}
-          </span>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                captionsEnabled && captionsAvailable
+                  ? "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200"
+                  : "bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+              } ${captionsAvailable ? "" : "opacity-50 cursor-not-allowed"}`}
+              onClick={toggleCaptions}
+              disabled={!captionsAvailable}
+            >
+              {captionsLabel}
+            </button>
+            <span
+              className={`text-xs font-semibold ${
+                online ? "text-green-600" : "text-amber-600"
+              }`}
+            >
+              {online ? t("statusOnline") : t("statusOffline")}
+            </span>
+          </div>
         </div>
         {task.clip.audio_url ? (
           <audio
@@ -270,9 +389,17 @@ export default function MobileTaskPage() {
             className="w-full"
             src={task.clip.audio_url}
             onTimeUpdate={onTimeUpdate}
-          />
+            onLoadedMetadata={onTimeUpdate}
+            onSeeking={enforcePlaybackBounds}
+          >
+            {captionsUrl && captionsEnabled ? (
+              <track kind="captions" src={captionsUrl} label="Captions" default />
+            ) : null}
+          </audio>
         ) : (
-          <p className="text-sm text-slate-500">Audio unavailable</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            {t("audioUnavailable")}
+          </p>
         )}
         {task.clip.video_url ? (
           task.task_type === "gesture_tag" ? (
@@ -281,46 +408,89 @@ export default function MobileTaskPage() {
                 onClick={() => setVideoVisible((prev) => !prev)}
                 className="text-sm text-blue-600"
               >
-                {videoVisible ? "Hide Video" : "Show Video"}
+                {videoVisible ? t("hideVideo") : t("showVideo")}
               </button>
               {videoVisible ? (
                 <video
                   controls
                   className="w-full rounded-lg"
                   src={task.clip.video_url}
-                />
+                  onSeeking={enforcePlaybackBounds}
+                  onLoadedMetadata={onTimeUpdate}
+                >
+                  {captionsUrl && captionsEnabled ? (
+                    <track kind="captions" src={captionsUrl} label="Captions" default />
+                  ) : null}
+                </video>
               ) : null}
             </>
           ) : (
             <p className="text-xs text-slate-500">
-              Video is limited to gesture reviews; audio-first playback enabled.
+              {t("videoGestureOnly")}
             </p>
           )
         ) : null}
         <p className="text-xs text-slate-500">
-          Watched {(watchedSec || 0).toFixed(1)}s · Playback ratio{" "}
-          {(playbackRatio * 100).toFixed(0)}%
+          {t("watchedLabel", {
+            seconds: (watchedSec || 0).toFixed(1),
+            ratio: (playbackRatio * 100).toFixed(0),
+          })}
         </p>
-        <button className="text-sm text-blue-600" onClick={loadContext}>
-          Load extended context
+        <button
+          className="text-sm font-semibold text-blue-600 transition hover:text-blue-500"
+          onClick={loadContext}
+        >
+          {t("loadContext")}
         </button>
         {context ? (
-          <div className="space-y-1">
-            <pre className="text-[11px] bg-slate-100 p-2 rounded">
-              {JSON.stringify(context, null, 2)}
-            </pre>
-            <p className="text-[10px] uppercase tracking-wide text-slate-500">
-              Context window {context.window ?? "±24s"}
-            </p>
+          <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/30">
+            <div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              <span>{t("contextTreeTitle")}</span>
+              <button
+                type="button"
+                className="font-semibold text-blue-600 transition hover:text-blue-500 dark:text-blue-300 dark:hover:text-blue-200"
+                onClick={() =>
+                  setContextView((prev) => (prev === "tree" ? "json" : "tree"))
+                }
+              >
+                {contextView === "tree"
+                  ? t("contextViewRaw")
+                  : t("contextViewStructured")}
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              <span>
+                {t("contextWindowLabel", {
+                  window: context.window ?? t("defaultContextWindow"),
+                })}
+              </span>
+              <span className="rounded-full bg-slate-200 px-2 py-0.5 font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-200">
+                {t("contextWatermark")}
+              </span>
+              <button
+                type="button"
+                onClick={copyContext}
+                className="rounded-full border border-slate-300 px-2 py-0.5 font-semibold text-blue-600 transition hover:bg-blue-50 dark:border-slate-600 dark:text-blue-200 dark:hover:bg-slate-800"
+              >
+                {contextCopied ? t("contextCopied") : t("contextCopy")}
+              </button>
+            </div>
+            {contextView === "tree" ? (
+              <ContextTree data={context} />
+            ) : (
+              <pre className="max-h-64 overflow-auto rounded bg-slate-900/80 p-2 text-[11px] text-slate-50 dark:bg-slate-950">
+                {JSON.stringify(context, null, 2)}
+              </pre>
+            )}
           </div>
         ) : null}
         {task.ai_suggestion ? (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-300/40 dark:bg-blue-500/10">
             <button
-              className="text-sm font-semibold text-blue-700"
+              className="text-sm font-semibold text-blue-700 dark:text-blue-300"
               onClick={() => setHintOpen((prev) => !prev)}
             >
-              {hintOpen ? "Hide AI hint" : "Show AI hint"}
+              {hintOpen ? t("hideAiHint") : t("showAiHint")}
             </button>
             {hintOpen ? (
               <pre className="text-xs text-slate-700 mt-2 whitespace-pre-wrap">
@@ -331,8 +501,8 @@ export default function MobileTaskPage() {
         ) : null}
       </section>
 
-      <section className="bg-white p-4 rounded-2xl shadow space-y-3 border border-slate-200">
-        <p className="font-semibold">Answer</p>
+      <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow dark:border-slate-700 dark:bg-slate-900">
+        <p className="font-semibold">{t("answerLabel")}</p>
         {isStructured && payloadObj ? (
           <StructuredForm
             taskType={task.task_type}
@@ -341,20 +511,22 @@ export default function MobileTaskPage() {
           />
         ) : (
           <textarea
-            className="w-full min-h-[200px] border rounded-lg p-2 font-mono text-sm"
+            className="w-full min-h-[200px] rounded-lg border border-slate-200 bg-white p-2 font-mono text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
             value={payloadText}
             onChange={(event) => setPayloadText(event.target.value)}
           />
         )}
-        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        {error ? (
+          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+        ) : null}
       </section>
 
       {!isStructured && (
-        <section className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-          <p className="text-xs uppercase tracking-wide text-slate-500">
-            Payload preview
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+          <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            {t("payloadPreviewLabel")}
           </p>
-          <pre className="text-[11px] bg-slate-50 mt-2 rounded-lg p-3 overflow-x-auto">
+          <pre className="mt-2 overflow-x-auto rounded-lg bg-slate-50 p-3 text-[11px] dark:bg-slate-800">
             {payloadText}
           </pre>
         </section>
@@ -372,6 +544,7 @@ function StructuredForm({
   payload: any;
   onChange: (value: any) => void;
 }) {
+  const t = useTranslations();
   const [newGesture, setNewGesture] = useState<{
     label: string;
     t: string;
@@ -381,29 +554,34 @@ function StructuredForm({
     const value = payload as TranslationCheckPayload;
     return (
       <div className="space-y-3">
-        <p className="text-sm font-medium">Is the translation correct?</p>
+        <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
+          {t("translationQuestion")}
+        </p>
         <div className="flex gap-3">
-          {["yes", "no"].map((option) => (
-            <button
-              key={option}
-              type="button"
-              onClick={() =>
-                onChange({ ...value, approved: option === "yes" })
-              }
-              className={`flex-1 border rounded-lg py-2 font-semibold ${
-                value.approved === (option === "yes")
-                  ? "border-blue-500 text-blue-600"
-                  : "border-slate-300"
-              }`}
-            >
-              {option === "yes" ? "Yes" : "No"}
-            </button>
-          ))}
+          {["yes", "no"].map((option) => {
+            const active = value.approved === (option === "yes");
+            return (
+              <button
+                key={option}
+                type="button"
+                onClick={() =>
+                  onChange({ ...value, approved: option === "yes" })
+                }
+                className={`flex-1 rounded-lg border py-2 font-semibold transition ${
+                  active
+                    ? "border-blue-500 text-blue-600 dark:border-blue-300 dark:text-blue-200"
+                    : "border-slate-300 text-slate-600 dark:border-slate-700 dark:text-slate-300"
+                }`}
+              >
+                {option === "yes" ? t("optionYes") : t("optionNo")}
+              </button>
+            );
+          })}
         </div>
         {!value.approved ? (
           <textarea
-            className="w-full border rounded-lg p-2 text-sm"
-            placeholder="Provide the corrected translation"
+            className={TEXTAREA_BASE_CLASS}
+            placeholder={t("correctedTranslationPlaceholder")}
             value={value.edit ?? ""}
             onChange={(event) =>
               onChange({ ...value, edit: event.target.value })
@@ -411,8 +589,8 @@ function StructuredForm({
           />
         ) : null}
         <textarea
-          className="w-full border rounded-lg p-2 text-sm"
-          placeholder="Notes (optional)"
+          className={TEXTAREA_BASE_CLASS}
+          placeholder={t("notesOptionalPlaceholder")}
           value={value.notes ?? ""}
           onChange={(event) =>
             onChange({ ...value, notes: event.target.value })
@@ -427,10 +605,15 @@ function StructuredForm({
     const options = ["American", "British", "Australian", "Indian", "Other"];
     return (
       <div className="space-y-3">
-        <p className="text-sm font-medium">Select the accent</p>
+        <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
+          {t("selectAccent")}
+        </p>
         <div className="flex flex-col gap-2">
           {options.map((option) => (
-            <label key={option} className="flex items-center gap-2 text-sm">
+            <label
+              key={option}
+              className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200"
+            >
               <input
                 type="radio"
                 checked={value.region === option}
@@ -442,8 +625,8 @@ function StructuredForm({
         </div>
         {value.region === "Other" ? (
           <input
-            className="w-full border rounded-lg p-2 text-sm"
-            placeholder="Describe the accent"
+            className={INPUT_BASE_CLASS}
+            placeholder={t("describeAccentPlaceholder")}
             value={value.country ?? ""}
             onChange={(event) =>
               onChange({ ...value, country: event.target.value })
@@ -451,8 +634,11 @@ function StructuredForm({
           />
         ) : null}
         <div className="flex flex-col gap-2">
-          <label className="text-sm font-medium">Confidence</label>
+          <label className="text-sm font-medium text-slate-800 dark:text-slate-100">
+            {t("confidenceLabel")}
+          </label>
           <input
+            className="w-full accent-blue-600 dark:accent-blue-400"
             type="range"
             min={0}
             max={1}
@@ -475,10 +661,15 @@ function StructuredForm({
     const options = ["Happy", "Neutral", "Angry", "Sad", "Surprised", "Other"];
     return (
       <div className="space-y-3">
-        <p className="text-sm font-medium">Select the emotion</p>
+        <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
+          {t("selectEmotion")}
+        </p>
         <div className="flex flex-col gap-2">
           {options.map((option) => (
-            <label key={option} className="flex items-center gap-2 text-sm">
+            <label
+              key={option}
+              className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200"
+            >
               <input
                 type="radio"
                 checked={value.emotion_primary === option}
@@ -495,8 +686,8 @@ function StructuredForm({
         </div>
         {value.emotion_primary === "Other" ? (
           <input
-            className="w-full border rounded-lg p-2 text-sm"
-            placeholder="Describe the emotion"
+            className={INPUT_BASE_CLASS}
+            placeholder={t("describeEmotionPlaceholder")}
             value={value.secondary?.[0] ?? ""}
             onChange={(event) =>
               onChange({
@@ -507,8 +698,11 @@ function StructuredForm({
           />
         ) : null}
         <div className="flex flex-col gap-2">
-          <label className="text-sm font-medium">Confidence</label>
+          <label className="text-sm font-medium text-slate-800 dark:text-slate-100">
+            {t("confidenceLabel")}
+          </label>
           <input
+            className="w-full accent-blue-600 dark:accent-blue-400"
             type="range"
             min={0}
             max={1}
@@ -531,24 +725,27 @@ function StructuredForm({
     return (
       <div className="space-y-3">
         <input
-          className="w-full border rounded-lg p-2 text-sm"
-          placeholder="Current speaker label (e.g., A)"
+          className={INPUT_BASE_CLASS}
+          placeholder={t("speakerLabelPlaceholder")}
           value={value.speaker ?? ""}
           onChange={(event) =>
             onChange({ ...value, speaker: event.target.value })
           }
         />
         <input
-          className="w-full border rounded-lg p-2 text-sm"
-          placeholder="Same as clip ID (optional)"
+          className={INPUT_BASE_CLASS}
+          placeholder={t("sameAsClipPlaceholder")}
           value={value.same_as_clip ?? ""}
           onChange={(event) =>
             onChange({ ...value, same_as_clip: event.target.value })
           }
         />
         <div className="flex flex-col gap-2">
-          <label className="text-sm font-medium">Confidence</label>
+          <label className="text-sm font-medium text-slate-800 dark:text-slate-100">
+            {t("confidenceLabel")}
+          </label>
           <input
+            className="w-full accent-blue-600 dark:accent-blue-400"
             type="range"
             min={0}
             max={1}
@@ -563,8 +760,8 @@ function StructuredForm({
           />
         </div>
         <textarea
-          className="w-full border rounded-lg p-2 text-sm"
-          placeholder="Notes (optional)"
+          className={INPUT_BASE_CLASS}
+          placeholder={t("notesOptionalPlaceholder")}
           value={value.notes ?? ""}
           onChange={(event) =>
             onChange({ ...value, notes: event.target.value })
@@ -583,17 +780,19 @@ function StructuredForm({
     return (
       <div className="space-y-4">
         <div className="space-y-2">
-          <p className="text-sm font-medium">Gestures</p>
+          <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
+            {t("gesturesLabel")}
+          </p>
           {events.length === 0 ? (
-            <p className="text-xs text-slate-500">
-              No gesture events recorded yet.
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {t("gesturesEmpty")}
             </p>
           ) : (
             <ul className="space-y-2">
               {events.map((event, idx) => (
                 <li
                   key={`${event.label}-${event.t}-${idx}`}
-                  className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700"
                 >
                   <span>
                     <span className="font-semibold">{event.label}</span> at{" "}
@@ -601,31 +800,33 @@ function StructuredForm({
                   </span>
                   <button
                     type="button"
-                    className="text-red-600 text-xs"
+                    className="text-xs text-red-600 dark:text-red-400"
                     onClick={() =>
                       updateEvents(events.filter((_, i) => i !== idx))
                     }
                   >
-                    Remove
+                    {t("removeAction")}
                   </button>
                 </li>
               ))}
             </ul>
           )}
         </div>
-        <div className="rounded-lg border border-slate-200 p-3 space-y-2">
-          <p className="text-sm font-medium">Add gesture</p>
+        <div className="space-y-2 rounded-lg border border-slate-200 p-3 dark:border-slate-700 dark:bg-slate-950/40">
+          <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
+            {t("addGestureLabel")}
+          </p>
           <input
-            className="w-full border rounded-lg p-2 text-sm"
-            placeholder="Label (e.g., head nod)"
+            className={INPUT_BASE_CLASS}
+            placeholder={t("gestureLabelPlaceholder")}
             value={newGesture.label}
             onChange={(event) =>
               setNewGesture((prev) => ({ ...prev, label: event.target.value }))
             }
           />
           <input
-            className="w-full border rounded-lg p-2 text-sm"
-            placeholder="Timestamp ms"
+            className={INPUT_BASE_CLASS}
+            placeholder={t("timestampPlaceholder")}
             value={newGesture.t}
             onChange={(event) =>
               setNewGesture((prev) => ({ ...prev, t: event.target.value }))
@@ -633,7 +834,7 @@ function StructuredForm({
           />
           <button
             type="button"
-            className="w-full bg-slate-800 text-white rounded-lg py-2 text-sm font-semibold disabled:opacity-60"
+            className="w-full rounded-lg bg-slate-800 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
             disabled={!newGesture.label}
             onClick={() => {
               const timestamp = Number.parseInt(newGesture.t || "0", 10) || 0;
@@ -644,7 +845,7 @@ function StructuredForm({
               setNewGesture({ label: "", t: "" });
             }}
           >
-            Add
+            {t("addAction")}
           </button>
         </div>
       </div>
@@ -653,7 +854,7 @@ function StructuredForm({
 
   return (
     <textarea
-      className="w-full min-h-[200px] border rounded-lg p-2 font-mono text-sm"
+      className={`${TEXTAREA_BASE_CLASS} font-mono`}
       value={JSON.stringify(payload, null, 2)}
       readOnly
     />
@@ -701,24 +902,155 @@ function TaskActionBar({
   releasing: boolean;
   submitting: boolean;
 }) {
+  const t = useTranslations();
+  const triggerHaptic = useCallback(() => {
+    if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+      navigator.vibrate(20);
+    }
+  }, []);
+
+  const handleSkip = () => {
+    triggerHaptic();
+    onSkip();
+  };
+
+  const handleSubmit = () => {
+    triggerHaptic();
+    onSubmit();
+  };
+
   return (
-    <div className="fixed inset-x-0 bottom-0 z-30 bg-white/95 px-4 py-3 pb-5 shadow-[0_-4px_24px_rgba(15,23,42,0.18)]">
+    <div className="fixed inset-x-0 bottom-0 z-30 bg-white/95 px-4 py-3 pb-5 shadow-[0_-4px_24px_rgba(15,23,42,0.18)] dark:bg-slate-950/95">
       <div className="mx-auto flex max-w-md gap-3">
         <button
-          onClick={onSkip}
+          onClick={handleSkip}
           disabled={releasing || submitting}
-          className="flex-1 rounded-lg bg-slate-200 py-3 font-semibold text-slate-800 disabled:opacity-60"
+          className="flex-1 rounded-lg bg-slate-200 py-3 font-semibold text-slate-800 transition hover:bg-slate-300 disabled:opacity-60 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
         >
-          {releasing ? "Skipping…" : "Skip"}
+          {releasing ? t("skippingState") : t("skipAction")}
         </button>
         <button
-          onClick={onSubmit}
+          onClick={handleSubmit}
           disabled={submitting}
-          className="flex-1 rounded-lg bg-blue-600 py-3 font-semibold text-white disabled:opacity-60"
+          className="flex-1 rounded-lg bg-blue-600 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:opacity-60 dark:bg-blue-500 dark:hover:bg-blue-400"
         >
-          {submitting ? "Submitting…" : "Submit"}
+          {submitting ? t("submittingState") : t("submitAction")}
         </button>
       </div>
     </div>
   );
 }
+
+function ContextTree({ data }: { data: any }) {
+  if (data === null || data === undefined) {
+    return <p className="text-sm text-slate-500 dark:text-slate-400">-</p>;
+  }
+  if (typeof data !== "object") {
+    return (
+      <p className="break-words text-sm text-slate-700 dark:text-slate-200">
+        {String(data)}
+      </p>
+    );
+  }
+  const entries = Array.isArray(data)
+    ? data.map((value, index) => ({ key: `[${index}]`, value }))
+    : Object.entries(data);
+  return (
+    <ul className="space-y-2 border-l border-slate-200 pl-3 text-sm dark:border-slate-700">
+      {entries.map(({ key, value }) => (
+        <ContextTreeNode key={key} label={String(key)} value={value} depth={0} />
+      ))}
+    </ul>
+  );
+}
+
+function ContextTreeNode({
+  label,
+  value,
+  depth,
+}: {
+  label: string;
+  value: any;
+  depth: number;
+}) {
+  const isLeaf = value === null || typeof value !== "object";
+  const [open, setOpen] = useState(depth < 1);
+  if (isLeaf) {
+    return (
+      <li className="space-y-0.5">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          {label}
+        </p>
+        <p className="break-words text-sm text-slate-700 dark:text-slate-200">
+          {String(value)}
+        </p>
+      </li>
+    );
+  }
+
+  const entries = Array.isArray(value)
+    ? value.map((child, index) => ({
+        key: `[${index}]`,
+        child,
+      }))
+    : Object.entries(value).map(([childKey, child]) => ({
+        key: childKey,
+        child,
+      }));
+
+  return (
+    <li className="space-y-1">
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className="flex w-full items-center justify-between rounded-md bg-white px-2 py-1 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-600 shadow-sm transition hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+      >
+        <span>{label}</span>
+        <span className="text-xs font-bold">{open ? "-" : "+"}</span>
+      </button>
+      {open ? (
+        <ul className="space-y-1 border-l border-dashed border-slate-200 pl-3 dark:border-slate-700">
+          {entries.map(({ key, child }) => (
+            <ContextTreeNode
+              key={`${label}-${key}-${depth}`}
+              label={String(key)}
+              value={child}
+              depth={depth + 1}
+            />
+          ))}
+        </ul>
+      ) : null}
+    </li>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

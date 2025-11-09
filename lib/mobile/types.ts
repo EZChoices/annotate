@@ -113,6 +113,8 @@ export interface MobileClipPayload {
   speakers: string[];
   audio_url: string;
   video_url?: string | null;
+  captions_vtt_url?: string | null;
+  captions_auto_enabled?: boolean;
   context_prev_clip?: string | null;
   context_next_clip?: string | null;
 }

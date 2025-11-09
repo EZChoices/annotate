@@ -115,3 +115,9 @@ export async function clearPendingSubmission(idempotencyKey: string) {
     store.delete(idempotencyKey);
   });
 }
+
+export async function clearAllPendingSubmissions() {
+  await runTransaction(STORE_SUBMISSIONS, "readwrite", (store) => {
+    store.clear();
+  });
+}

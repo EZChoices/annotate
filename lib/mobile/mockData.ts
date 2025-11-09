@@ -28,6 +28,9 @@ const MOCK_CLIPS: Array<{
         "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
       video_url:
         "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+      captions_vtt_url:
+        "https://gist.githubusercontent.com/raw/cc0-example/flower-en.vtt",
+      captions_auto_enabled: true,
       context_prev_clip: null,
       context_next_clip: null,
     },
@@ -41,7 +44,7 @@ const MOCK_CLIPS: Array<{
         "مرحبا! شكرا للمشاركة. نحتاج فقط إلى بعض المعلومات الإضافية منك.",
       translation:
         "Hello! Thanks for taking part. We just need a little more information from you.",
-      window: "±24s",
+      window: "+/- 24s",
     },
   },
   {
@@ -56,6 +59,9 @@ const MOCK_CLIPS: Array<{
         "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3",
       video_url:
         "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.webm",
+      captions_vtt_url:
+        "https://gist.githubusercontent.com/raw/cc0-example/flower-ar.vtt",
+      captions_auto_enabled: true,
       context_prev_clip: null,
       context_next_clip: null,
     },
@@ -68,7 +74,7 @@ const MOCK_CLIPS: Array<{
     context: {
       summary:
         "Speaker reminisces about a family celebration and sounds upbeat.",
-      window: "±24s",
+      window: "+/- 24s",
     },
   },
   {
@@ -82,6 +88,9 @@ const MOCK_CLIPS: Array<{
       audio_url:
         "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3",
       video_url: null,
+      captions_vtt_url:
+        "https://gist.githubusercontent.com/raw/cc0-example/flower-cc.vtt",
+      captions_auto_enabled: true,
       context_prev_clip: null,
       context_next_clip: null,
     },
@@ -96,7 +105,7 @@ const MOCK_CLIPS: Array<{
         { speaker: "A", from: 0, to: 6000 },
         { speaker: "B", from: 6000, to: 12000 },
       ],
-      window: "±24s",
+      window: "+/- 24s",
     },
   },
 ];
