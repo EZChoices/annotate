@@ -35,6 +35,12 @@ const CAPTIONS_STORAGE_KEY = "dd-mobile-captions";
 const INPUT_BASE_CLASS =
   "w-full rounded-lg border border-slate-200 bg-white p-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
 const TEXTAREA_BASE_CLASS = `${INPUT_BASE_CLASS} min-h-[120px]`;
+const OPTION_BASE_CLASS =
+  "relative flex flex-col gap-1 rounded-2xl border-2 px-3 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:ring-offset-slate-950";
+const OPTION_ACTIVE_CLASS =
+  "border-blue-600 bg-blue-50 text-blue-700 shadow-[0_15px_45px_rgba(37,99,235,0.15)] dark:border-blue-400 dark:bg-blue-500/20 dark:text-blue-100";
+const OPTION_INACTIVE_CLASS =
+  "border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:text-slate-200 dark:hover:border-slate-500";
 
 function clampContextPayload(payload: any) {
   if (!payload || typeof payload !== "object") return null;
@@ -66,10 +72,13 @@ export default function MobileTaskPage() {
   const [task, setTask] = useState<MobileClaimResponse | null>(null);
   const [payloadObj, setPayloadObj] = useState<any | null>(null);
   const [payloadText, setPayloadText] = useState<string>("{}");
+  const [clipProgress, setClipProgress] = useState<{ current: number; total: number }>({
+    current: 0,
+    total: 0,
+  });
   const [submitting, setSubmitting] = useState(false);
   const [releasing, setReleasing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [videoVisible, setVideoVisible] = useState(false);
   const [context, setContext] = useState<any | null>(null);
   const [contextView, setContextView] = useState<"tree" | "json">("tree");
   const [hintOpen, setHintOpen] = useState(false);
@@ -77,6 +86,8 @@ export default function MobileTaskPage() {
     typeof navigator === "undefined" ? true : navigator.onLine
   );
   const audioRef = useRef<HTMLAudioElement>(null);
+  const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [watchedSec, setWatchedSec] = useState(0);
   const [durationSec, setDurationSec] = useState(0);
   const { fetchWithAuth, session, status, mode } = useMobileAuth();
@@ -90,21 +101,26 @@ export default function MobileTaskPage() {
 
   useEffect(() => {
     loadCachedBundles().then((bundles) => {
-      const found = bundles
-        .flatMap((bundle) => bundle.tasks)
-        .find((t) => t.task_id === taskId);
-      if (found) {
-        setTask(found);
-        const initialPayload = defaultPayload(found.task_type);
-        setPayloadObj(initialPayload);
-        setPayloadText(JSON.stringify(initialPayload, null, 2));
-        setDurationSec(
-          Math.max(
-            1,
-            Math.round((found.clip.end_ms - found.clip.start_ms) / 1000)
-          )
-        );
+      const flattened = bundles.flatMap((bundle) => bundle.tasks);
+      const foundIndex = flattened.findIndex((t) => t.task_id === taskId);
+      if (foundIndex === -1) {
+        return;
       }
+      const found = flattened[foundIndex];
+      setClipProgress({
+        current: foundIndex + 1,
+        total: flattened.length,
+      });
+      setTask(found);
+      const initialPayload = defaultPayload(found.task_type);
+      setPayloadObj(initialPayload);
+      setPayloadText(JSON.stringify(initialPayload, null, 2));
+      setDurationSec(
+        Math.max(
+          1,
+          Math.round((found.clip.end_ms - found.clip.start_ms) / 1000)
+        )
+      );
     });
   }, [taskId]);
 
@@ -116,6 +132,14 @@ export default function MobileTaskPage() {
     return () => {
       window.removeEventListener("online", handler);
       window.removeEventListener("offline", handler);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (successTimeoutRef.current) {
+        clearTimeout(successTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -182,6 +206,23 @@ export default function MobileTaskPage() {
     if (!durationSec) return 0;
     return Math.min(1, watchedSec / durationSec);
   }, [watchedSec, durationSec]);
+  const clipProgressDots = useMemo(() => {
+    if (!clipProgress.total) return [];
+    const dots = Math.min(8, clipProgress.total);
+    if (!dots) return [];
+    const active = Math.max(
+      1,
+      Math.round((clipProgress.current / clipProgress.total) * dots)
+    );
+    return Array.from({ length: dots }, (_, index) => index < active);
+  }, [clipProgress]);
+  const clipProgressPercent = useMemo(() => {
+    if (!clipProgress.total) return 0;
+    return Math.min(
+      100,
+      Math.max(0, Math.round((clipProgress.current / clipProgress.total) * 100))
+    );
+  }, [clipProgress]);
 
   const onTimeUpdate = () => {
     const audio = audioRef.current;
@@ -213,6 +254,16 @@ export default function MobileTaskPage() {
       return next;
     });
   };
+  const goHomeWithToast = useCallback(() => {
+    if (successTimeoutRef.current) {
+      clearTimeout(successTimeoutRef.current);
+    }
+    setSuccessMessage(t("submitSuccessToast"));
+    successTimeoutRef.current = setTimeout(() => {
+      setSuccessMessage(null);
+      router.push("/mobile");
+    }, 700);
+  }, [router, t]);
 
   const loadContext = async () => {
     if (!task) return;
@@ -238,7 +289,7 @@ export default function MobileTaskPage() {
     }
   };
 
-  const submit = async () => {
+  const submitTask = async () => {
     if (!task || !assignmentId) return;
     setSubmitting(true);
     setError(null);
@@ -283,7 +334,8 @@ export default function MobileTaskPage() {
         const payload = await response.json().catch(() => ({}));
         throw new Error(payload.message || t("submitFailed"));
       }
-      router.push("/mobile");
+      goHomeWithToast();
+      return;
     } catch (err: any) {
       setError(err.message || t("submitQueuedOffline"));
       await queueSubmission({
@@ -339,170 +391,203 @@ export default function MobileTaskPage() {
     : captionsEnabled
     ? t("captionsOn")
     : t("captionsOff");
+  const clipDurationLabel = formatDuration(
+    task.clip.end_ms - task.clip.start_ms
+  );
+  const leaseTimeLabel = new Date(task.lease_expires_at).toLocaleTimeString(
+    [],
+    {
+      hour: "2-digit",
+      minute: "2-digit",
+    }
+  );
+  const hasProgress = clipProgress.total > 0;
+  const clipProgressLabelText = hasProgress
+    ? t("clipProgressLabel", {
+        current: clipProgress.current,
+        total: clipProgress.total,
+      })
+    : "";
 
   return (
-    <main className="p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <button
-          className="text-sm font-semibold text-blue-600 transition hover:text-blue-500"
-          onClick={() => router.push("/mobile")}
-        >
-          {t("backToTasks")}
-        </button>
-        <LocaleToggle />
-      </div>
-
-      <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow dark:border-slate-700 dark:bg-slate-900">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              {task.task_type}
-            </p>
-            <h2 className="text-lg font-semibold">{t("clipPreview")}</h2>
+    <div className="relative min-h-screen bg-gradient-to-b from-white via-slate-50 to-slate-200 px-4 py-4 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950">
+      {successMessage ? (
+        <div className="pointer-events-none fixed inset-x-0 top-4 z-40 flex justify-center px-4">
+          <div className="inline-flex items-center gap-2 rounded-full bg-emerald-600/95 px-4 py-2 text-sm font-semibold text-white shadow-xl dark:bg-emerald-500/90">
+            <span aria-hidden="true">✓</span>
+            {successMessage}
           </div>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                captionsEnabled && captionsAvailable
-                  ? "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200"
-                  : "bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-              } ${captionsAvailable ? "" : "opacity-50 cursor-not-allowed"}`}
-              onClick={toggleCaptions}
-              disabled={!captionsAvailable}
-            >
-              {captionsLabel}
-            </button>
+        </div>
+      ) : null}
+      <main className="mx-auto flex w-full max-w-sm flex-col gap-5 pb-32">
+        <header className="flex items-center justify-between">
+          <button
+            className="inline-flex items-center gap-2 text-sm font-semibold text-slate-500 transition hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
+            onClick={() => router.push("/mobile")}
+          >
+            <span aria-hidden="true">←</span>
+            {t("backToTasks")}
+          </button>
+          <LocaleToggle />
+        </header>
+
+        {hasProgress ? (
+          <section className="rounded-3xl bg-white/90 p-4 text-xs font-semibold text-slate-500 shadow ring-1 ring-slate-100 dark:bg-slate-900/80 dark:text-slate-300 dark:ring-slate-800">
+            <div className="flex items-center justify-between">
+              <span>{clipProgressLabelText}</span>
+              <span>{clipProgressPercent}%</span>
+            </div>
+            <div className="mt-3 flex gap-1" aria-hidden="true">
+              {clipProgressDots.map((active, index) => (
+                <span
+                  key={`progress-dot-${index}`}
+                  className={`h-1.5 flex-1 rounded-full ${
+                    active
+                      ? "bg-blue-600 dark:bg-blue-400"
+                      : "bg-slate-200 dark:bg-slate-700"
+                  }`}
+                />
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        <section className="space-y-4 rounded-3xl bg-white/95 p-4 shadow-xl ring-1 ring-slate-100 dark:bg-slate-900/90 dark:ring-slate-800">
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
+              {getFriendlyTitle(task.task_type)}
+            </p>
+            <h2 className="text-2xl font-semibold text-slate-900 dark:text-white">
+              {t("clipPreview")}
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {clipDurationLabel} • {t("leaseLabel", { time: leaseTimeLabel })}
+            </p>
+          </div>
+
+          <div className="relative overflow-hidden rounded-2xl bg-slate-900 text-white shadow-lg">
+            <div className="aspect-video bg-black/40">
+              {task.clip.video_url ? (
+                <video
+                  controls
+                  className="h-full w-full object-cover"
+                  src={task.clip.video_url ?? task.clip.audio_url ?? ""}
+                  onSeeking={enforcePlaybackBounds}
+                  onLoadedMetadata={onTimeUpdate}
+                />
+              ) : (
+                <audio
+                  ref={audioRef}
+                  controls
+                  className="w-full bg-slate-900 p-4"
+                  src={task.clip.audio_url}
+                  onTimeUpdate={onTimeUpdate}
+                  onLoadedMetadata={onTimeUpdate}
+                  onSeeking={enforcePlaybackBounds}
+                />
+              )}
+            </div>
+            <div className="absolute bottom-3 left-3 flex items-center gap-2 rounded-full bg-black/50 px-3 py-1 text-xs font-semibold">
+              <span>00:{Math.max(0, Math.round(watchedSec)).toString().padStart(2, "0")}</span>
+              <span className="opacity-60">/</span>
+              <span>{durationSec.toString().padStart(2, "0")}s</span>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
             <span
-              className={`text-xs font-semibold ${
-                online ? "text-green-600" : "text-amber-600"
+              className={`rounded-full px-3 py-1 ${
+                online
+                  ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200"
+                  : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-200"
               }`}
             >
               {online ? t("statusOnline") : t("statusOffline")}
             </span>
-          </div>
-        </div>
-        {task.clip.audio_url ? (
-          <audio
-            ref={audioRef}
-            controls
-            className="w-full"
-            src={task.clip.audio_url}
-            onTimeUpdate={onTimeUpdate}
-            onLoadedMetadata={onTimeUpdate}
-            onSeeking={enforcePlaybackBounds}
-          >
-            {captionsUrl && captionsEnabled ? (
-              <track kind="captions" src={captionsUrl} label="Captions" default />
-            ) : null}
-          </audio>
-        ) : (
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            {t("audioUnavailable")}
-          </p>
-        )}
-        {task.clip.video_url ? (
-          task.task_type === "gesture_tag" ? (
-            <>
-              <button
-                onClick={() => setVideoVisible((prev) => !prev)}
-                className="text-sm text-blue-600"
-              >
-                {videoVisible ? t("hideVideo") : t("showVideo")}
-              </button>
-              {videoVisible ? (
-                <video
-                  controls
-                  className="w-full rounded-lg"
-                  src={task.clip.video_url}
-                  onSeeking={enforcePlaybackBounds}
-                  onLoadedMetadata={onTimeUpdate}
-                >
-                  {captionsUrl && captionsEnabled ? (
-                    <track kind="captions" src={captionsUrl} label="Captions" default />
-                  ) : null}
-                </video>
-              ) : null}
-            </>
-          ) : (
-            <p className="text-xs text-slate-500">
-              {t("videoGestureOnly")}
-            </p>
-          )
-        ) : null}
-        <p className="text-xs text-slate-500">
-          {t("watchedLabel", {
-            seconds: (watchedSec || 0).toFixed(1),
-            ratio: (playbackRatio * 100).toFixed(0),
-          })}
-        </p>
-        <button
-          className="text-sm font-semibold text-blue-600 transition hover:text-blue-500"
-          onClick={loadContext}
-        >
-          {t("loadContext")}
-        </button>
-        {context ? (
-          <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/30">
-            <div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              <span>{t("contextTreeTitle")}</span>
-              <button
-                type="button"
-                className="font-semibold text-blue-600 transition hover:text-blue-500 dark:text-blue-300 dark:hover:text-blue-200"
-                onClick={() =>
-                  setContextView((prev) => (prev === "tree" ? "json" : "tree"))
-                }
-              >
-                {contextView === "tree"
-                  ? t("contextViewRaw")
-                  : t("contextViewStructured")}
-              </button>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              <span>
-                {t("contextWindowLabel", {
-                  window: context.window ?? t("defaultContextWindow"),
-                })}
-              </span>
-              <span className="rounded-full bg-slate-200 px-2 py-0.5 font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-200">
-                {t("contextWatermark")}
-              </span>
-              <button
-                type="button"
-                onClick={copyContext}
-                className="rounded-full border border-slate-300 px-2 py-0.5 font-semibold text-blue-600 transition hover:bg-blue-50 dark:border-slate-600 dark:text-blue-200 dark:hover:bg-slate-800"
-              >
-                {contextCopied ? t("contextCopied") : t("contextCopy")}
-              </button>
-            </div>
-            {contextView === "tree" ? (
-              <ContextTree data={context} />
-            ) : (
-              <pre className="max-h-64 overflow-auto rounded bg-slate-900/80 p-2 text-[11px] text-slate-50 dark:bg-slate-950">
-                {JSON.stringify(context, null, 2)}
-              </pre>
-            )}
-          </div>
-        ) : null}
-        {task.ai_suggestion ? (
-          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-300/40 dark:bg-blue-500/10">
             <button
-              className="text-sm font-semibold text-blue-700 dark:text-blue-300"
-              onClick={() => setHintOpen((prev) => !prev)}
+              type="button"
+              onClick={toggleCaptions}
+              disabled={!captionsAvailable}
+              className={`rounded-full px-3 py-1 ${
+                captionsEnabled && captionsAvailable
+                  ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-200"
+                  : "bg-slate-200 text-slate-500 dark:bg-slate-800/70 dark:text-slate-400"
+              }`}
             >
-              {hintOpen ? t("hideAiHint") : t("showAiHint")}
+              {captionsLabel}
             </button>
-            {hintOpen ? (
-              <pre className="text-xs text-slate-700 mt-2 whitespace-pre-wrap">
-                {JSON.stringify(task.ai_suggestion, null, 2)}
-              </pre>
-            ) : null}
+            <button
+              onClick={loadContext}
+              className="rounded-full border border-slate-200 px-3 py-1 text-slate-600 transition hover:border-slate-300 hover:text-slate-900 dark:border-slate-700 dark:text-slate-200 dark:hover:border-slate-500 dark:hover:text-white"
+            >
+              {t("loadContext")}
+            </button>
           </div>
-        ) : null}
-      </section>
 
-      <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow dark:border-slate-700 dark:bg-slate-900">
-        <p className="font-semibold">{t("answerLabel")}</p>
+          {context ? (
+            <div className="space-y-3 rounded-2xl bg-slate-100/80 p-3 dark:bg-slate-800/40">
+              <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-300">
+                <span>{t("contextTreeTitle")}</span>
+                <button
+                  type="button"
+                  className="text-blue-600 transition hover:text-blue-500 dark:text-blue-300 dark:hover:text-blue-200"
+                  onClick={() =>
+                    setContextView((prev) => (prev === "tree" ? "json" : "tree"))
+                  }
+                >
+                  {contextView === "tree"
+                    ? t("contextViewRaw")
+                    : t("contextViewStructured")}
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                <span>
+                  {t("contextWindowLabel", {
+                    window: context.window ?? t("defaultContextWindow"),
+                  })}
+                </span>
+                <span className="rounded-full bg-white px-2 py-0.5 text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                  {t("contextWatermark")}
+                </span>
+                <button
+                  type="button"
+                  onClick={copyContext}
+                  className="rounded-full border border-slate-300 px-2 py-0.5 text-blue-600 transition hover:bg-blue-50 dark:border-slate-600 dark:text-blue-200 dark:hover:bg-slate-900"
+                >
+                  {contextCopied ? t("contextCopied") : t("contextCopy")}
+                </button>
+              </div>
+              {contextView === "tree" ? (
+                <ContextTree data={context} />
+              ) : (
+                <pre className="max-h-48 overflow-auto rounded-xl bg-slate-900/80 p-2 text-[11px] text-slate-50 dark:bg-slate-950">
+                  {JSON.stringify(context, null, 2)}
+                </pre>
+              )}
+            </div>
+          ) : null}
+
+          {task.ai_suggestion ? (
+            <div className="rounded-2xl border border-blue-100 bg-blue-50/80 p-3 dark:border-blue-400/40 dark:bg-blue-500/10">
+              <button
+                className="text-sm font-semibold text-blue-700 dark:text-blue-300"
+                onClick={() => setHintOpen((prev) => !prev)}
+              >
+                {hintOpen ? t("hideAiHint") : t("showAiHint")}
+              </button>
+              {hintOpen ? (
+                <pre className="mt-2 text-xs text-blue-900 dark:text-blue-100">
+                  {JSON.stringify(task.ai_suggestion, null, 2)}
+                </pre>
+              ) : null}
+            </div>
+          ) : null}
+        </section>
+
+        <section className="space-y-4 rounded-3xl bg-white/95 p-4 shadow-xl ring-1 ring-slate-100 dark:bg-slate-900/80 dark:ring-slate-800">
+        <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          {t("answerLabel")}
+        </p>
         {isStructured && payloadObj ? (
           <StructuredForm
             taskType={task.task_type}
@@ -511,27 +596,34 @@ export default function MobileTaskPage() {
           />
         ) : (
           <textarea
-            className="w-full min-h-[200px] rounded-lg border border-slate-200 bg-white p-2 font-mono text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+            className="w-full min-h-[200px] rounded-2xl border border-slate-200 bg-slate-50/80 p-3 font-mono text-sm text-slate-900 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-100 dark:focus:border-blue-500 dark:focus:ring-blue-500/30"
             value={payloadText}
             onChange={(event) => setPayloadText(event.target.value)}
           />
         )}
         {error ? (
-          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+          <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>
         ) : null}
       </section>
 
-      {!isStructured && (
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-          <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            {t("payloadPreviewLabel")}
-          </p>
-          <pre className="mt-2 overflow-x-auto rounded-lg bg-slate-50 p-3 text-[11px] dark:bg-slate-800">
-            {payloadText}
-          </pre>
-        </section>
-      )}
-    </main>
+        {!isStructured && (
+          <section className="rounded-3xl bg-white/95 p-4 shadow ring-1 ring-slate-100 dark:bg-slate-900/80 dark:ring-slate-800">
+            <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              {t("payloadPreviewLabel")}
+            </p>
+            <pre className="mt-2 max-h-56 overflow-x-auto rounded-2xl bg-slate-900/80 p-3 text-[11px] text-slate-50 dark:bg-slate-950">
+              {payloadText}
+            </pre>
+          </section>
+        )}
+      </main>
+      <TaskActionBar
+        onSkip={skipTask}
+        onSubmit={submitTask}
+        releasing={releasing}
+        submitting={submitting}
+      />
+    </div>
   );
 }
 
@@ -553,28 +645,21 @@ function StructuredForm({
   if (taskType === "translation_check") {
     const value = payload as TranslationCheckPayload;
     return (
-      <div className="space-y-3">
-        <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
+      <div className="space-y-4">
+        <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
           {t("translationQuestion")}
         </p>
-        <div className="flex gap-3">
+        <div className="grid grid-cols-2 gap-2">
           {["yes", "no"].map((option) => {
-            const active = value.approved === (option === "yes");
+            const approved = option === "yes";
+            const active = value.approved === approved;
             return (
-              <button
+              <OptionButton
                 key={option}
-                type="button"
-                onClick={() =>
-                  onChange({ ...value, approved: option === "yes" })
-                }
-                className={`flex-1 rounded-lg border py-2 font-semibold transition ${
-                  active
-                    ? "border-blue-500 text-blue-600 dark:border-blue-300 dark:text-blue-200"
-                    : "border-slate-300 text-slate-600 dark:border-slate-700 dark:text-slate-300"
-                }`}
-              >
-                {option === "yes" ? t("optionYes") : t("optionNo")}
-              </button>
+                label={approved ? t("optionYes") : t("optionNo")}
+                active={active}
+                onClick={() => onChange({ ...value, approved })}
+              />
             );
           })}
         </div>
@@ -604,23 +689,18 @@ function StructuredForm({
     const value = payload as AccentTagPayload;
     const options = ["American", "British", "Australian", "Indian", "Other"];
     return (
-      <div className="space-y-3">
-        <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
+      <div className="space-y-4">
+        <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
           {t("selectAccent")}
         </p>
-        <div className="flex flex-col gap-2">
+        <div className="grid grid-cols-2 gap-2">
           {options.map((option) => (
-            <label
+            <OptionButton
               key={option}
-              className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200"
-            >
-              <input
-                type="radio"
-                checked={value.region === option}
-                onChange={() => onChange({ ...value, region: option })}
-              />
-              {option}
-            </label>
+              label={option}
+              active={value.region === option}
+              onClick={() => onChange({ ...value, region: option })}
+            />
           ))}
         </div>
         {value.region === "Other" ? (
@@ -633,25 +713,11 @@ function StructuredForm({
             }
           />
         ) : null}
-        <div className="flex flex-col gap-2">
-          <label className="text-sm font-medium text-slate-800 dark:text-slate-100">
-            {t("confidenceLabel")}
-          </label>
-          <input
-            className="w-full accent-blue-600 dark:accent-blue-400"
-            type="range"
-            min={0}
-            max={1}
-            step={0.1}
-            value={value.confidence ?? 0.5}
-            onChange={(event) =>
-              onChange({
-                ...value,
-                confidence: Number.parseFloat(event.target.value),
-              })
-            }
-          />
-        </div>
+        <ConfidenceSlider
+          label={t("confidenceLabel")}
+          value={value.confidence ?? 0.5}
+          onChange={(next) => onChange({ ...value, confidence: next })}
+        />
       </div>
     );
   }
@@ -660,28 +726,23 @@ function StructuredForm({
     const value = payload as EmotionTagPayload;
     const options = ["Happy", "Neutral", "Angry", "Sad", "Surprised", "Other"];
     return (
-      <div className="space-y-3">
-        <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
+      <div className="space-y-4">
+        <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
           {t("selectEmotion")}
         </p>
-        <div className="flex flex-col gap-2">
+        <div className="grid grid-cols-2 gap-2">
           {options.map((option) => (
-            <label
+            <OptionButton
               key={option}
-              className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200"
-            >
-              <input
-                type="radio"
-                checked={value.emotion_primary === option}
-                onChange={() =>
-                  onChange({
-                    ...value,
-                    emotion_primary: option,
-                  })
-                }
-              />
-              {option}
-            </label>
+              label={option}
+              active={value.emotion_primary === option}
+              onClick={() =>
+                onChange({
+                  ...value,
+                  emotion_primary: option,
+                })
+              }
+            />
           ))}
         </div>
         {value.emotion_primary === "Other" ? (
@@ -697,25 +758,11 @@ function StructuredForm({
             }
           />
         ) : null}
-        <div className="flex flex-col gap-2">
-          <label className="text-sm font-medium text-slate-800 dark:text-slate-100">
-            {t("confidenceLabel")}
-          </label>
-          <input
-            className="w-full accent-blue-600 dark:accent-blue-400"
-            type="range"
-            min={0}
-            max={1}
-            step={0.1}
-            value={value.confidence ?? 0.5}
-            onChange={(event) =>
-              onChange({
-                ...value,
-                confidence: Number.parseFloat(event.target.value),
-              })
-            }
-          />
-        </div>
+        <ConfidenceSlider
+          label={t("confidenceLabel")}
+          value={value.confidence ?? 0.5}
+          onChange={(next) => onChange({ ...value, confidence: next })}
+        />
       </div>
     );
   }
@@ -723,44 +770,38 @@ function StructuredForm({
   if (taskType === "speaker_continuity") {
     const value = payload as SpeakerContinuityPayload;
     return (
-      <div className="space-y-3">
-        <input
-          className={INPUT_BASE_CLASS}
-          placeholder={t("speakerLabelPlaceholder")}
-          value={value.speaker ?? ""}
-          onChange={(event) =>
-            onChange({ ...value, speaker: event.target.value })
-          }
-        />
-        <input
-          className={INPUT_BASE_CLASS}
-          placeholder={t("sameAsClipPlaceholder")}
-          value={value.same_as_clip ?? ""}
-          onChange={(event) =>
-            onChange({ ...value, same_as_clip: event.target.value })
-          }
-        />
-        <div className="flex flex-col gap-2">
-          <label className="text-sm font-medium text-slate-800 dark:text-slate-100">
-            {t("confidenceLabel")}
-          </label>
+      <div className="space-y-4">
+        <div className="space-y-1">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            {t("speakerLabelPlaceholder")}
+          </p>
           <input
-            className="w-full accent-blue-600 dark:accent-blue-400"
-            type="range"
-            min={0}
-            max={1}
-            step={0.1}
-            value={value.confidence ?? 0.5}
+            className={INPUT_BASE_CLASS}
+            value={value.speaker ?? ""}
             onChange={(event) =>
-              onChange({
-                ...value,
-                confidence: Number.parseFloat(event.target.value),
-              })
+              onChange({ ...value, speaker: event.target.value })
             }
           />
         </div>
+        <div className="space-y-1">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            {t("sameAsClipPlaceholder")}
+          </p>
+          <input
+            className={INPUT_BASE_CLASS}
+            value={value.same_as_clip ?? ""}
+            onChange={(event) =>
+              onChange({ ...value, same_as_clip: event.target.value })
+            }
+          />
+        </div>
+        <ConfidenceSlider
+          label={t("confidenceLabel")}
+          value={value.confidence ?? 0.5}
+          onChange={(next) => onChange({ ...value, confidence: next })}
+        />
         <textarea
-          className={INPUT_BASE_CLASS}
+          className={TEXTAREA_BASE_CLASS}
           placeholder={t("notesOptionalPlaceholder")}
           value={value.notes ?? ""}
           onChange={(event) =>
@@ -776,44 +817,47 @@ function StructuredForm({
     const events = value.events ?? [];
     const updateEvents = (next: GestureTagEvent[]) =>
       onChange({ ...value, events: next });
-
     return (
       <div className="space-y-4">
-        <div className="space-y-2">
-          <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
-            {t("gesturesLabel")}
-          </p>
-          {events.length === 0 ? (
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              {t("gesturesEmpty")}
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {events.map((event, idx) => (
-                <li
-                  key={`${event.label}-${event.t}-${idx}`}
-                  className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700"
-                >
-                  <span>
-                    <span className="font-semibold">{event.label}</span> at{" "}
-                    {(event.t / 1000).toFixed(1)}s
-                  </span>
+        <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+          {t("gesturesLabel")}
+        </p>
+        {events.length ? (
+          <ul className="space-y-2">
+            {events.map((event, index) => (
+              <li
+                key={`${event.label}-${event.t}-${index}`}
+                className="rounded-2xl border-2 border-slate-200 px-3 py-2 dark:border-slate-700"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      {event.label}
+                    </p>
+                    <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                      {event.t}ms
+                    </p>
+                  </div>
                   <button
                     type="button"
-                    className="text-xs text-red-600 dark:text-red-400"
+                    className="text-xs font-semibold text-rose-600 transition hover:text-rose-700 dark:text-rose-300 dark:hover:text-rose-200"
                     onClick={() =>
-                      updateEvents(events.filter((_, i) => i !== idx))
+                      updateEvents(events.filter((_, idx) => idx !== index))
                     }
                   >
                     {t("removeAction")}
                   </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        <div className="space-y-2 rounded-lg border border-slate-200 p-3 dark:border-slate-700 dark:bg-slate-950/40">
-          <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            {t("gesturesEmpty")}
+          </p>
+        )}
+        <div className="space-y-2 rounded-2xl border border-dashed border-slate-300 p-3 dark:border-slate-700">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
             {t("addGestureLabel")}
           </p>
           <input
@@ -834,7 +878,7 @@ function StructuredForm({
           />
           <button
             type="button"
-            className="w-full rounded-lg bg-slate-800 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
+            className="w-full rounded-xl bg-slate-900 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
             disabled={!newGesture.label}
             onClick={() => {
               const timestamp = Number.parseInt(newGesture.t || "0", 10) || 0;
@@ -861,6 +905,75 @@ function StructuredForm({
   );
 }
 
+function OptionButton({
+  label,
+  description,
+  active,
+  onClick,
+}: {
+  label: string;
+  description?: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`${OPTION_BASE_CLASS} ${
+        active ? OPTION_ACTIVE_CLASS : OPTION_INACTIVE_CLASS
+      }`}
+    >
+      <span className="text-sm font-semibold">{label}</span>
+      {description ? (
+        <span
+          className={`text-xs ${
+            active
+              ? "text-blue-800 dark:text-blue-100"
+              : "text-slate-500 dark:text-slate-400"
+          }`}
+        >
+          {description}
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+function ConfidenceSlider({
+  value,
+  onChange,
+  label,
+}: {
+  value: number;
+  onChange: (next: number) => void;
+  label: string;
+}) {
+  return (
+    <div className="space-y-1">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        {label}
+      </p>
+      <div className="flex items-center gap-3">
+        <input
+          className="w-full accent-blue-600 dark:accent-blue-400"
+          type="range"
+          min={0}
+          max={1}
+          step={0.05}
+          value={value}
+          onChange={(event) =>
+            onChange(Number.parseFloat(event.target.value) || 0)
+          }
+        />
+        <span className="text-xs font-semibold text-slate-500 dark:text-slate-300">
+          {Math.round(value * 100)}%
+        </span>
+      </div>
+    </div>
+  );
+}
 function defaultPayload(taskType: string) {
   switch (taskType) {
     case "translation_check":

@@ -19,6 +19,18 @@ import { useTranslations } from "../../components/mobile/useTranslations";
 import { LocaleToggle } from "../../components/mobile/LocaleToggle";
 
 const ENABLED = process.env.NEXT_PUBLIC_ENABLE_MOBILE_TASKS !== "false";
+const TASK_LABELS: Record<string, string> = {
+  translation_check: "Check Translation",
+  accent_tag: "Tag Accent",
+  emotion_tag: "Classify Emotion",
+  speaker_continuity: "Approve Clip",
+  gesture_tag: "Tag Gestures",
+  safety_flag: "Flag Quality",
+};
+
+function getTaskLabel(type: string) {
+  return TASK_LABELS[type] || type.replace(/_/g, " ");
+}
 type QueueActionState = { type: "retry" | "remove"; id: string } | null;
 type BulkActionState = "retryAll" | "clearAll" | null;
 
@@ -211,75 +223,99 @@ export default function MobileHomePage() {
   };
 
   return (
-    <main className="relative mx-auto max-w-md space-y-4 p-4 pb-10">
-      <header className="space-y-2">
-        <div className="flex justify-end">
-          <LocaleToggle />
-        </div>
-        <div className="text-center space-y-1">
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            {t("brand")}
-          </p>
-          <h1 className="text-2xl font-semibold">{t("workOnTasks")}</h1>
-          <p
-            className={`text-xs ${
-              online ? "text-green-600" : "text-amber-600"
-            }`}
-          >
-            {online ? t("statusOnline") : t("statusOffline")}
-          </p>
-        </div>
-      </header>
+    <div className="min-h-screen bg-gradient-to-b from-slate-100 via-slate-50 to-slate-200 px-4 py-6 text-slate-900 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-slate-50">
+      <main className="mx-auto flex w-full max-w-sm flex-col gap-5 pb-16">
+        <section className="rounded-3xl bg-white/95 p-5 shadow-2xl ring-1 ring-blue-50 dark:bg-slate-900/90 dark:ring-blue-900/40">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-wider text-blue-600">
+                {t("brand")}
+              </p>
+              <h1 className="text-3xl font-bold leading-tight text-slate-900 dark:text-white">
+                {t("workOnTasks")}
+              </h1>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                Clip bundles refresh throughout the day. Stay in flow.
+              </p>
+            </div>
+            <LocaleToggle />
+          </div>
+          <div className="mt-4 flex items-center justify-between text-xs font-semibold">
+            <span
+              className={`inline-flex items-center gap-2 rounded-full px-3 py-1 ${
+                online
+                  ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
+                  : "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200"
+              }`}
+            >
+              <span className="text-base leading-none">•</span>
+              {online ? t("statusOnline") : t("statusOffline")}
+            </span>
+            <span className="text-slate-500 dark:text-slate-400">
+              {cachedCount} cached • {queuedCount} queued
+            </span>
+          </div>
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <button
+              onClick={fetchBundle}
+              disabled={loading}
+              className="flex-1 rounded-2xl bg-blue-600 py-3 text-center text-base font-semibold text-white shadow-lg transition hover:bg-blue-500 disabled:opacity-60 dark:bg-blue-500 dark:hover:bg-blue-400"
+            >
+              {loading ? t("loading") : t("getTasks")}
+            </button>
+            {(cachedCount > 0 || queuedCount > 0) && (
+              <button
+                type="button"
+                onClick={() => setShowQueue(true)}
+                className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:border-slate-500 dark:hover:bg-slate-800"
+              >
+                {t("offlineQueueTitle")}
+              </button>
+            )}
+          </div>
+        </section>
 
-      {(cachedCount > 0 || queuedCount > 0) && (
-        <button
-          className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700 text-left dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-          onClick={() => setShowQueue(true)}
-        >
-          {t("offlineBannerButton", {
-            cached: cachedCount,
-            queued: queuedCount,
-          })}
-        </button>
-      )}
+        {error ? (
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200">
+            {error}
+          </div>
+        ) : null}
 
-      <button
-        onClick={fetchBundle}
-        disabled={loading}
-        className="w-full rounded-lg bg-blue-600 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:opacity-60 dark:bg-blue-500 dark:hover:bg-blue-400"
-      >
-        {loading ? t("loading") : t("getTasks")}
-      </button>
-      {error ? (
-        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-      ) : null}
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Today&apos;s bundle
+            </p>
+            <span className="text-xs text-slate-400">
+              {flatTasks.length} clips ready
+            </span>
+          </div>
+          {flatTasks.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-slate-300 bg-white/70 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
+              {t("noCached")}
+            </div>
+          ) : (
+            flatTasks.map(({ bundle_id, task }) => (
+              <TaskCard key={`${bundle_id}:${task.assignment_id}`} task={task} />
+            ))
+          )}
+        </section>
 
-      <section className="space-y-3 pb-4">
-        {flatTasks.length === 0 ? (
-          <p className="text-center text-sm text-slate-500">
-            {t("noCached")}
-          </p>
-        ) : (
-          flatTasks.map(({ bundle_id, task }) => (
-            <TaskCard key={`${bundle_id}:${task.assignment_id}`} task={task} />
-          ))
-        )}
-      </section>
-
-      {showQueue ? (
-        <OfflineQueueModal
-          cachedCount={cachedCount}
-          pending={pendingSubmissions}
-          onClose={() => setShowQueue(false)}
-          onRetry={handleRetrySubmission}
-          onRemove={handleRemoveSubmission}
-          queueAction={queueAction}
-          onRetryAll={handleRetryAllPending}
-          onClearAll={handleClearQueue}
-          bulkAction={bulkAction}
-        />
-      ) : null}
-    </main>
+        {showQueue ? (
+          <OfflineQueueModal
+            cachedCount={cachedCount}
+            pending={pendingSubmissions}
+            onClose={() => setShowQueue(false)}
+            onRetry={handleRetrySubmission}
+            onRemove={handleRemoveSubmission}
+            queueAction={queueAction}
+            onRetryAll={handleRetryAllPending}
+            onClearAll={handleClearQueue}
+            bulkAction={bulkAction}
+          />
+        ) : null}
+      </main>
+    </div>
   );
 }
 
@@ -294,34 +330,57 @@ function TaskCard({ task }: { task: MobileClaimResponse }) {
   const href = `/mobile/tasks/${task.task_id}?assignment=${task.assignment_id}`;
   const hasHint = Boolean(task.ai_suggestion);
   const t = useTranslations();
+  const friendlyName = getTaskLabel(task.task_type);
+  const payout = `$${(task.price_cents / 100).toFixed(2)}`;
+  const clipDuration = `${Math.max(
+    1,
+    Math.round((task.clip.end_ms - task.clip.start_ms) / 1000)
+  )}s clip`;
 
   return (
     <a
-      className="block rounded-xl border border-slate-200 bg-white p-4 shadow transition hover:border-blue-200 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-400"
+      className="block rounded-3xl border border-slate-100 bg-white/95 p-4 shadow-lg transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-xl dark:border-slate-800 dark:bg-slate-900/80 dark:hover:border-blue-400/60"
       href={href}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            {task.task_type.replace("_", " ")}
-          </p>
-          <p className="text-xl font-semibold">{durationLabel}</p>
-          <p
-            className={`text-xs ${
+      <div className="space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              {friendlyName}
+            </p>
+            <h3 className="text-2xl font-semibold text-slate-900 dark:text-white">
+              {durationLabel}
+            </h3>
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+              <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800/80">
+                {clipDuration}
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800/80">
+                {payout}
+              </span>
+            </div>
+          </div>
+          {hasHint ? (
+            <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-blue-600 dark:bg-blue-500/20 dark:text-blue-200">
+              {t("aiHint")}
+            </span>
+          ) : null}
+        </div>
+        <div className="flex items-center justify-between text-sm font-semibold">
+          <span
+            className={
               warning
                 ? "text-amber-600 dark:text-amber-400"
                 : "text-slate-500 dark:text-slate-400"
-            }`}
+            }
           >
-            {`$${(task.price_cents / 100).toFixed(2)}`} -{" "}
             {t("leaseLabel", { time: leaseLabel })}
-          </p>
-        </div>
-        {hasHint ? (
-          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-blue-700 dark:bg-blue-500/20 dark:text-blue-200">
-            {t("aiHint")}
           </span>
-        ) : null}
+          <span className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-md transition hover:bg-blue-500 dark:bg-blue-500 dark:hover:bg-blue-400">
+            Start
+            <span aria-hidden="true">→</span>
+          </span>
+        </div>
       </div>
     </a>
   );
