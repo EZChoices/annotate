@@ -32,6 +32,14 @@ const STRUCTURED_TASK_TYPES = new Set([
 
 const CONTEXT_WINDOW_LIMIT_SECONDS = 24;
 const CAPTIONS_STORAGE_KEY = "dd-mobile-captions";
+const TASK_FRIENDLY_TITLES: Record<string, string> = {
+  translation_check: "Translation Check",
+  accent_tag: "Accent Tag",
+  emotion_tag: "Emotion Tag",
+  speaker_continuity: "Speaker Continuity",
+  gesture_tag: "Gesture Tag",
+  safety_flag: "Quality Review",
+};
 const INPUT_BASE_CLASS =
   "w-full rounded-lg border border-slate-200 bg-white p-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
 const TEXTAREA_BASE_CLASS = `${INPUT_BASE_CLASS} min-h-[120px]`;
@@ -41,6 +49,10 @@ const OPTION_ACTIVE_CLASS =
   "border-blue-600 bg-blue-50 text-blue-700 shadow-[0_15px_45px_rgba(37,99,235,0.15)] dark:border-blue-400 dark:bg-blue-500/20 dark:text-blue-100";
 const OPTION_INACTIVE_CLASS =
   "border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:text-slate-200 dark:hover:border-slate-500";
+
+function getFriendlyTitle(taskType: string) {
+  return TASK_FRIENDLY_TITLES[taskType] ?? taskType.replace(/_/g, " ");
+}
 
 function clampContextPayload(payload: any) {
   if (!payload || typeof payload !== "object") return null;
@@ -973,6 +985,16 @@ function ConfidenceSlider({
       </div>
     </div>
   );
+}
+
+function formatDuration(ms: number) {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(
+    2,
+    "0"
+  )}`;
 }
 function defaultPayload(taskType: string) {
   switch (taskType) {
