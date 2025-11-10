@@ -1,3 +1,5 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 type ConfigEntry = {
   value: unknown;
   expiresAt: number;
@@ -5,6 +7,7 @@ type ConfigEntry = {
 
 const CACHE_TTL_MS = 60 * 1000;
 const cache = new Map<string, ConfigEntry>();
+const REMOTE_CONFIG_TABLE = "remote_config";
 
 export interface RemoteConfigAdapter {
   get(key: string): Promise<unknown | undefined>;
@@ -29,17 +32,36 @@ class MemoryRemoteConfigAdapter implements RemoteConfigAdapter {
 }
 
 export class SupabaseRemoteConfigAdapter implements RemoteConfigAdapter {
-  // Placeholder for future Supabase-backed implementation.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  constructor(private readonly supabase?: unknown) {}
-  async get() {
-    return undefined;
+  constructor(private readonly supabase: SupabaseClient) {}
+
+  async get(key: string) {
+    const { data, error } = await this.supabase
+      .from(REMOTE_CONFIG_TABLE)
+      .select("value")
+      .eq("key", key)
+      .maybeSingle();
+    if (error) throw error;
+    return data?.value ?? undefined;
   }
-  async set() {
-    // no-op until Supabase credentials are wired.
+
+  async set(key: string, value: unknown) {
+    const { error } = await this.supabase
+      .from(REMOTE_CONFIG_TABLE)
+      .upsert({ key, value }, { onConflict: "key" });
+    if (error) throw error;
   }
+
   async list() {
-    return {};
+    const { data, error } = await this.supabase
+      .from(REMOTE_CONFIG_TABLE)
+      .select("key,value");
+    if (error) throw error;
+    return (data ?? []).reduce<Record<string, unknown>>((acc, row) => {
+      if (row?.key !== undefined) {
+        acc[row.key] = row.value;
+      }
+      return acc;
+    }, {});
   }
 }
 

@@ -79,7 +79,7 @@ Backend also accepts Bunny base URL via any of:
 
 ## Mobile admin utilities
 
-- **Remote config playground** – visit `/admin/mobile/settings` (no auth yet) to edit in-memory flags such as `est_wait_seconds`, `bundle_size`, or any ad-hoc key. The UI talks to `/api/admin/remote-config`, which in turn uses `lib/remoteConfig.ts`. Useful for testing without wiring Supabase.
+- **Remote config console** - visit `/admin/mobile/settings` (no auth yet) to edit Supabase-backed flags such as `bundle_count`, `golden_ratio`, `captions_default_on`, and any ad-hoc keys. The UI talks to `/api/admin/remote-config`, which now reads/writes the `remote_config` table via `lib/remoteConfig.ts` and caches values for ~60s.
 - **Confusion analytics** – `/admin/mobile/confusion` renders mock KPI cards and accent/emotion matrices. Swap the mock data with real Supabase queries once credentials are ready.
 - **Postman collection** – `docs/postman/MobileTasks.postman_collection.json` contains local/mock calls for peek, bundle, submit, and remote-config endpoints. Import it and set `baseUrl`.
 - **Load test script** – `load/k6.js` exercises peek → bundle → submit against the mock API. Run `k6 run load/k6.js` (set `BASE_URL`, `VUS`, `DURATION` as env vars) to simulate mobile traffic without Supabase.

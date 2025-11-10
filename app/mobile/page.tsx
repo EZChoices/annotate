@@ -17,6 +17,7 @@ import {
 import { useMobileAuth } from "../../components/mobile/MobileAuthProvider";
 import { useTranslations } from "../../components/mobile/useTranslations";
 import { LocaleToggle } from "../../components/mobile/LocaleToggle";
+import { useMobileToast } from "../../components/mobile/MobileToastProvider";
 
 const ENABLED = process.env.NEXT_PUBLIC_ENABLE_MOBILE_TASKS !== "false";
 const TASK_LABELS: Record<string, string> = {
@@ -49,6 +50,7 @@ export default function MobileHomePage() {
   const [bulkAction, setBulkAction] = useState<BulkActionState>(null);
   const { fetchWithAuth, session, status, mode } = useMobileAuth();
   const t = useTranslations();
+  const { pushToast } = useMobileToast();
 
   useEffect(() => {
     if (!ENABLED) return;
@@ -139,7 +141,9 @@ export default function MobileHomePage() {
       setBundles((prev) => [data, ...prev]);
       await cacheBundle(data);
     } catch (err: any) {
-      setError(err.message || "Failed to fetch bundle");
+      const message = err?.message || "Failed to fetch bundle";
+      setError(message);
+      pushToast(message, "error");
     } finally {
       setLoading(false);
     }
@@ -153,7 +157,9 @@ export default function MobileHomePage() {
         prev.filter((item) => item.idempotencyKey !== submission.idempotencyKey)
       );
     } catch (err: any) {
-      setError(err.message || t("retryFailed"));
+      const message = err?.message || t("retryFailed");
+      setError(message);
+      pushToast(message, "error");
     } finally {
       setQueueAction(null);
     }
@@ -185,7 +191,9 @@ export default function MobileHomePage() {
         prev.filter((item) => item.idempotencyKey !== submission.idempotencyKey)
       );
     } catch (err: any) {
-      setError(err.message || t("retryFailed"));
+      const message = err?.message || t("retryFailed");
+      setError(message);
+      pushToast(message, "error");
       if (typeof navigator !== "undefined") {
         const registration = await navigator.serviceWorker?.ready;
         await (registration as any)?.sync?.register("dd-submit").catch(() => {});
@@ -204,6 +212,7 @@ export default function MobileHomePage() {
         // eslint-disable-next-line no-await-in-loop
         await handleRetrySubmission(submission);
       }
+      pushToast(t("retryAllQueuedSuccess"), "success");
     } finally {
       setBulkAction(null);
     }
@@ -215,8 +224,11 @@ export default function MobileHomePage() {
     try {
       await clearAllPendingSubmissions();
       setPendingSubmissions([]);
+      pushToast(t("clearQueueSuccess"), "success");
     } catch (err: any) {
-      setError(err.message || t("queueClearFailed"));
+      const message = err?.message || t("queueClearFailed");
+      setError(message);
+      pushToast(message, "error");
     } finally {
       setBulkAction(null);
     }
@@ -269,7 +281,14 @@ export default function MobileHomePage() {
                 onClick={() => setShowQueue(true)}
                 className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:border-slate-500 dark:hover:bg-slate-800"
               >
-                {t("offlineQueueTitle")}
+                <span className="flex items-center justify-center gap-2">
+                  {t("offlineQueueTitle")}
+                  {queuedCount > 0 ? (
+                    <span className="inline-flex min-w-[2rem] justify-center rounded-full bg-slate-900 px-2 py-0.5 text-xs font-semibold text-white dark:bg-slate-100 dark:text-slate-900">
+                      {queuedCount}
+                    </span>
+                  ) : null}
+                </span>
               </button>
             )}
           </div>

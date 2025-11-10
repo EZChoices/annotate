@@ -2,14 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   getRemoteConfigSnapshot,
   getRemoteConfigValue,
+  refreshRemoteConfigFromAdapter,
   setRemoteConfigValue,
 } from "../../../../lib/remoteConfig";
 
 export async function GET(req: NextRequest) {
   const keys = req.nextUrl.searchParams.getAll("key");
   if (keys.length === 0) {
+    await refreshRemoteConfigFromAdapter();
     return NextResponse.json({ values: getRemoteConfigSnapshot() });
   }
+  await refreshRemoteConfigFromAdapter(keys);
   const entries = keys.reduce<Record<string, unknown>>((acc, key) => {
     acc[key] = getRemoteConfigValue(key, null);
     return acc;

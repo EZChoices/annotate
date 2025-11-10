@@ -5,22 +5,34 @@ import { motion } from "framer-motion";
 
 const DEFAULT_KEYS = [
   {
-    key: "est_wait_seconds",
-    label: "Estimated wait (seconds)",
-    helper: "Used by /api/mobile/peek",
-    fallback: 30,
-  },
-  {
-    key: "bundle_size",
+    key: "bundle_count",
     label: "Bundle size",
-    helper: "Suggested number of clips per bundle",
+    helper: "Clips delivered per /bundle request.",
     fallback: 3,
   },
   {
-    key: "captions_default",
-    label: "Captions opt-in",
-    helper: "true/false to enable captions by default",
+    key: "captions_default_on",
+    label: "Captions default on",
+    helper: "true/false to auto-enable VTT tracks.",
     fallback: true,
+  },
+  {
+    key: "context_window_ms",
+    label: "Context window (ms)",
+    helper: "Used by /api/mobile/context for ± window.",
+    fallback: 24_000,
+  },
+  {
+    key: "golden_ratio",
+    label: "Golden clip ratio",
+    helper: "Fraction (0-1) of clips sourced from golden pool.",
+    fallback: 0.02,
+  },
+  {
+    key: "est_wait_seconds",
+    label: "Estimated wait (seconds)",
+    helper: "Shown in /api/mobile/peek backlog summary.",
+    fallback: 30,
   },
 ];
 
@@ -53,9 +65,7 @@ export default function RemoteConfigSettingsPage() {
   }, [values]);
 
   useEffect(() => {
-    const params = new URLSearchParams();
-    DEFAULT_KEYS.forEach((preset) => params.append("key", preset.key));
-    fetch(`/api/admin/remote-config?${params.toString()}`)
+    fetch(`/api/admin/remote-config`)
       .then((res) => res.json())
       .then((data) => setValues(data.values || {}))
       .catch(() => setMessage("Unable to load remote config cache"))
@@ -110,8 +120,9 @@ export default function RemoteConfigSettingsPage() {
         </p>
         <h1 className="text-3xl font-semibold">Remote Config</h1>
         <p className="text-sm text-slate-500">
-          Values are stored in-memory for this deployment. Use this page to test
-          throttle and UX switches before wiring Supabase.
+          Values persist to the Supabase <code>remote_config</code> table and
+          are cached by the API for ~60 seconds. Tweak bundle size, captions,
+          or experimental flags here without redeploying.
         </p>
       </header>
 
