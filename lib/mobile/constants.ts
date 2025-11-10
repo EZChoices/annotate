@@ -1,6 +1,14 @@
+function flagEnabled(value?: string) {
+  if (value === undefined) return undefined;
+  return value.trim().toLowerCase() === "true";
+}
+
+const rawFlag =
+  process.env.MOBILE_TASKS_ENABLED ??
+  process.env.NEXT_PUBLIC_ENABLE_MOBILE_TASKS;
+
 export const MOBILE_TASKS_ENABLED =
-  process.env.MOBILE_TASKS_ENABLED === "true" ||
-  process.env.NEXT_PUBLIC_ENABLE_MOBILE_TASKS === "true";
+  flagEnabled(rawFlag) ?? true;
 
 export const MOBILE_GOLDEN_RATIO = Number(
   process.env.MOBILE_GOLDEN_RATIO ?? "0.02"
@@ -34,4 +42,3 @@ export const MOBILE_ALLOWED_TASK_TYPES = [
 ] as const;
 
 export type MobileTaskType = (typeof MOBILE_ALLOWED_TASK_TYPES)[number];
-

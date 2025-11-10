@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { assertMobileFeatureEnabled } from "../../../../../lib/mobile/feature";
 import { requireContributor } from "../../../../../lib/mobile/auth";
 import { errorResponse, MobileApiError } from "../../../../../lib/mobile/errors";
@@ -13,23 +13,32 @@ import {
   mockModeActive,
   mockSubmit,
 } from "../../../../../lib/mobile/mockRepo";
-import { isMobileMockMode } from "../../../../../lib/mobile/mockData";
+import { jsonWithLog, logMobileApi } from "../../../../../lib/mobile/logging";
 
 export async function POST(req: NextRequest) {
+  const startedAt = Date.now();
+  let userId: string | null = null;
   try {
     assertMobileFeatureEnabled();
     const { contributor, supabase } = await requireContributor(req);
+    userId = contributor.id;
     const body = (await req.json()) || {};
     const idempotencyKey = req.headers.get("idempotency-key");
     await assertIdempotencyKey(contributor.id, idempotencyKey);
     if (!consumeRateLimit(contributor.id, "submit/min", 10, 60 * 1000)) {
-      return NextResponse.json(
+      return jsonWithLog(
+        "POST /api/mobile/tasks/submit",
+        userId,
+        startedAt,
         { error: "RATE_LIMIT" },
         { status: 429 }
       );
     }
     if (!consumeRateLimit(contributor.id, "submit/hour", 60, 60 * 60 * 1000)) {
-      return NextResponse.json(
+      return jsonWithLog(
+        "POST /api/mobile/tasks/submit",
+        userId,
+        startedAt,
         { error: "RATE_LIMIT" },
         { status: 429 }
       );
@@ -39,34 +48,70 @@ export async function POST(req: NextRequest) {
         ? getIdempotentResponse(contributor.id, idempotencyKey)
         : null;
       if (cached) {
-        return NextResponse.json(cached as any);
+        return jsonWithLog(
+          "POST /api/mobile/tasks/submit",
+          userId,
+          startedAt,
+          cached,
+          { headers: { "x-mobile-mock-data": "true", "x-idempotent-hit": "true" } }
+        );
       }
       const mockResult = mockSubmit(body.assignment_id, body.payload);
       if (idempotencyKey) {
         setIdempotentResponse(contributor.id, idempotencyKey, mockResult);
       }
-      return NextResponse.json(mockResult);
+      return jsonWithLog(
+        "POST /api/mobile/tasks/submit",
+        userId,
+        startedAt,
+        mockResult,
+        { headers: { "x-mobile-mock-data": "true" } }
+      );
     }
     const existing = idempotencyKey
       ? getIdempotentResponse(contributor.id, idempotencyKey)
       : null;
     if (existing) {
-      return NextResponse.json(existing as any);
+      return jsonWithLog(
+        "POST /api/mobile/tasks/submit",
+        userId,
+        startedAt,
+        existing,
+        { headers: { "x-idempotent-hit": "true" } }
+      );
     }
     const result = await submitAssignment(contributor, supabase, body);
     if (idempotencyKey) {
       setIdempotentResponse(contributor.id, idempotencyKey, result);
     }
-    return NextResponse.json(result);
+    return jsonWithLog(
+      "POST /api/mobile/tasks/submit",
+      userId,
+      startedAt,
+      result
+    );
   } catch (error) {
     if (
       error instanceof MobileApiError &&
       error.code !== "SERVER_ERROR" &&
       error.code !== "UNAUTHORIZED"
     ) {
-      return errorResponse(error);
+      const response = errorResponse(error);
+      logMobileApi(
+        "POST /api/mobile/tasks/submit",
+        userId,
+        response.status,
+        startedAt
+      );
+      return response;
     }
     console.warn("[mobile/submit] falling back to mock success", error);
-    return NextResponse.json({ ok: true, mock: true });
+    return jsonWithLog(
+      "POST /api/mobile/tasks/submit",
+      userId,
+      startedAt,
+      { ok: true },
+      { headers: { "x-mobile-mock-data": "true" } }
+    );
   }
 }

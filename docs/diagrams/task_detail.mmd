@@ -1,0 +1,10 @@
+flowchart LR
+  OpenTask --> Audio["Audio-first player"]
+  Audio --> Ctx["context ±24s"]
+  Audio --> Hint["AI hint (collapsed)"]
+  Audio --> Form{"task_type"}
+  Form --> Submit[Submit]
+  Form --> Skip[Skip]
+  Submit --> Result{"status"}
+  Result -- auto_approved --> Next
+  Result -- needs_review --> Next

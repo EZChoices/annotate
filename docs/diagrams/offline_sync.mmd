@@ -1,0 +1,8 @@
+flowchart LR
+  Play[Start playback] --> HB[/heartbeat/]
+  Submit[Submit/Skip] -->|fail| Q[Queue in IDB]
+  NetUp[online event] --> BS[Background Sync dd-submit]
+  BS --> API[/submit/ or /release/]
+  API --> OK{200?}
+  OK -- yes --> CLR[Remove from queue]
+  OK -- no --> RET[Backoff & retry]

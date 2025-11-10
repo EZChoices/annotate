@@ -63,3 +63,44 @@ export function getMockPilotMetrics(backlogCount: number) {
 export function getMockPeekCount() {
   return mockPeek().count;
 }
+
+function escapeCsvValue(value: string | number | null | undefined) {
+  if (value === null || value === undefined) return "";
+  const str = String(value);
+  return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+}
+
+export function getMockKpiCsv() {
+  const peek = mockPeek();
+  const metrics = getMockPilotMetrics(peek.count);
+  const backlogRows = Object.entries(peek.backlog_by_type).map(
+    ([type, count]) => ({
+      type,
+      clips: count,
+      hours: ((count * 12) / 3600).toFixed(2),
+    })
+  );
+  const sections: string[] = [];
+  sections.push(["Metric", "Value", "Helper"].map(escapeCsvValue).join(","));
+  metrics.forEach((metric) => {
+    sections.push(
+      [
+        escapeCsvValue(metric.label),
+        escapeCsvValue(metric.value),
+        escapeCsvValue(metric.helper ?? ""),
+      ].join(",")
+    );
+  });
+  sections.push("");
+  sections.push(["Backlog Type", "Clips", "Hours"].map(escapeCsvValue).join(","));
+  backlogRows.forEach((row) => {
+    sections.push(
+      [
+        escapeCsvValue(row.type),
+        escapeCsvValue(row.clips),
+        escapeCsvValue(row.hours),
+      ].join(",")
+    );
+  });
+  return sections.join("\n");
+}

@@ -6,7 +6,7 @@
     "generate:manifest": "node scripts/generate_manifest.js",
     "build": "npm run generate:manifest && node scripts/inject-build-meta.js && next build",
     "start": "next start",
-    "test": "node --test && tsx --test tests/mobile.consensus.test.ts",
+    "test": "node --test \"tests/**/*.test.js\" && tsx --test tests/mobile.api.mock.test.ts tests/mobile.consensus.test.ts",
     "nightly:irr": "node scripts/nightly_irr.js"
   },
   "dependencies": {
@@ -26,7 +26,9 @@
     "@types/node": "^24.9.2",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
+    "playwright": "^1.56.1",
     "tsx": "^4.20.6",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "wait-on": "^9.0.3"
   }
 }

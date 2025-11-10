@@ -18,7 +18,7 @@ import { useMobileAuth } from "../../components/mobile/MobileAuthProvider";
 import { useTranslations } from "../../components/mobile/useTranslations";
 import { LocaleToggle } from "../../components/mobile/LocaleToggle";
 
-const ENABLED = process.env.NEXT_PUBLIC_ENABLE_MOBILE_TASKS === "true";
+const ENABLED = process.env.NEXT_PUBLIC_ENABLE_MOBILE_TASKS !== "false";
 type QueueActionState = { type: "retry" | "remove"; id: string } | null;
 type BulkActionState = "retryAll" | "clearAll" | null;
 
@@ -288,7 +288,9 @@ function TaskCard({ task }: { task: MobileClaimResponse }) {
     () => formatDuration(task.clip.end_ms - task.clip.start_ms),
     [task.clip.end_ms, task.clip.start_ms]
   );
-  const { label: leaseLabel } = useLeaseCountdown(task.lease_expires_at);
+  const { label: leaseLabel, warning } = useLeaseCountdown(
+    task.lease_expires_at
+  );
   const href = `/mobile/tasks/${task.task_id}?assignment=${task.assignment_id}`;
   const hasHint = Boolean(task.ai_suggestion);
   const t = useTranslations();
@@ -304,7 +306,13 @@ function TaskCard({ task }: { task: MobileClaimResponse }) {
             {task.task_type.replace("_", " ")}
           </p>
           <p className="text-xl font-semibold">{durationLabel}</p>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
+          <p
+            className={`text-xs ${
+              warning
+                ? "text-amber-600 dark:text-amber-400"
+                : "text-slate-500 dark:text-slate-400"
+            }`}
+          >
             {`$${(task.price_cents / 100).toFixed(2)}`} -{" "}
             {t("leaseLabel", { time: leaseLabel })}
           </p>
@@ -463,7 +471,7 @@ function useLeaseCountdown(expiresAt: string) {
   const compute = () => {
     const diff = new Date(expiresAt).getTime() - Date.now();
     if (diff <= 0) {
-      return { label: "Expired", expired: true };
+      return { label: "Expired", expired: true, warning: false };
     }
     const minutes = Math.floor(diff / 60000);
     const seconds = Math.floor((diff % 60000) / 1000);
@@ -473,6 +481,7 @@ function useLeaseCountdown(expiresAt: string) {
         "0"
       )}`,
       expired: false,
+      warning: diff <= 2 * 60 * 1000,
     };
   };
   const [value, setValue] = useState(compute);

@@ -1,0 +1,13 @@
+stateDiagram-v2
+  [*] --> pending
+  pending --> in_progress: lease created
+  in_progress --> submitted: response saved
+  in_progress --> released: /release
+  in_progress --> expired: TTL exceeded
+  submitted --> auto_approved: >=4 greens
+  submitted --> needs_review: 3 greens
+  submitted --> more_votes: <=2 greens (up to 7 voters)
+  needs_review --> complete
+  auto_approved --> complete
+  expired --> pending
+  released --> pending

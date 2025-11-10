@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { assertMobileFeatureEnabled } from "../../../../lib/mobile/feature";
 import { requireContributor } from "../../../../lib/mobile/auth";
 import { getClipContext } from "../../../../lib/mobile/taskService";
@@ -7,11 +7,14 @@ import {
   getMockContext,
   isMobileMockMode,
 } from "../../../../lib/mobile/mockData";
+import { jsonWithLog, logMobileApi } from "../../../../lib/mobile/logging";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   const clipId = req.nextUrl.searchParams.get("clip_id");
+  const startedAt = Date.now();
+  let userId: string | null = null;
   try {
     assertMobileFeatureEnabled();
     if (!clipId) {
@@ -23,23 +26,39 @@ export async function GET(req: NextRequest) {
     }
 
     if (isMobileMockMode()) {
-      return NextResponse.json(getMockContext(clipId), {
-        headers: { "x-mobile-mock-data": "true" },
-      });
+      return jsonWithLog(
+        "GET /api/mobile/context",
+        userId,
+        startedAt,
+        getMockContext(clipId),
+        { headers: { "x-mobile-mock-data": "true" } }
+      );
     }
 
     const { contributor, supabase } = await requireContributor(req, {
       requireMobileFlag: false,
     });
+    userId = contributor.id;
     const context = await getClipContext(supabase, clipId);
-    return NextResponse.json({ ...context });
+    return jsonWithLog(
+      "GET /api/mobile/context",
+      userId,
+      startedAt,
+      { ...context }
+    );
   } catch (error) {
     if (error instanceof MobileApiError && error.code === "VALIDATION_FAILED") {
-      return errorResponse(error);
+      const response = errorResponse(error);
+      logMobileApi("GET /api/mobile/context", userId, response.status, startedAt);
+      return response;
     }
     console.warn("[mobile/context] falling back to mock data", error);
-    return NextResponse.json(getMockContext(clipId || "mock-clip-1"), {
-      headers: { "x-mobile-mock-data": "true" },
-    });
+    return jsonWithLog(
+      "GET /api/mobile/context",
+      userId,
+      startedAt,
+      getMockContext(clipId || "mock-clip-1"),
+      { headers: { "x-mobile-mock-data": "true" } }
+    );
   }
 }

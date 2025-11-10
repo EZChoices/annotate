@@ -1,0 +1,4 @@
+flowchart LR
+  BL[Backlog per type/capability] --> F[Formula: 1 + backlog/500, cap 1.5]
+  F --> TP[task_prices update]
+  TP --> API[/next|/bundle returns price_cents/]

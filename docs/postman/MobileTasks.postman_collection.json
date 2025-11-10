@@ -90,6 +90,20 @@
       "response": []
     }
   ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.request.headers.has('Idempotency-Key')) {",
+          "  const key = `${Date.now()}-${Math.random().toString(16).slice(2)}`;",
+          "  pm.request.headers.add({ key: 'Idempotency-Key', value: key });",
+          "}"
+        ]
+      }
+    }
+  ],
   "variable": [
     {
       "key": "baseUrl",

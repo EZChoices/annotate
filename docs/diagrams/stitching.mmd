@@ -1,0 +1,6 @@
+flowchart LR
+  COL["collect approved tasks"] --> MER["merge transcripts + translations"]
+  MER --> JOIN["join labels (accent/emotion/gesture)"]
+  JOIN --> VAL["validate continuity + taxonomy"]
+  VAL --> OUT["manifest.json + clips.parquet + vtt + quality report"]
+  OUT --> STOR[("Export bucket")]

@@ -941,8 +941,14 @@ function TaskActionBar({
   );
 }
 
+function isRenderable(value: any) {
+  if (value === undefined || value === null) return false;
+  if (typeof value === "string" && value.trim() === "") return false;
+  return true;
+}
+
 function ContextTree({ data }: { data: any }) {
-  if (data === null || data === undefined) {
+  if (!isRenderable(data)) {
     return <p className="text-sm text-slate-500 dark:text-slate-400">-</p>;
   }
   if (typeof data !== "object") {
@@ -953,12 +959,26 @@ function ContextTree({ data }: { data: any }) {
     );
   }
   const entries = Array.isArray(data)
-    ? data.map((value, index) => ({ key: `[${index}]`, value }))
-    : Object.entries(data);
+    ? data
+        .map((value, index) => ({ key: `[${index}]`, value }))
+        .filter((entry) => isRenderable(entry.value))
+    : Object.entries(data)
+        .map(([childKey, child]) => ({ key: childKey, value: child }))
+        .filter((entry) => isRenderable(entry.value));
+
+  if (!entries.length) {
+    return <p className="text-sm text-slate-500 dark:text-slate-400">-</p>;
+  }
+
   return (
     <ul className="space-y-2 border-l border-slate-200 pl-3 text-sm dark:border-slate-700">
       {entries.map(({ key, value }) => (
-        <ContextTreeNode key={key} label={String(key)} value={value} depth={0} />
+        <ContextTreeNode
+          key={`${key}`}
+          label={String(key)}
+          value={value}
+          depth={0}
+        />
       ))}
     </ul>
   );
@@ -973,6 +993,9 @@ function ContextTreeNode({
   value: any;
   depth: number;
 }) {
+  if (!isRenderable(value)) {
+    return null;
+  }
   const isLeaf = value === null || typeof value !== "object";
   const [open, setOpen] = useState(depth < 1);
   if (isLeaf) {
@@ -988,7 +1011,7 @@ function ContextTreeNode({
     );
   }
 
-  const entries = Array.isArray(value)
+  const entries = (Array.isArray(value)
     ? value.map((child, index) => ({
         key: `[${index}]`,
         child,
@@ -996,7 +1019,9 @@ function ContextTreeNode({
     : Object.entries(value).map(([childKey, child]) => ({
         key: childKey,
         child,
-      }));
+      }))).filter(({ child }) => isRenderable(child));
+
+  if (!entries.length) return null;
 
   return (
     <li className="space-y-1">

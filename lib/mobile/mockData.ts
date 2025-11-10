@@ -171,9 +171,35 @@ export function generateMockTask(): MobileClaimResponse {
 export function getMockContext(clipId: string) {
   const template =
     MOCK_CLIPS.find((entry) => entry.clip.id === clipId) || MOCK_CLIPS[0];
+  const { clip, context } = template;
+  const prev = {
+    start_ms: Math.max(clip.start_ms - TWELVE_SECONDS, 0),
+    end_ms: clip.start_ms,
+    audio_url: clip.audio_url,
+  };
+  const next = {
+    start_ms: clip.end_ms,
+    end_ms: clip.end_ms + TWELVE_SECONDS,
+    audio_url: clip.audio_url,
+  };
+  const rawDiarization = Array.isArray(context.diarization)
+    ? context.diarization
+    : null;
+  const diarization = rawDiarization
+    ? rawDiarization.map(
+        (segment: { speaker: string; from: number; to: number }) =>
+          `${segment.speaker}: ${segment.from}-${segment.to}ms`
+      )
+    : clip.speakers ?? [];
   return {
-    clip_id: template.clip.id,
-    ...template.context,
+    clip_id: clip.id,
+    prev,
+    next,
+    transcript_snippet: context.transcript ?? context.summary ?? null,
+    translation_snippet: context.translation ?? null,
+    diarization,
+    window_seconds: 24,
+    ...context,
     mock: true,
   };
 }

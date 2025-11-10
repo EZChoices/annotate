@@ -9,6 +9,7 @@ import {
   mockModeActive,
 } from "../../../../lib/mobile/mockRepo";
 import { consumeRateLimit } from "../../../../lib/mobile/rateLimit";
+import { jsonWithLog, logMobileApi } from "../../../../lib/mobile/logging";
 
 export const dynamic = "force-dynamic";
 
@@ -18,33 +19,58 @@ export async function GET(req: NextRequest) {
     Number.isFinite(countParam) && countParam > 0
       ? Math.min(Math.trunc(countParam), 10)
       : MOBILE_DEFAULT_BUNDLE_SIZE;
+  const startedAt = Date.now();
+  let userId: string | null = null;
   try {
     assertMobileFeatureEnabled();
     const { contributor, supabase } = await requireContributor(req);
+    userId = contributor.id;
     if (
       !consumeRateLimit(contributor.id, "bundle/hour", 10, 60 * 60 * 1000)
     ) {
-      return NextResponse.json(
+      return jsonWithLog(
+        "GET /api/mobile/bundle",
+        userId,
+        startedAt,
         { error: "RATE_LIMIT" },
         { status: 429 }
       );
     }
     if (mockModeActive()) {
       const mockBundle = mockClaimBundle(contributor.id, requestedCount);
-      return NextResponse.json(mockBundle, {
-        headers: { "x-mobile-mock-data": "true" },
-      });
+      return jsonWithLog(
+        "GET /api/mobile/bundle",
+        userId,
+        startedAt,
+        mockBundle,
+        {
+          headers: { "x-mobile-mock-data": "true" },
+        }
+      );
     }
 
     const bundle = await claimBundle(contributor, supabase, requestedCount);
-    return NextResponse.json(bundle);
+    return jsonWithLog(
+      "GET /api/mobile/bundle",
+      userId,
+      startedAt,
+      bundle
+    );
   } catch (error) {
     if (error instanceof MobileApiError && error.code === "VALIDATION_FAILED") {
-      return errorResponse(error);
+      const response = errorResponse(error);
+      logMobileApi("GET /api/mobile/bundle", userId, response.status, startedAt);
+      return response;
     }
     console.warn("[mobile/bundle] falling back to mock data", error);
-    return NextResponse.json(mockClaimBundle("fallback", requestedCount), {
-      headers: { "x-mobile-mock-data": "true" },
-    });
+    return jsonWithLog(
+      "GET /api/mobile/bundle",
+      userId,
+      startedAt,
+      mockClaimBundle("fallback", requestedCount),
+      {
+        headers: { "x-mobile-mock-data": "true" },
+      }
+    );
   }
 }

@@ -1,0 +1,5 @@
+flowchart LR
+  P[pending tasks no ai_suggestion] --> B[batch job]
+  B --> H[local model or stub]
+  H --> S[write tasks.ai_suggestion]
+  S --> API

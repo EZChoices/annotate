@@ -1,0 +1,8 @@
+flowchart TB
+  V["Votes + user weights"] --> MOD["Weighted modal label"]
+  MOD --> G["Count greens"]
+  G --> DEC{"greens >= 4?"}
+  DEC -- yes --> AA["auto_approved"]
+  DEC -- no --> R2{"greens == 3?"}
+  R2 -- yes --> NR["needs_review"]
+  R2 -- no --> ADD["add voters (&lt;= 7)"] --> MOD

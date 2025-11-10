@@ -50,7 +50,7 @@ export function ConfusionMatrix({
           <thead>
             <tr>
               <th className="p-2 text-left text-slate-500 dark:text-slate-400">
-                Consensus ->
+                Consensus →
               </th>
               {labels.map((label) => (
                 <th

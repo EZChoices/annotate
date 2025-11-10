@@ -10,6 +10,13 @@ import type {
   MobileBundleResponse,
   MobileClaimResponse,
 } from "./types";
+import {
+  BundleRecord,
+  createBundleRecord,
+  DEFAULT_BUNDLE_TTL_MS,
+  ensureSingleActiveBundle,
+  expireBundlesInPlace,
+} from "./bundle";
 
 type AssignmentState = "leased" | "released" | "submitted";
 
@@ -23,22 +30,12 @@ interface Assignment {
   playbackStarted?: boolean;
 }
 
-interface Bundle {
-  id: string;
-  contributorId: string;
-  state: "active" | "expired" | "closed";
-  createdAt: number;
-  ttlMs: number;
-  assignmentIds: string[];
-}
-
 const BACKLOG_FACTOR = 80;
-const DEFAULT_TTL_MS = 45 * 60 * 1000;
 const LEASE_MS = 15 * 60 * 1000;
 
 const backlog = new Map<string, MobileClaimResponse[]>();
 const assignments = new Map<string, Assignment>();
-const bundles = new Map<string, Bundle>();
+const bundles = new Map<string, BundleRecord>();
 const responses = new Map<string, { contributorId: string; payload: any }[]>();
 const reputation = new Map<string, number>();
 
@@ -84,18 +81,12 @@ export function mockPeek(taskType?: string) {
   };
 }
 
-function expireBundles(now = Date.now()) {
-  for (const bundle of bundles.values()) {
-    if (bundle.state !== "active") continue;
-    if (bundle.createdAt + bundle.ttlMs < now) {
-      bundle.state = "expired";
-      for (const assignmentId of bundle.assignmentIds) {
-        const assignment = assignments.get(assignmentId);
-        if (assignment && assignment.state === "leased") {
-          assignment.state = "released";
-          recycleAssignment(assignment);
-        }
-      }
+function recycleBundleAssignments(bundle: BundleRecord) {
+  for (const assignmentId of bundle.assignmentIds) {
+    const assignment = assignments.get(assignmentId);
+    if (assignment && assignment.state === "leased") {
+      assignment.state = "released";
+      recycleAssignment(assignment);
     }
   }
 }
@@ -105,23 +96,13 @@ export function mockClaimBundle(
   count: number
 ): MobileBundleResponse {
   ensureBacklog();
-  expireBundles();
-  const existing = Array.from(bundles.values()).find(
-    (bundle) =>
-      bundle.contributorId === contributorId && bundle.state === "active"
-  );
+  expireBundlesInPlace(bundles, recycleBundleAssignments);
+  const existing = ensureSingleActiveBundle(bundles.values(), contributorId);
   if (existing) {
     throw new Error("BUNDLE_ACTIVE");
   }
   const bundleId = `mock-bundle-${randomUUID()}`;
-  const bundle: Bundle = {
-    id: bundleId,
-    contributorId,
-    state: "active",
-    createdAt: Date.now(),
-    ttlMs: DEFAULT_TTL_MS,
-    assignmentIds: [],
-  };
+  const bundle = createBundleRecord(bundleId, contributorId, DEFAULT_BUNDLE_TTL_MS);
   const tasks: MobileClaimResponse[] = [];
   for (let i = 0; i < count; i += 1) {
     const queue = backlog.get("translation_check") || [];

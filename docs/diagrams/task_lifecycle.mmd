@@ -1,0 +1,17 @@
+sequenceDiagram
+  participant Mob as Mobile UI
+  participant SW as Service Worker/IDB
+  participant API as /api/mobile
+  participant DB as DB (tasks, assignments)
+
+  Mob->>API: /bundle?count=3
+  API->>DB: create bundle + N leases (TTL 45m)
+  API-->>Mob: {bundle_id, tasks[]}
+  Mob->>SW: cache media, store bundle
+  Mob->>API: /heartbeat (on play)
+  API->>DB: extend lease (15m rolling)
+
+  Mob->>API: /submit (Idempotency-Key)
+  API->>DB: upsert response, recompute consensus
+  API-->>Mob: {ok, green_count, status}
+  SW->>API: background sync retries if offline

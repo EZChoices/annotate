@@ -1,0 +1,6 @@
+stateDiagram-v2
+  [*] --> active
+  active --> closed: all tasks submitted | user close
+  active --> expired: 45m TTL
+  closed --> [*]
+  expired --> [*]

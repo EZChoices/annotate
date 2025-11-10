@@ -499,7 +499,7 @@ function buildClipPayload(clip: ClipRow | null): MobileClipPayload {
     null;
   const videoUrl = meta.video_url || meta.video || null;
   const captionsUrl =
-    clip.captions_vtt_url ||
+    (clip as any)?.captions_vtt_url ||
     meta.captions_vtt_url ||
     meta.subtitles_vtt_url ||
     meta.transcript_vtt_url ||

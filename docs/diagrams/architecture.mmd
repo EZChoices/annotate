@@ -1,0 +1,15 @@
+flowchart LR
+  U["User on /mobile (PWA)"] --> SW["Service Worker"]
+  U --> UI["React UI"]
+  SW <---> IDB["IndexedDB (bundles + queue)"]
+  UI -->|/api/mobile/*| API["Next.js API Routes"]
+  API --> RLS[("Supabase Postgres + RLS")]
+  API --> STOR["Object Storage (audio HLS, MP4, manifests)"]
+  API --> RC["Remote Config"]
+  subgraph Jobs
+    HINTS["Precompute LLM Hints"]
+    SURGE["Dynamic Pricing"]
+    STITCH["Stitching Pipeline"]
+  end
+  RLS <--> Jobs
+  STOR <--> STITCH

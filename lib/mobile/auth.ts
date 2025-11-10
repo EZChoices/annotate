@@ -4,6 +4,7 @@ import type { User } from "@supabase/supabase-js";
 import { getServiceSupabase } from "../supabaseServer";
 import type { Database } from "../../types/supabase";
 import { MobileApiError } from "./errors";
+import { isMobileMockMode } from "./mockData";
 
 type AuthUserResponse = Awaited<
   ReturnType<ReturnType<typeof createClient<Database>>["auth"]["getUser"]>
@@ -20,6 +21,14 @@ export async function requireContributor(
   req: NextRequest,
   opts?: { requireMobileFlag?: boolean }
 ): Promise<ContributorContext> {
+  if (isMobileMockMode()) {
+    return {
+      contributor: MOCK_CONTRIBUTOR,
+      supabase: null as unknown as ReturnType<typeof getServiceSupabase>,
+      accessToken: "mock-token",
+      userId: MOCK_CONTRIBUTOR.id,
+    };
+  }
   const authHeader = req.headers.get("authorization") || "";
   const token = authHeader.startsWith("Bearer ")
     ? authHeader.slice(7).trim()
@@ -114,6 +123,19 @@ async function getOrCreateContributor(
 
 const ANON_CONTRIBUTOR_ID = "00000000-0000-4000-8000-000000000042";
 const ANON_EMAIL = "anonymous@dialectdata.test";
+const MOCK_CONTRIBUTOR: Database["public"]["Tables"]["contributors"]["Row"] = {
+  id: "mock-contributor",
+  email: "mock@dialectdata.test",
+  feature_flags: { mobile_tasks: true },
+  capabilities: {},
+  handle: "mock-user",
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+  tier: "silver",
+  role: "contributor",
+  locale: "ar",
+  geo_country: null,
+};
 
 async function getOrCreateAnonymousContributor(
   supabase: ReturnType<typeof getServiceSupabase>

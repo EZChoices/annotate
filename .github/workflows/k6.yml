@@ -1,0 +1,57 @@
+name: k6 smoke
+
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - "lib/**"
+      - "load/k6.ts"
+      - "package-lock.json"
+      - "package.json"
+  workflow_dispatch:
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    env:
+      MOBILE_TASKS_ENABLED: "true"
+      NEXT_PUBLIC_ENABLE_MOBILE_TASKS: "true"
+      NEXT_PUBLIC_ENABLE_MOBILE_LOGIN: "true"
+      SUPABASE_SERVICE_ROLE_KEY: "mock"
+      SUPABASE_URL: "https://mock.supabase.local"
+      NEXT_PUBLIC_SUPABASE_URL: "https://mock.supabase.local"
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: "mock"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build
+      - name: Start server
+        run: |
+          PORT=4000 npm start > server.log 2>&1 &
+          echo $! > server.pid
+      - name: Wait for server
+        run: npx wait-on http://localhost:4000/api/mobile/peek
+      - uses: grafana/setup-k6-action@v1
+        with:
+          k6-version: v0.49.0
+      - name: Run k6 smoke
+        run: |
+          k6 run --vus 5 --duration 10s load/k6.ts --summary-export k6-summary.json
+        env:
+          BASE_URL: http://localhost:4000
+      - name: Stop server
+        if: always()
+        run: |
+          if [ -f server.pid ]; then
+            kill $(cat server.pid) || true
+          fi
+      - name: Upload k6 summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-summary
+          path: k6-summary.json

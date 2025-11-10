@@ -11,6 +11,10 @@ function key(userId: string, bucket: string) {
   return `${userId}:${bucket}`;
 }
 
+export function resetRateLimitBuckets() {
+  store.clear();
+}
+
 export function consumeRateLimit(
   userId: string,
   bucket: string,
