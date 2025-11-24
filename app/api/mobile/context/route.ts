@@ -47,18 +47,18 @@ export async function GET(req: NextRequest) {
       { ...context }
     );
   } catch (error) {
-    if (error instanceof MobileApiError && error.code === "VALIDATION_FAILED") {
+    if (error instanceof MobileApiError) {
       const response = errorResponse(error);
       logMobileApi("GET /api/mobile/context", userId, response.status, startedAt);
       return response;
     }
-    console.warn("[mobile/context] falling back to mock data", error);
+    console.error("[mobile/context] unexpected error", error);
     return jsonWithLog(
       "GET /api/mobile/context",
       userId,
       startedAt,
-      getMockContext(clipId || "mock-clip-1"),
-      { headers: { "x-mobile-mock-data": "true" } }
+      { error: "SERVER_ERROR", message: "Context lookup failed" },
+      { status: 500 }
     );
   }
 }

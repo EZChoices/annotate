@@ -57,20 +57,21 @@ export async function GET(req: NextRequest) {
       bundle
     );
   } catch (error) {
-    if (error instanceof MobileApiError && error.code === "VALIDATION_FAILED") {
+    if (error instanceof MobileApiError) {
       const response = errorResponse(error);
       logMobileApi("GET /api/mobile/bundle", userId, response.status, startedAt);
       return response;
     }
-    console.warn("[mobile/bundle] falling back to mock data", error);
+    console.error("[mobile/bundle] unexpected error", error);
     return jsonWithLog(
       "GET /api/mobile/bundle",
       userId,
       startedAt,
-      mockClaimBundle("fallback", requestedCount),
       {
-        headers: { "x-mobile-mock-data": "true" },
-      }
+        error: "SERVER_ERROR",
+        message: "Bundle fetch failed. Check Supabase/Bunny configuration.",
+      },
+      { status: 500 }
     );
   }
 }

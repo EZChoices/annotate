@@ -77,11 +77,17 @@ Backend also accepts Bunny base URL via any of:
 - `BUNNY_BASE`
 - `BUNNY_PULL_BASE`
 
+### Mobile mock + health
+
+- Mock mode is now **opt-in**. Set `MOBILE_ENABLE_MOCK_MODE=true` (or `NEXT_PUBLIC_ENABLE_MOBILE_MOCK=true`) to serve sample clips; otherwise mobile APIs surface Supabase/Bunny misconfigurations instead of silently falling back.
+- Health probe: `GET /api/mobile/health` returns a JSON summary of Supabase key/url presence, Bunny base detection, and whether mock mode is enabled (HTTP 503 when Supabase is missing).
+- Demo-only endpoints live under `/api/mobile/mock/*` (bundle, context, submit) and always return mock payloads with the `x-mobile-mock-data: true` header.
+
 ## Mobile admin utilities
 
 - **Remote config console** - visit `/admin/mobile/settings` (no auth yet) to edit Supabase-backed flags such as `bundle_count`, `golden_ratio`, `captions_default_on`, and any ad-hoc keys. The UI talks to `/api/admin/remote-config`, which now reads/writes the `remote_config` table via `lib/remoteConfig.ts` and caches values for ~60s.
-- **Confusion analytics** – `/admin/mobile/confusion` renders mock KPI cards and accent/emotion matrices. Swap the mock data with real Supabase queries once credentials are ready.
-- **Postman collection** – `docs/postman/MobileTasks.postman_collection.json` contains local/mock calls for peek, bundle, submit, and remote-config endpoints. Import it and set `baseUrl`.
+- **Confusion analytics** - `/admin/mobile/confusion` renders mock KPI cards and accent/emotion matrices. Swap the mock data with real Supabase queries once credentials are ready.
+- **Postman collection** - `docs/postman/MobileTasks.postman_collection.json` contains local/mock calls for peek, bundle, submit, and remote-config endpoints. Import it and set `baseUrl`.
 - **Load test script** – `load/k6.js` exercises peek → bundle → submit against the mock API. Run `k6 run load/k6.js` (set `BASE_URL`, `VUS`, `DURATION` as env vars) to simulate mobile traffic without Supabase.
 
 ## Requirements

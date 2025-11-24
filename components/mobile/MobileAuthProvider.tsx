@@ -27,6 +27,7 @@ export interface MobileAuthContextValue {
   ) => Promise<Response>;
   signOut: () => Promise<void>;
   mode: MobileAuthMode;
+  mockActive: boolean;
 }
 
 const MobileAuthContext = createContext<MobileAuthContextValue | null>(null);
@@ -44,6 +45,7 @@ export function MobileAuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<MobileAuthStatus>(
     otpEnabled ? "loading" : "ready"
   );
+  const [mockActive, setMockActive] = useState(false);
 
   useEffect(() => {
     if (!otpEnabled || !supabase) return;
@@ -68,7 +70,11 @@ export function MobileAuthProvider({ children }: { children: ReactNode }) {
   const fetchWithAuth = useCallback(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       if (!otpEnabled || !supabase) {
-        return fetch(input, init);
+        const response = await fetch(input, init);
+        if (response.headers.get("x-mobile-mock-data") === "true") {
+          setMockActive(true);
+        }
+        return response;
       }
       const headers = new Headers(init?.headers ?? undefined);
       const token =
@@ -80,7 +86,11 @@ export function MobileAuthProvider({ children }: { children: ReactNode }) {
       }
 
       headers.set("Authorization", `Bearer ${token}`);
-      return fetch(input, { ...init, headers });
+      const response = await fetch(input, { ...init, headers });
+      if (response.headers.get("x-mobile-mock-data") === "true") {
+        setMockActive(true);
+      }
+      return response;
     },
     [otpEnabled, session?.access_token, supabase]
   );
@@ -95,6 +105,7 @@ export function MobileAuthProvider({ children }: { children: ReactNode }) {
         fetchWithAuth,
         signOut: async () => {},
         mode: "bypass",
+        mockActive,
       };
     }
 
@@ -108,8 +119,9 @@ export function MobileAuthProvider({ children }: { children: ReactNode }) {
         await supabase?.auth.signOut();
       },
       mode: "otp",
+      mockActive,
     };
-  }, [fetchWithAuth, otpEnabled, session, status, supabase]);
+  }, [fetchWithAuth, mockActive, otpEnabled, session, status, supabase]);
 
   return (
     <MobileAuthContext.Provider value={value}>

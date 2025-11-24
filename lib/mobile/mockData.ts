@@ -1,11 +1,11 @@
 import { randomUUID } from "crypto";
-import { MOBILE_TASKS_ENABLED } from "./constants";
 import type {
   MobileBundleResponse,
   MobileClaimResponse,
   MobileClipPayload,
   TaskType,
 } from "./types";
+import { isMockModeEnabled } from "./health";
 
 const TWELVE_SECONDS = 12_000;
 
@@ -111,33 +111,7 @@ const MOCK_CLIPS: Array<{
 ];
 
 export function isMobileMockMode(): boolean {
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-  const anonKey =
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    process.env.SUPABASE_KEY ||
-    "";
-
-  if (process.env.NEXT_PUBLIC_ENABLE_MOBILE_MOCK === "true") {
-    return true;
-  }
-
-  if (!MOBILE_TASKS_ENABLED) {
-    return true;
-  }
-
-  if (!serviceKey) {
-    return true;
-  }
-
-  if (serviceKey === "mock") {
-    return true;
-  }
-
-  if (!!anonKey && serviceKey === anonKey) {
-    return true;
-  }
-
-  return false;
+  return isMockModeEnabled();
 }
 
 export function generateMockBundle(

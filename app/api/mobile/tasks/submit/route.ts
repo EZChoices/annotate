@@ -91,11 +91,7 @@ export async function POST(req: NextRequest) {
       result
     );
   } catch (error) {
-    if (
-      error instanceof MobileApiError &&
-      error.code !== "SERVER_ERROR" &&
-      error.code !== "UNAUTHORIZED"
-    ) {
+    if (error instanceof MobileApiError) {
       const response = errorResponse(error);
       logMobileApi(
         "POST /api/mobile/tasks/submit",
@@ -105,13 +101,13 @@ export async function POST(req: NextRequest) {
       );
       return response;
     }
-    console.warn("[mobile/submit] falling back to mock success", error);
+    console.error("[mobile/submit] unexpected error", error);
     return jsonWithLog(
       "POST /api/mobile/tasks/submit",
       userId,
       startedAt,
-      { ok: true },
-      { headers: { "x-mobile-mock-data": "true" } }
+      { error: "SERVER_ERROR", message: "Submit failed" },
+      { status: 500 }
     );
   }
 }
