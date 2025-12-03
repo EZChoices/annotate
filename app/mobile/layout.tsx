@@ -7,10 +7,6 @@ import { LocaleProvider } from "../../components/mobile/LocaleProvider";
 import { MobileToastProvider } from "../../components/mobile/MobileToastProvider";
 import { MockModeBanner } from "../../components/mobile/MockModeBanner";
 
-export const metadata = {
-  title: "Dialect Data - Mobile Tasks",
-};
-
 export default function MobileLayout({ children }: { children: ReactNode }) {
   return (
     <MobileAuthProvider>
