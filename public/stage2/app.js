@@ -2621,10 +2621,21 @@ async function startStage2(seed){
         } : null
       });
     }
-    const prefill = await loadPrefillForCurrent();
-    if(prefill){
-      await loadTranslationAndCodeSwitch(prefill);
+    let prefill = null;
+    const [prefillResult] = await Promise.allSettled([loadPrefillForCurrent()]);
+    if(prefillResult.status === 'fulfilled'){
+      prefill = prefillResult.value;
+    } else {
+      console.error('[Stage2] Prefill load failed; continuing without prefill', prefillResult.reason);
+      setPrefillNotice('Failed to load prefill data. You can still proceed.');
     }
+
+    const [tlResult] = await Promise.allSettled([loadTranslationAndCodeSwitch(prefill)]);
+    if(tlResult.status === 'rejected'){
+      console.error('[Stage2] Translation/code-switch prefill failed; continuing', tlResult.reason);
+      setPrefillNotice('Failed to load translation/code-switch prefill. You can still proceed.');
+    }
+
     loadAudio();
     prefetchNext();
     EAQ.state.startedAt = Date.now();

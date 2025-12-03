@@ -1083,19 +1083,19 @@ function TaskActionBar({
   };
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-30 bg-white/95 px-4 py-3 pb-5 shadow-[0_-4px_24px_rgba(15,23,42,0.18)] dark:bg-slate-950/95">
-      <div className="mx-auto flex max-w-md gap-3">
+    <div className="fixed inset-x-0 bottom-0 z-30 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent px-4 pb-6 pt-3">
+      <div className="mx-auto flex max-w-md gap-3 rounded-2xl bg-white/90 p-2 shadow-xl ring-1 ring-slate-200/70 dark:bg-slate-900/90 dark:ring-slate-800/70">
         <button
           onClick={handleSkip}
           disabled={releasing || submitting}
-          className="flex-1 rounded-lg bg-slate-200 py-3 font-semibold text-slate-800 transition hover:bg-slate-300 disabled:opacity-60 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+          className="flex-1 rounded-xl border border-slate-200 bg-white py-3 font-semibold text-slate-800 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:border-slate-600"
         >
           {releasing ? t("skippingState") : t("skipAction")}
         </button>
         <button
           onClick={handleSubmit}
           disabled={submitting}
-          className="flex-1 rounded-lg bg-blue-600 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:opacity-60 dark:bg-blue-500 dark:hover:bg-blue-400"
+          className="flex-1 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-500 py-3 font-semibold text-white shadow-md transition hover:from-blue-500 hover:to-indigo-400 disabled:opacity-60 dark:from-blue-500 dark:to-indigo-500"
         >
           {submitting ? t("submittingState") : t("submitAction")}
         </button>

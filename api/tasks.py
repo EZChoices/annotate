@@ -1631,6 +1631,12 @@ async def get_tasks(
                     "pass_number": pass_number,
                     "previous_annotators": previous_annotators,
                 }
+                if (
+                    not manifest_item["media"].get("video_hls_url")
+                    and media_url
+                    and str(media_url).lower().endswith(".mp4")
+                ):
+                    manifest_item["media"]["video_hls_url"] = media_url
                 prefill_block = manifest_item.get("prefill") or {}
                 core_prefill_present = bool(
                     prefill_block.get("transcript_vtt_url")
