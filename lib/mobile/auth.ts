@@ -24,7 +24,7 @@ function hasSupabaseEnv() {
 }
 
 type AuthUserResponse = Awaited<
-  ReturnType<ReturnType<typeof createClient<Database>["auth"]["getUser"]>>
+  ReturnType<ReturnType<typeof createClient<Database>>["auth"]["getUser"]>
 >;
 
 export interface ContributorContext {
@@ -46,7 +46,7 @@ export async function requireContributor(
   req: NextRequest,
   opts?: { requireMobileFlag?: boolean }
 ): Promise<ContributorContext> {
-  // If we’re running in mock mode or Supabase environment variables are
+  // If we're running in mock mode or Supabase environment variables are
   // entirely absent, return a mock contributor. If the environment variables
   // exist we still return a real Supabase client so downstream calls can
   // interact with the database instead of crashing due to a null client.
@@ -109,7 +109,7 @@ export async function requireContributor(
     }
   }
 
-  return { contributor, supabase, accessToken: token!, userId: data.user!.id };
+  return { contributor, supabase, accessToken: token, userId: data.user.id };
 }
 
 async function getOrCreateContributor(
@@ -202,7 +202,7 @@ async function getOrCreateAnonymousContributor(
     .maybeSingle();
 
   if (byEmail) {
-    return data as any;
+    return data;
   }
 
   const { data: inserted, error } = await supabase
