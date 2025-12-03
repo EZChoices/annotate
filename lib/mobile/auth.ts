@@ -5,7 +5,6 @@ import { getServiceSupabase } from "../supabaseServer";
 import type { Database } from "../../types/supabase";
 import { MobileApiError } from "./errors";
 import { isMobileMockMode } from "./mockData";
-import { getServiceSupabase } from "../supabaseServer";
 
 function hasSupabaseEnv() {
   return Boolean(
