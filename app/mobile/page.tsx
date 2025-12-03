@@ -272,7 +272,7 @@ export default function MobileHomePage() {
               className="flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-base font-semibold text-slate-900 shadow-lg shadow-blue-900/30 transition hover:-translate-y-0.5 hover:shadow-xl disabled:opacity-60"
             >
               {loading ? t("loading") : t("getTasks")}
-              <span className="text-lg">></span>
+              <span className="text-lg">{">"}</span>
             </button>
             <button
               type="button"
