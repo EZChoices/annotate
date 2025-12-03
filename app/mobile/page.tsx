@@ -235,28 +235,22 @@ export default function MobileHomePage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-50">
-      <main className="mx-auto flex w-full max-w-md flex-col gap-5 px-4 pb-24 pt-6">
-        <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-blue-600 via-indigo-500 to-slate-900 p-5 shadow-2xl ring-1 ring-white/10">
-          <div className="absolute inset-0 opacity-30 mix-blend-overlay">
-            <div className="absolute -left-10 top-6 h-28 w-28 rounded-full bg-white/20 blur-3xl" />
-            <div className="absolute right-2 bottom-6 h-24 w-24 rounded-full bg-emerald-300/20 blur-3xl" />
-          </div>
-          <div className="relative flex items-start justify-between gap-3">
+    <div className="mobile-shell">
+      <main className="mobile-main">
+        <section className="hero">
+          <div className="hero-glow hero-glow-a" />
+          <div className="hero-glow hero-glow-b" />
+          <div className="hero-top">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-white/70">
-                {t("brand")}
-              </p>
-              <h1 className="mt-1 text-3xl font-bold leading-tight text-white">
-                {t("workOnTasks")}
-              </h1>
-              <p className="mt-1 text-sm text-white/80">
+              <p className="eyebrow">{t("brand")}</p>
+              <h1 className="hero-title">{t("workOnTasks")}</h1>
+              <p className="hero-subtitle">
                 Clip bundles refresh throughout the day. Stay in flow.
               </p>
             </div>
             <LocaleToggle />
           </div>
-          <div className="relative mt-4 grid grid-cols-3 gap-3 text-sm font-semibold text-white/90">
+          <div className="stat-grid">
             <StatusPill
               label={online ? t("statusOnline") : t("statusOffline")}
               tone={online ? "emerald" : "amber"}
@@ -265,56 +259,46 @@ export default function MobileHomePage() {
             <StatCard label="Cached" value={cachedCount} helper="ready clips" />
             <StatCard label="Queued" value={queuedCount} helper="pending sends" />
           </div>
-          <div className="relative mt-5 grid grid-cols-2 gap-3">
+          <div className="cta-row">
             <button
               onClick={fetchBundle}
               disabled={loading}
-              className="flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-base font-semibold text-slate-900 shadow-lg shadow-blue-900/30 transition hover:-translate-y-0.5 hover:shadow-xl disabled:opacity-60"
+              className="cta-primary"
             >
               {loading ? t("loading") : t("getTasks")}
-              <span className="text-lg">{">"}</span>
+              <span className="chevron">{">"}</span>
             </button>
             <button
               type="button"
               onClick={() => setShowQueue(true)}
-              className="flex items-center justify-center gap-2 rounded-2xl border border-white/30 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15"
+              className="cta-secondary"
             >
               Offline queue
               {queuedCount > 0 ? (
-                <span className="inline-flex min-w-[2rem] justify-center rounded-full bg-white/80 px-2 py-0.5 text-xs font-bold text-slate-900">
-                  {queuedCount}
-                </span>
+                <span className="badge">{queuedCount}</span>
               ) : null}
             </button>
           </div>
         </section>
 
-        {error ? (
-          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 shadow-lg shadow-rose-200/40 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-100">
-            {error}
-          </div>
-        ) : null}
+        {error ? <div className="alert">{error}</div> : null}
 
-        <section className="rounded-3xl bg-white/95 px-4 py-5 shadow-xl ring-1 ring-slate-100/60 dark:bg-slate-900/90 dark:ring-slate-800/60">
-          <div className="flex items-center justify-between">
+        <section className="panel">
+          <div className="panel-header">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                Today&apos;s bundle
-              </p>
-              <p className="text-xs text-slate-400">{flatTasks.length} clips ready</p>
+              <p className="eyebrow muted">Today&apos;s bundle</p>
+              <p className="muted tiny">{flatTasks.length} clips ready</p>
             </div>
-            <div className="flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-100">
-              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+            <div className="sync-pill">
+              <span className="dot" />
               {online ? "Auto-sync on" : "Will sync when online"}
             </div>
           </div>
-          <div className="mt-4 space-y-3">
+          <div className="panel-body">
             {flatTasks.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
+              <div className="empty">
                 {t("noCached")}
-                <div className="mt-2 text-xs text-slate-400">
-                  Fetch a bundle to start a new run.
-                </div>
+                <div className="tiny muted">Fetch a bundle to start a new run.</div>
               </div>
             ) : (
               flatTasks.map(({ bundle_id, task }) => (
@@ -338,6 +322,475 @@ export default function MobileHomePage() {
           />
         ) : null}
       </main>
+      <style jsx>{`
+        .mobile-shell {
+          min-height: 100vh;
+          background: radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.12), transparent 32%),
+            radial-gradient(circle at 80% 0%, rgba(14, 165, 233, 0.1), transparent 28%),
+            radial-gradient(circle at 50% 80%, rgba(79, 70, 229, 0.08), transparent 36%),
+            #0b1220;
+          color: #f8fafc;
+        }
+        .mobile-main {
+          max-width: 420px;
+          margin: 0 auto;
+          padding: 24px 16px 80px;
+          display: flex;
+          flex-direction: column;
+          gap: 18px;
+        }
+        .hero {
+          position: relative;
+          overflow: hidden;
+          border-radius: 22px;
+          padding: 20px;
+          background: linear-gradient(145deg, #2563eb, #4f46e5 55%, #0f172a);
+          box-shadow: 0 20px 50px rgba(15, 23, 42, 0.45);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .hero-glow {
+          position: absolute;
+          border-radius: 999px;
+          filter: blur(38px);
+          opacity: 0.4;
+        }
+        .hero-glow-a {
+          width: 140px;
+          height: 140px;
+          background: rgba(255, 255, 255, 0.24);
+          top: 12px;
+          left: -30px;
+        }
+        .hero-glow-b {
+          width: 110px;
+          height: 110px;
+          background: rgba(52, 211, 153, 0.28);
+          bottom: 12px;
+          right: 4px;
+        }
+        .hero-top {
+          position: relative;
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+        }
+        .hero-title {
+          margin: 4px 0;
+          font-size: 28px;
+          font-weight: 700;
+          line-height: 1.1;
+        }
+        .hero-subtitle {
+          margin: 0;
+          font-size: 14px;
+          color: rgba(255, 255, 255, 0.82);
+        }
+        .eyebrow {
+          margin: 0;
+          font-size: 11px;
+          letter-spacing: 0.22em;
+          text-transform: uppercase;
+          font-weight: 600;
+          color: rgba(255, 255, 255, 0.7);
+        }
+        .eyebrow.muted {
+          color: #94a3b8;
+          letter-spacing: 0.18em;
+        }
+        .stat-grid {
+          position: relative;
+          margin-top: 14px;
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 10px;
+        }
+        .cta-row {
+          position: relative;
+          margin-top: 16px;
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+        .cta-primary,
+        .cta-secondary {
+          border: none;
+          border-radius: 14px;
+          padding: 12px 14px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+        }
+        .cta-primary {
+          background: #ffffff;
+          color: #0f172a;
+          box-shadow: 0 12px 28px rgba(0, 0, 0, 0.2);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+        }
+        .cta-primary:disabled {
+          opacity: 0.65;
+          cursor: not-allowed;
+        }
+        .cta-primary:not(:disabled):hover {
+          transform: translateY(-1px);
+        }
+        .cta-secondary {
+          background: rgba(255, 255, 255, 0.14);
+          color: #ffffff;
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+        }
+        .cta-secondary:hover {
+          transform: translateY(-1px);
+        }
+        .badge {
+          min-width: 26px;
+          text-align: center;
+          padding: 4px 6px;
+          border-radius: 999px;
+          background: #ffffff;
+          color: #0f172a;
+          font-size: 12px;
+          font-weight: 800;
+        }
+        .chevron {
+          font-size: 16px;
+          line-height: 1;
+        }
+        .alert {
+          background: #fef2f2;
+          color: #991b1b;
+          border: 1px solid #fecdd3;
+          border-radius: 14px;
+          padding: 12px 14px;
+          font-size: 14px;
+          box-shadow: 0 8px 18px rgba(248, 113, 113, 0.15);
+        }
+        .panel {
+          background: rgba(255, 255, 255, 0.96);
+          color: #0f172a;
+          border-radius: 18px;
+          padding: 14px 14px 16px;
+          box-shadow: 0 16px 38px rgba(15, 23, 42, 0.22);
+          border: 1px solid rgba(148, 163, 184, 0.2);
+        }
+        .panel-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+        }
+        .panel-body {
+          margin-top: 12px;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        .status-pill {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          border-radius: 14px;
+          padding: 10px;
+          box-shadow: 0 12px 22px rgba(0, 0, 0, 0.16);
+        }
+        .stat-card {
+          border-radius: 14px;
+          padding: 10px;
+          background: rgba(255, 255, 255, 0.12);
+          border: 1px solid rgba(255, 255, 255, 0.14);
+          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+        }
+        .pill-title {
+          font-size: 12px;
+          font-weight: 700;
+          letter-spacing: 0.05em;
+          text-transform: uppercase;
+        }
+        .pill-helper {
+          font-size: 11px;
+          color: rgba(255, 255, 255, 0.82);
+        }
+        .stat-value {
+          font-size: 22px;
+          font-weight: 800;
+          color: #ffffff;
+          margin: 4px 0;
+        }
+        .sync-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 10px;
+          border-radius: 999px;
+          background: #e2e8f0;
+          color: #0f172a;
+          font-size: 11px;
+          font-weight: 700;
+        }
+        .sync-pill .dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 999px;
+          background: #22c55e;
+        }
+        .empty {
+          border: 1px dashed #cbd5e1;
+          border-radius: 14px;
+          padding: 18px;
+          text-align: center;
+          background: #f8fafc;
+          color: #475569;
+          font-size: 14px;
+        }
+        .muted {
+          color: #94a3b8;
+        }
+        .tiny {
+          font-size: 12px;
+        }
+        .task-card {
+          display: block;
+          border-radius: 16px;
+          padding: 14px;
+          background: linear-gradient(135deg, #ffffff, #f8fafc);
+          border: 1px solid rgba(148, 163, 184, 0.35);
+          box-shadow: 0 12px 26px rgba(15, 23, 42, 0.15);
+          color: #0f172a;
+          text-decoration: none;
+          transition: transform 120ms ease, box-shadow 120ms ease;
+        }
+        .task-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 16px 32px rgba(59, 130, 246, 0.15);
+        }
+        .task-top {
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+        }
+        .task-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 6px 10px;
+          background: #e2e8f0;
+          border-radius: 999px;
+          font-size: 12px;
+          font-weight: 700;
+          color: #1e293b;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+        .task-hint {
+          background: #2563eb;
+          color: #ffffff;
+          border-radius: 999px;
+          padding: 4px 8px;
+          font-size: 10px;
+          font-weight: 800;
+        }
+        .task-title {
+          margin: 6px 0 4px;
+          font-size: 22px;
+          font-weight: 800;
+          color: #0f172a;
+        }
+        .task-meta {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          font-size: 12px;
+          font-weight: 700;
+          color: #475569;
+        }
+        .task-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 10px;
+          border-radius: 999px;
+          background: #f1f5f9;
+          color: #1e293b;
+          font-weight: 700;
+        }
+        .task-pill.payout {
+          background: #dcfce7;
+          color: #166534;
+        }
+        .task-side {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 8px;
+          text-align: right;
+        }
+        .lease {
+          font-size: 12px;
+          font-weight: 700;
+          color: #475569;
+        }
+        .lease-warn {
+          color: #d97706;
+        }
+        .task-start {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 8px 12px;
+          border-radius: 999px;
+          background: linear-gradient(135deg, #2563eb, #4f46e5);
+          color: #ffffff;
+          font-size: 12px;
+          font-weight: 800;
+          box-shadow: 0 10px 22px rgba(37, 99, 235, 0.28);
+        }
+        .task-footer {
+          margin-top: 12px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 10px;
+          color: #475569;
+          font-size: 12px;
+        }
+        .lease-bar {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .lease-bar .lease-fill {
+          display: block;
+          height: 6px;
+          border-radius: 999px;
+          background: linear-gradient(90deg, #22c55e, #2563eb);
+          width: 80%;
+        }
+        .modal-backdrop {
+          position: fixed;
+          inset: 0;
+          background: rgba(0, 0, 0, 0.65);
+          backdrop-filter: blur(6px);
+          display: flex;
+          align-items: flex-end;
+          justify-content: center;
+          padding: 16px;
+          z-index: 40;
+        }
+        @media (min-width: 540px) {
+          .modal-backdrop {
+            align-items: center;
+          }
+        }
+        .modal {
+          width: 100%;
+          max-width: 420px;
+          background: #0b1220;
+          color: #e2e8f0;
+          border-radius: 18px;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          box-shadow: 0 22px 48px rgba(0, 0, 0, 0.45);
+          padding: 14px;
+        }
+        .modal-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          padding-bottom: 8px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .modal-title {
+          margin: 4px 0;
+          font-size: 18px;
+          font-weight: 700;
+        }
+        .modal-close {
+          border: 1px solid rgba(255, 255, 255, 0.18);
+          background: rgba(255, 255, 255, 0.08);
+          color: #ffffff;
+          border-radius: 999px;
+          padding: 6px 12px;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+        }
+        .modal-actions {
+          display: flex;
+          gap: 8px;
+          margin: 10px 0;
+          flex-wrap: wrap;
+        }
+        .btn-solid,
+        .btn-ghost {
+          border: none;
+          border-radius: 12px;
+          padding: 10px 12px;
+          font-weight: 700;
+          cursor: pointer;
+        }
+        .btn-solid {
+          background: linear-gradient(135deg, #2563eb, #4f46e5);
+          color: #ffffff;
+          box-shadow: 0 10px 24px rgba(37, 99, 235, 0.25);
+        }
+        .btn-solid:disabled,
+        .btn-ghost:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+        .btn-ghost {
+          background: rgba(255, 255, 255, 0.08);
+          color: #e2e8f0;
+          border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+        .btn-ghost.danger {
+          border-color: rgba(248, 113, 113, 0.5);
+          color: #fecdd3;
+        }
+        .modal-list {
+          list-style: none;
+          padding: 0;
+          margin: 0;
+          max-height: 290px;
+          overflow-y: auto;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+        .modal-item {
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          border-radius: 12px;
+          padding: 10px;
+          background: rgba(255, 255, 255, 0.04);
+        }
+        .modal-item-title {
+          margin: 0 0 4px;
+          font-weight: 700;
+          color: #ffffff;
+        }
+        .modal-buttons {
+          display: flex;
+          gap: 8px;
+          margin-top: 8px;
+        }
+        @media (max-width: 480px) {
+          .mobile-main {
+            padding: 20px 12px 72px;
+          }
+          .stat-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+          }
+          .cta-row {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+        }
+      `}</style>
     </div>
   );
 }
@@ -351,16 +804,14 @@ function StatusPill({
   helper: string;
   tone?: "emerald" | "amber";
 }) {
-  const toneClass =
+  const styles =
     tone === "emerald"
-      ? "bg-emerald-500/20 text-white border border-emerald-200/40"
-      : "bg-amber-400/25 text-white border border-amber-100/30";
+      ? { background: "rgba(34,197,94,0.18)", border: "1px solid rgba(74,222,128,0.4)" }
+      : { background: "rgba(251,191,36,0.2)", border: "1px solid rgba(252,211,77,0.35)" };
   return (
-    <div
-      className={`flex flex-col gap-0.5 rounded-2xl px-3 py-2 shadow-lg shadow-black/10 ${toneClass}`}
-    >
-      <span className="text-xs font-semibold uppercase tracking-wide">{label}</span>
-      <span className="text-[11px] text-white/80">{helper}</span>
+    <div className="status-pill" style={styles}>
+      <span className="pill-title">{label}</span>
+      <span className="pill-helper">{helper}</span>
     </div>
   );
 }
@@ -375,10 +826,10 @@ function StatCard({
   helper: string;
 }) {
   return (
-    <div className="rounded-2xl border border-white/15 bg-white/10 px-3 py-2 shadow-inner">
-      <p className="text-[11px] uppercase tracking-wide text-white/70">{label}</p>
-      <p className="text-2xl font-bold text-white">{value}</p>
-      <p className="text-[11px] text-white/70">{helper}</p>
+    <div className="stat-card">
+      <p className="pill-title muted">{label}</p>
+      <p className="stat-value">{value}</p>
+      <p className="pill-helper muted">{helper}</p>
     </div>
   );
 }
@@ -403,57 +854,36 @@ function TaskCard({ task }: { task: MobileClaimResponse }) {
   const isShortLease = warning || leaseLabel === "Expired";
 
   return (
-    <a
-      className="block overflow-hidden rounded-2xl border border-slate-200/70 bg-white/95 p-4 shadow-lg shadow-slate-900/5 transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-xl dark:border-slate-800 dark:bg-slate-900/80 dark:hover:border-blue-500/40"
-      href={href}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="space-y-1">
-          <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800/70 dark:text-slate-200">
+    <a className="task-card" href={href}>
+      <div className="task-top">
+        <div>
+          <div className="task-chip">
             {friendlyName}
-            {hasHint ? (
-              <span className="rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white">
-                {t("aiHint")}
-              </span>
-            ) : null}
+            {hasHint ? <span className="task-hint">{t("aiHint")}</span> : null}
           </div>
-          <h3 className="text-2xl font-bold text-slate-900 dark:text-white">
-            {durationLabel}
-          </h3>
-          <div className="flex flex-wrap items-center gap-2 text-[12px] font-semibold text-slate-600 dark:text-slate-300">
-            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 dark:bg-slate-800/70">
-              {clipDuration}
-            </span>
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-1 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-200">
-              {payout}
-            </span>
+          <h3 className="task-title">{durationLabel}</h3>
+          <div className="task-meta">
+            <span className="task-pill">{clipDuration}</span>
+            <span className="task-pill payout">{payout}</span>
           </div>
         </div>
-        <div className="flex flex-col items-end gap-2 text-right">
-          <span
-            className={`text-xs font-semibold ${
-              isShortLease ? "text-amber-500" : "text-slate-500 dark:text-slate-400"
-            }`}
-          >
+        <div className="task-side">
+          <span className={`lease ${isShortLease ? "lease-warn" : ""}`}>
             {t("leaseLabel", { time: leaseLabel })}
           </span>
-          <span className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-md transition hover:bg-blue-500 dark:bg-blue-500 dark:hover:bg-blue-400">
+          <span className="task-start">
             Start
             <span aria-hidden="true">{">"}</span>
           </span>
         </div>
       </div>
-      <div className="mt-3 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 dark:bg-slate-800/70">
-          Assignment {task.assignment_id.slice(0, 6)}
-        </span>
-        <span className="inline-flex items-center gap-2">
-          <span className="h-1.5 w-14 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
-            <span
-              className="block h-full rounded-full bg-blue-500 transition-all"
-              style={{ width: isShortLease ? "60%" : "90%" }}
-            />
-          </span>
+      <div className="task-footer">
+        <span className="task-pill">Assignment {task.assignment_id.slice(0, 6)}</span>
+        <span className="lease-bar">
+          <span
+            className="lease-fill"
+            style={{ width: isShortLease ? "60%" : "90%" }}
+          />
           {warning ? "Soon" : "Fresh"}
         </span>
       </div>
@@ -486,101 +916,86 @@ function OfflineQueueModal({
   const anyPending = pending.length > 0;
   const bulkDisabled = bulkAction !== null || queueAction !== null;
   return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/60 p-4 backdrop-blur-md sm:items-center">
-      <div className="w-full max-w-md overflow-hidden rounded-2xl bg-slate-950 text-slate-50 shadow-2xl ring-1 ring-white/10">
-        <div className="border-b border-white/10 px-4 py-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.2em] text-white/60">
-                {t("offlineQueueTitle")}
-              </p>
-              <h2 className="text-lg font-semibold">
-                {t("offlineQueueHeading", {
-                  cached: cachedCount,
-                  queued: pending.length,
-                })}
-              </h2>
-            </div>
-            <button
-              onClick={onClose}
-              className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white hover:bg-white/20"
-            >
-              {t("close")}
-            </button>
+    <div className="modal-backdrop">
+      <div className="modal">
+        <div className="modal-header">
+          <div>
+            <p className="eyebrow muted">{t("offlineQueueTitle")}</p>
+            <h2 className="modal-title">
+              {t("offlineQueueHeading", { cached: cachedCount, queued: pending.length })}
+            </h2>
           </div>
-          <p className="mt-1 text-xs text-white/60">{t("offlineQueueBulkHint")}</p>
+          <button onClick={onClose} className="modal-close">
+            {t("close")}
+          </button>
         </div>
-        <div className="px-4 py-3">
-          {!anyPending ? (
-            <p className="text-sm text-white/70">{t("offlineQueueEmpty")}</p>
-          ) : (
-            <>
-              <div className="mb-3 flex flex-wrap gap-2 text-xs">
-                <button
-                  type="button"
-                  onClick={onRetryAll}
-                  disabled={bulkDisabled}
-                  className="rounded-lg bg-blue-500 px-3 py-2 font-semibold text-white shadow hover:bg-blue-400 disabled:opacity-60"
-                >
-                  {bulkAction === "retryAll" ? t("retryingState") : t("retryAllAction")}
-                </button>
-                <button
-                  type="button"
-                  onClick={onClearAll}
-                  disabled={bulkDisabled}
-                  className="rounded-lg bg-rose-500/80 px-3 py-2 font-semibold text-white shadow hover:bg-rose-400 disabled:opacity-60"
-                >
-                  {bulkAction === "clearAll" ? t("removingState") : t("clearAllAction")}
-                </button>
-              </div>
-              <ul className="max-h-72 space-y-3 overflow-y-auto pr-1">
-                {pending.map((entry) => {
-                  const isRetrying =
-                    queueAction?.type === "retry" &&
-                    queueAction?.id === entry.idempotencyKey;
-                  const isRemoving =
-                    queueAction?.type === "remove" &&
-                    queueAction?.id === entry.idempotencyKey;
-                  const anotherActionInFlight =
-                    queueAction !== null && queueAction?.id !== entry.idempotencyKey;
-                  return (
-                    <li
-                      key={entry.idempotencyKey}
-                      className="rounded-xl border border-white/10 bg-white/5 p-3 text-sm shadow-sm"
-                    >
-                      <p className="font-semibold text-white">
-                        {entry.task_id} - {entry.assignment_id}
-                      </p>
-                      <p className="text-xs text-white/60">
-                        {t("queueQueuedAt", {
-                          time: new Date(entry.created_at).toLocaleTimeString(),
-                        })}
-                      </p>
-                      <div className="mt-2 flex gap-2 text-xs">
-                        <button
-                          type="button"
-                          onClick={() => onRetry(entry)}
-                          disabled={anotherActionInFlight || isRemoving || isRetrying}
-                          className="flex-1 rounded-lg bg-blue-500 px-3 py-2 font-semibold text-white transition hover:bg-blue-400 disabled:opacity-60"
-                        >
-                          {isRetrying ? t("retryingState") : t("retryAction")}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onRemove(entry)}
-                          disabled={anotherActionInFlight || isRetrying || isRemoving}
-                          className="flex-1 rounded-lg bg-slate-800 px-3 py-2 font-semibold text-white transition hover:bg-slate-700 disabled:opacity-60"
-                        >
-                          {isRemoving ? t("removingState") : t("removeQueueAction")}
-                        </button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </>
-          )}
-        </div>
+        <p className="muted tiny">{t("offlineQueueBulkHint")}</p>
+        {!anyPending ? (
+          <p className="muted" style={{ marginTop: 8 }}>
+            {t("offlineQueueEmpty")}
+          </p>
+        ) : (
+          <>
+            <div className="modal-actions">
+              <button
+                type="button"
+                onClick={onRetryAll}
+                disabled={bulkDisabled}
+                className="btn-solid"
+              >
+                {bulkAction === "retryAll" ? t("retryingState") : t("retryAllAction")}
+              </button>
+              <button
+                type="button"
+                onClick={onClearAll}
+                disabled={bulkDisabled}
+                className="btn-ghost danger"
+              >
+                {bulkAction === "clearAll" ? t("removingState") : t("clearAllAction")}
+              </button>
+            </div>
+            <ul className="modal-list">
+              {pending.map((entry) => {
+                const isRetrying =
+                  queueAction?.type === "retry" && queueAction?.id === entry.idempotencyKey;
+                const isRemoving =
+                  queueAction?.type === "remove" && queueAction?.id === entry.idempotencyKey;
+                const anotherActionInFlight =
+                  queueAction !== null && queueAction?.id !== entry.idempotencyKey;
+                return (
+                  <li key={entry.idempotencyKey} className="modal-item">
+                    <p className="modal-item-title">
+                      {entry.task_id} - {entry.assignment_id}
+                    </p>
+                    <p className="tiny muted">
+                      {t("queueQueuedAt", {
+                        time: new Date(entry.created_at).toLocaleTimeString(),
+                      })}
+                    </p>
+                    <div className="modal-buttons">
+                      <button
+                        type="button"
+                        onClick={() => onRetry(entry)}
+                        disabled={anotherActionInFlight || isRemoving || isRetrying}
+                        className="btn-solid"
+                      >
+                        {isRetrying ? t("retryingState") : t("retryAction")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onRemove(entry)}
+                        disabled={anotherActionInFlight || isRetrying || isRemoving}
+                        className="btn-ghost"
+                      >
+                        {isRemoving ? t("removingState") : t("removeQueueAction")}
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        )}
       </div>
     </div>
   );

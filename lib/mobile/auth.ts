@@ -5,6 +5,17 @@ import { getServiceSupabase } from "../supabaseServer";
 import type { Database } from "../../types/supabase";
 import { MobileApiError } from "./errors";
 import { isMobileMockMode } from "./mockData";
+import { getServiceSupabase } from "../supabaseServer";
+
+function hasSupabaseEnv() {
+  return Boolean(
+    (process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL) &&
+      (process.env.SUPABASE_SERVICE_ROLE_KEY ||
+        process.env.SUPABASE_SERVICE_KEY ||
+        process.env.SUPABASE_KEY ||
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
+  );
+}
 
 type AuthUserResponse = Awaited<
   ReturnType<ReturnType<typeof createClient<Database>>["auth"]["getUser"]>
@@ -21,7 +32,7 @@ export async function requireContributor(
   req: NextRequest,
   opts?: { requireMobileFlag?: boolean }
 ): Promise<ContributorContext> {
-  if (isMobileMockMode()) {
+  if (isMobileMockMode() || !hasSupabaseEnv()) {
     return {
       contributor: MOCK_CONTRIBUTOR,
       supabase: null as unknown as ReturnType<typeof getServiceSupabase>,
