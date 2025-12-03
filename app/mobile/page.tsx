@@ -439,7 +439,7 @@ function TaskCard({ task }: { task: MobileClaimResponse }) {
           </span>
           <span className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-md transition hover:bg-blue-500 dark:bg-blue-500 dark:hover:bg-blue-400">
             Start
-            <span aria-hidden="true">></span>
+            <span aria-hidden="true">{">"}</span>
           </span>
         </div>
       </div>
