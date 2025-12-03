@@ -46,13 +46,26 @@ export async function requireContributor(
   const supabase = getServiceSupabase();
 
   if (!token) {
-    const contributor = await getOrCreateAnonymousContributor(supabase);
-    return {
-      contributor,
-      supabase,
-      accessToken: "anonymous-bypass",
-      userId: contributor.id,
-    };
+    try {
+      const contributor = await getOrCreateAnonymousContributor(supabase);
+      return {
+        contributor,
+        supabase,
+        accessToken: "anonymous-bypass",
+        userId: contributor.id,
+      };
+    } catch (error) {
+      console.warn(
+        "[mobile] anonymous contributor create failed; falling back to mock mode",
+        error
+      );
+      return {
+        contributor: MOCK_CONTRIBUTOR,
+        supabase: null as unknown as ReturnType<typeof getServiceSupabase>,
+        accessToken: "mock-token",
+        userId: MOCK_CONTRIBUTOR.id,
+      };
+    }
   }
 
   const { data, error }: AuthUserResponse = await supabase.auth.getUser(token);
