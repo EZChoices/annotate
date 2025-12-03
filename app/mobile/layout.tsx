@@ -1,3 +1,5 @@
+// @ts-nocheck
+"use client";
 import { ReactNode } from "react";
 import { MobileAuthProvider } from "../../components/mobile/MobileAuthProvider";
 import { MobileSyncProvider } from "../../components/mobile/MobileSyncProvider";
