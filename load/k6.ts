@@ -16,12 +16,14 @@ export const options = {
 
 function mockPayload(task) {
   return {
-    task_id: task?.task_id || "mock-task",
-    assignment_id: task?.assignment_id || "mock-assign",
+    task_id: (task && task.task_id) || "mock-task",
+    assignment_id: (task && task.assignment_id) || "mock-assign",
     payload: { approved: true },
     duration_ms: 12000,
     playback_ratio: 0.92,
   };
+}
+
 }
 
 export default function () {
