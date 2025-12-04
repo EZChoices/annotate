@@ -34,7 +34,7 @@ export async function requireContributor(
   if (isMobileMockMode() || !hasSupabaseEnv()) {
     return {
       contributor: MOCK_CONTRIBUTOR,
-      supabase: null as unknown as ReturnType<typeof getServiceSupabase>,
+supabase: hasSupabaseEnv() ? getServiceSupabase() : null,
       accessToken: "mock-token",
       userId: MOCK_CONTRIBUTOR.id,
     };
@@ -60,11 +60,10 @@ export async function requireContributor(
         error
       );
       return {
-        contributor: MOCK_CONTRIBUTOR,
-        supabase: null as unknown as ReturnType<typeof getServiceSupabase>,
+    contributor: MOCK_CONTRIBUTOR,
+        supabase,
         accessToken: "mock-token",
         userId: MOCK_CONTRIBUTOR.id,
-      };
     }
   }
 
