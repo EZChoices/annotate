@@ -23,7 +23,6 @@ function mockPayload(task) {
     playback_ratio: 0.92,
   };
 }
-
 }
 
 export default function () {
