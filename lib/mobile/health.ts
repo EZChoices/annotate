@@ -19,7 +19,7 @@ export function isMockModeEnabled(env: NodeJS.ProcessEnv = process.env) {
       (env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL || env.SUPABASE_PROJECT_URL) &&
         serviceKey
     );
-  if (!hasSupabase) return true;
+  if (!hasSupabase) return explicit;
   return explicit || explicitMockKey;
 }
 
