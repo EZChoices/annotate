@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertMobileFeatureEnabled } from "../../../../lib/mobile/feature";
 import { requireContributor } from "../../../../lib/mobile/auth";
-import { claimBundle } from "../../../../lib/mobile/taskService";
+import {
+  claimBundle,
+  summarizeCandidateTasks,
+} from "../../../../lib/mobile/taskService";
 import { errorResponse, MobileApiError } from "../../../../lib/mobile/errors";
 import { MOBILE_DEFAULT_BUNDLE_SIZE } from "../../../../lib/mobile/constants";
 import {
@@ -21,9 +24,12 @@ export async function GET(req: NextRequest) {
       : MOBILE_DEFAULT_BUNDLE_SIZE;
   const startedAt = Date.now();
   let userId: string | null = null;
+  let contributorContext: Awaited<ReturnType<typeof requireContributor>> | null =
+    null;
   try {
     assertMobileFeatureEnabled();
-    const { contributor, supabase } = await requireContributor(req);
+    contributorContext = await requireContributor(req);
+    const { contributor, supabase } = contributorContext;
     userId = contributor.id;
     if (
       !consumeRateLimit(contributor.id, "bundle/hour", 10, 60 * 60 * 1000)
@@ -58,6 +64,48 @@ export async function GET(req: NextRequest) {
     );
   } catch (error) {
     if (error instanceof MobileApiError) {
+      if (error.code === "NO_TASKS") {
+        const candidateStats =
+          contributorContext?.supabase && !mockModeActive()
+            ? await summarizeCandidateTasks(contributorContext.supabase)
+            : null;
+
+        console.warn("[mobile bundle] NO_TASKS", {
+          contributorId: contributorContext?.contributor.id,
+          locale: contributorContext?.contributor.locale,
+          featureFlags: contributorContext?.contributor.feature_flags,
+          filters: {
+            status: ["pending", "in_progress"],
+            requiredLocale: contributorContext?.contributor.locale ?? null,
+            requiredGeo: contributorContext?.contributor.geo_country ?? null,
+            tier: contributorContext?.contributor.tier ?? null,
+          },
+          queryStats: {
+            totalCandidates: candidateStats?.totalCandidates ?? -1,
+            finalPicked: 0,
+          },
+        });
+
+        const response = NextResponse.json(
+          {
+            status: "NO_TASKS",
+            debug: {
+              contributorId: contributorContext?.contributor.id ?? null,
+              locale: contributorContext?.contributor.locale ?? null,
+              featureFlags: contributorContext?.contributor.feature_flags ?? null,
+            },
+          },
+          { status: 200 }
+        );
+
+        logMobileApi(
+          "GET /api/mobile/bundle",
+          userId,
+          response.status,
+          startedAt
+        );
+        return response;
+      }
       const response = errorResponse(error);
       logMobileApi("GET /api/mobile/bundle", userId, response.status, startedAt);
       return response;

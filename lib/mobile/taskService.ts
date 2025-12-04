@@ -468,6 +468,23 @@ async function fetchCandidates(
   return ((data as TaskRecord[]) ?? []).filter(Boolean);
 }
 
+export async function summarizeCandidateTasks(
+  supabase: Supabase,
+  opts: { limit?: number } = {}
+) {
+  const limit = opts.limit ?? 50;
+  const [goldenCandidates, regularCandidates] = await Promise.all([
+    fetchCandidates(supabase, { goldenOnly: true, limit }),
+    fetchCandidates(supabase, { goldenOnly: false, limit }),
+  ]);
+
+  return {
+    goldenCandidates: goldenCandidates.length,
+    regularCandidates: regularCandidates.length,
+    totalCandidates: goldenCandidates.length + regularCandidates.length,
+  };
+}
+
 async function loadAssignments(supabase: Supabase, taskId: string) {
   const { data } = await supabase
     .from("task_assignments")
