@@ -14,13 +14,15 @@ import {
 
 const contributorId = "tester";
 
-test("mock bundle enforces single active bundle", () => {
+test("mock bundle returns existing tasks when bundle already active", () => {
   const bundle = mockClaimBundle(`${contributorId}-bundle`, 2);
   assert.equal(bundle.tasks.length, 2);
-  assert.throws(
-    () => mockClaimBundle(`${contributorId}-bundle`, 1),
-    /BUNDLE_ACTIVE/,
-    "second active bundle should throw"
+  const second = mockClaimBundle(`${contributorId}-bundle`, 1);
+  assert.equal(second.bundle_id, bundle.bundle_id);
+  assert.deepEqual(
+    second.tasks.map((task) => task.assignment_id),
+    bundle.tasks.map((task) => task.assignment_id),
+    "active bundle should return the existing task set"
   );
   const assignmentId = bundle.tasks[0].assignment_id;
   mockReleaseAssignment(assignmentId);
