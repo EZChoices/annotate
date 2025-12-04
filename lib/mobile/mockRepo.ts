@@ -99,7 +99,12 @@ export function mockClaimBundle(
   expireBundlesInPlace(bundles, recycleBundleAssignments);
   const existing = ensureSingleActiveBundle(bundles.values(), contributorId);
   if (existing) {
-    throw new Error("BUNDLE_ACTIVE");
+    const tasks = existing.assignmentIds
+      .map((assignmentId) => assignments.get(assignmentId))
+      .filter(Boolean)
+      .map((assignment) => assignment!.task);
+
+    return { bundle_id: existing.id, tasks };
   }
   const bundleId = `mock-bundle-${randomUUID()}`;
   const bundle = createBundleRecord(bundleId, contributorId, DEFAULT_BUNDLE_TTL_MS);
