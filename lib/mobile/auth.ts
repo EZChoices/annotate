@@ -73,7 +73,9 @@ export async function requireContributor(
         "[mobile] anonymous contributor create failed; falling back to mock mode",
         error
       );
-      supabase = hasSupabaseEnv() ? (supabase ?? getServiceSupabase()) : null;
+      if (hasSupabaseEnv()) {
+        supabase = supabase ?? getServiceSupabase();
+      }
       return {
         contributor: MOCK_CONTRIBUTOR,
         supabase,
