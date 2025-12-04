@@ -6,21 +6,10 @@ import type { Database } from "../../types/supabase";
 import { MobileApiError } from "./errors";
 import { isMobileMockMode } from "./mockData";
 
-/**
- * Check whether the Supabase environment variables are configured.
- * This helper looks for both the URL and at least one key in either
- * service role or anon form. When mock mode is enabled we may still
- * choose to return a real Supabase client if the environment variables
- * are present so downstream calls don’t crash unexpectedly.
- */
-function hasSupabaseEnv() {
-  return Boolean(
-    (process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL) &&
-      (process.env.SUPABASE_SERVICE_ROLE_KEY ||
-        process.env.SUPABASE_SERVICE_KEY ||
-        process.env.SUPABASE_KEY ||
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
-  );
+export function hasSupabaseEnv(): boolean {
+  return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL) &&
+         Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) &&
+         Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
 }
 
 type AuthUserResponse = Awaited<
@@ -65,7 +54,7 @@ export async function requireContributor(
   const token = authHeader.startsWith("Bearer ")
     ? authHeader.slice(7).trim()
     : null;
-  const supabase = getServiceSupabase();
+  let supabase = getServiceSupabase();
 
   // Without a token we create or fetch an anonymous contributor. If this
   // operation fails we still return the Supabase client we created so
@@ -84,6 +73,7 @@ export async function requireContributor(
         "[mobile] anonymous contributor create failed; falling back to mock mode",
         error
       );
+      supabase = hasSupabaseEnv() ? (supabase ?? getServiceSupabase()) : null;
       return {
         contributor: MOCK_CONTRIBUTOR,
         supabase,
