@@ -59,11 +59,14 @@ export async function requireContributor(
         "[mobile] anonymous contributor create failed; falling back to mock mode",
         error
       );
+      // Reuse a Supabase client when environment variables are present; otherwise set it to null.
+      supabase = (process.env.NEXT_PUBLIC_SUPABASE_URL &&
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY &&
+        process.env.SUPABASE_SERVICE_ROLE_KEY)
+        ? (supabase ?? getServiceSupabase())
+        : null;
       return {
         contributor: MOCK_CONTRIBUTOR,
-        supabase: hasSupabaseEnv()
-          ? (supabase ?? getServiceSupabase())
-          : (null as unknown as ReturnType<typeof getServiceSupabase>),
         accessToken: "mock-token",
         userId: MOCK_CONTRIBUTOR.id,
       };
