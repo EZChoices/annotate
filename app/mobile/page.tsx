@@ -133,11 +133,22 @@ export default function MobileHomePage() {
     setError(null);
     try {
       const response = await fetchWithAuth("/api/mobile/bundle?count=3");
+      const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.message || "Failed to fetch bundle");
+        throw new Error((payload as any)?.message || "Failed to fetch bundle");
       }
-      const data: MobileBundleResponse = await response.json();
+      const invalidPayload =
+        !payload ||
+        typeof payload !== "object" ||
+        "status" in (payload as Record<string, unknown>) ||
+        !Array.isArray((payload as any).tasks);
+      if (invalidPayload) {
+        const message = "No tasks available";
+        setError(message);
+        pushToast(message, "error");
+        return;
+      }
+      const data = payload as MobileBundleResponse;
       setBundles((prev) => [data, ...prev]);
       await cacheBundle(data);
     } catch (err: any) {
