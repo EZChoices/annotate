@@ -55,13 +55,19 @@ export async function requireContributor(
         userId: contributor.id,
       };
     } catch (error) {
+      // Log the failure details to aid debugging and include any Supabase hints
       console.warn(
         "[mobile] anonymous contributor create failed; falling back to mock mode",
-        error
+        {
+          message: (error as any)?.message,
+          hint: (error as any)?.hint,
+          error,
+        },
       );
+      // Return the mock contributor but continue to pass through the Supabase client
       return {
         contributor: MOCK_CONTRIBUTOR,
-        supabase: null as unknown as ReturnType<typeof getServiceSupabase>,
+        supabase,
         accessToken: "mock-token",
         userId: MOCK_CONTRIBUTOR.id,
       };
