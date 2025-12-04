@@ -61,7 +61,9 @@ export async function requireContributor(
       );
       return {
         contributor: MOCK_CONTRIBUTOR,
-        supabase: null as unknown as ReturnType<typeof getServiceSupabase>,
+        supabase: hasSupabaseEnv()
+          ? (supabase ?? getServiceSupabase())
+          : (null as unknown as ReturnType<typeof getServiceSupabase>),
         accessToken: "mock-token",
         userId: MOCK_CONTRIBUTOR.id,
       };
