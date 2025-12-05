@@ -30,8 +30,8 @@ export default function () {
 
   const bundle = http.get(`${BASE_URL}/api/mobile/bundle?count=1`);
   check(bundle, { "bundle ok": (res) => res.status === 200 });
-  const task =
-    bundle.status === 200 ? bundle.json("tasks[0]") : undefined;
+  const tasks = bundle.status === 200 ? bundle.json("tasks") : [];
+  const task = Array.isArray(tasks) && tasks.length > 0 ? tasks[0] : undefined;
 
   const submit = http.post(
     `${BASE_URL}/api/mobile/tasks/submit`,
