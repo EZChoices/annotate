@@ -4,7 +4,6 @@ import type { User } from "@supabase/supabase-js";
 import { getServiceSupabase } from "../supabaseServer";
 import type { Database } from "../../types/supabase";
 import { MobileApiError } from "./errors";
-import { isMobileMockMode } from "./mockData";
 
 export function hasSupabaseEnv(): boolean {
   return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL) &&
@@ -35,26 +34,19 @@ export async function requireContributor(
   req: NextRequest,
   opts?: { requireMobileFlag?: boolean }
 ): Promise<ContributorContext> {
-  // If we're running in mock mode or Supabase environment variables are
-  // entirely absent, return a mock contributor. If the environment variables
-  // exist we still return a real Supabase client so downstream calls can
-  // interact with the database instead of crashing due to a null client.
-  if (isMobileMockMode() || !hasSupabaseEnv()) {
-    return {
-      contributor: MOCK_CONTRIBUTOR,
-      supabase: hasSupabaseEnv()
-        ? getServiceSupabase()
-        : (null as unknown as ReturnType<typeof getServiceSupabase>),
-      accessToken: "mock-token",
-      userId: MOCK_CONTRIBUTOR.id,
-    };
+  if (!hasSupabaseEnv()) {
+    throw new MobileApiError(
+      "SERVER_ERROR",
+      500,
+      "Supabase environment variables are required for mobile auth"
+    );
   }
 
   const authHeader = req.headers.get("authorization") || "";
   const token = authHeader.startsWith("Bearer ")
     ? authHeader.slice(7).trim()
     : null;
-  let supabase = getServiceSupabase();
+  const supabase = getServiceSupabase();
 
   // Without a token we create or fetch an anonymous contributor. If this
   // operation fails we still return the Supabase client we created so
@@ -70,18 +62,14 @@ export async function requireContributor(
       };
     } catch (error) {
       console.warn(
-        "[mobile] anonymous contributor create failed; falling back to mock mode",
+        "[mobile] anonymous contributor create failed; mock fallback disabled",
         error
       );
-      if (hasSupabaseEnv()) {
-        supabase = supabase ?? getServiceSupabase();
-      }
-      return {
-        contributor: MOCK_CONTRIBUTOR,
-        supabase,
-        accessToken: "mock-token",
-        userId: MOCK_CONTRIBUTOR.id,
-      };
+      throw new MobileApiError(
+        "SERVER_ERROR",
+        500,
+        "Unable to create anonymous contributor"
+      );
     }
   }
 
@@ -164,19 +152,6 @@ async function getOrCreateContributor(
 
 const ANON_CONTRIBUTOR_ID = "00000000-0000-4000-8000-000000000042";
 const ANON_EMAIL = "anonymous@dialectdata.test";
-const MOCK_CONTRIBUTOR: Database["public"]["Tables"]["contributors"]["Row"] = {
-  id: "mock-contributor",
-  email: "mock@dialectdata.test",
-  feature_flags: { mobile_tasks: true },
-  capabilities: {},
-  handle: "mock-user",
-  created_at: new Date().toISOString(),
-  updated_at: new Date().toISOString(),
-  tier: "silver",
-  role: "contributor",
-  locale: "ar",
-  geo_country: null,
-};
 
 async function getOrCreateAnonymousContributor(
   supabase: ReturnType<typeof getServiceSupabase>

@@ -1,9 +1,9 @@
 const fs = require("fs");
 const path = require("path");
 
-const PUBLIC_DIR = path.join(process.cwd(), 'public');
-const DATA_DIR = path.join(PUBLIC_DIR, 'data');
-const OUTPUT_PATH = path.join(PUBLIC_DIR, 'manifest.json');
+const PUBLIC_DIR = path.join(process.cwd(), "public");
+const DATA_DIR = path.join(PUBLIC_DIR, "data");
+const OUTPUT_PATH = path.join(PUBLIC_DIR, "manifest.json");
 
 function safeReadDir(dirPath) {
   try {
@@ -34,16 +34,19 @@ function findPrefillFiles(dir) {
 }
 
 function toPublicUrl(absPath) {
-  const relFromPublic = path.relative(PUBLIC_DIR, absPath).replace(/\\/g, '/');
-  return '/' + relFromPublic;
+  const relFromPublic = path.relative(PUBLIC_DIR, absPath).replace(/\\/g, "/");
+  return "/" + relFromPublic;
 }
 
 function buildManifest() {
   const items = [];
 
   if (!fs.existsSync(DATA_DIR)) {
-    console.warn('⚠️  No /public/data directory found. Writing empty manifest.');
-    fs.writeFileSync(OUTPUT_PATH, JSON.stringify({ annotator_id: 'auto', stage: 2, items }, null, 2));
+    console.warn("⚠️  No /public/data directory found. Writing empty manifest.");
+    fs.writeFileSync(
+      OUTPUT_PATH,
+      JSON.stringify({ annotator_id: "auto", stage: 2, items }, null, 2)
+    );
     return;
   }
 
@@ -74,7 +77,7 @@ function buildManifest() {
       items.push({
         asset_id: clip,
         media: {
-          audio_proxy_url: '/sample.mp4',
+          audio_proxy_url: "/sample.mp4",
           video_hls_url: null,
           poster_url: null,
         },
@@ -101,7 +104,7 @@ function buildManifest() {
   }
 
   const manifest = {
-    annotator_id: 'auto',
+    annotator_id: "auto",
     stage: 2,
     items,
   };
@@ -110,4 +113,8 @@ function buildManifest() {
   console.log(`✅ Manifest built with ${items.length} items → ${OUTPUT_PATH}`);
 }
 
-buildManifest();
+module.exports = { buildManifest };
+
+if (require.main === module) {
+  buildManifest();
+}
