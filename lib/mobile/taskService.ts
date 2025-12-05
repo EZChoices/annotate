@@ -101,11 +101,30 @@ export async function claimSingleTask(
 
   for (const candidates of candidateSets) {
     for (const task of candidates) {
-      if (!task.clip) continue;
+      if (!task.clip) {
+        await logMobileEvent(contributor.id, "task_skipped", {
+          task_id: task.id,
+          reason: "missing_clip",
+        });
+        continue;
+      }
+
+      if (!hasTaskTypeCapability(contributorCaps, task.task_type)) {
+        await logMobileEvent(contributor.id, "task_skipped", {
+          task_id: task.id,
+          reason: "capability_mismatch",
+        });
+        continue;
+      }
+
       if (
-        !hasTaskTypeCapability(contributorCaps, task.task_type) ||
+        task.task_type !== "translation_check" &&
         !isTaskEligible(contributor, contributorCaps, task, task.clip)
       ) {
+        await logMobileEvent(contributor.id, "task_skipped", {
+          task_id: task.id,
+          reason: "eligibility_failure",
+        });
         continue;
       }
       const activeAssignments = await loadAssignments(supabase, task.id);
