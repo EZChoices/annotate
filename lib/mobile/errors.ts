@@ -16,6 +16,7 @@ export type MobileErrorCode =
   | "SERVER_ERROR";
 
 export class MobileApiError extends Error {
+  public skipReasons?: unknown;
   constructor(
     public code: MobileErrorCode,
     public status: number,

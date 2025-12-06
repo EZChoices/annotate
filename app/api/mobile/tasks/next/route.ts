@@ -35,9 +35,14 @@ export async function POST(req: NextRequest) {
         { headers: { "x-mobile-mock-data": "true" } }
       );
     }
-    const claimed = await claimSingleTask(contributor, supabase);
+    const { task: claimed, skipReasons } = await claimSingleTask(
+      contributor,
+      supabase
+    );
     if (!claimed) {
-      throw new MobileApiError("NO_TASKS", 404, "No tasks available");
+      const error = new MobileApiError("NO_TASKS", 404, "No tasks available");
+      error.skipReasons = skipReasons;
+      throw error;
     }
     return jsonWithLog(
       "POST /api/mobile/tasks/next",

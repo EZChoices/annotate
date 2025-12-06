@@ -34,6 +34,19 @@ interface TaskRecord extends TaskRow {
   clip: ClipRow | null;
 }
 
+type SkipReasonCode =
+  | "missing_clip"
+  | "capability_mismatch"
+  | "eligibility_failure"
+  | "already_assigned"
+  | "no_open_slots"
+  | "assignment_insert_failed";
+
+export interface SkipReason {
+  taskId: string;
+  reason: SkipReasonCode;
+}
+
 const DEFAULT_EWMA = 0.8;
 function normalizePayload(value: any) {
   try {
@@ -91,9 +104,13 @@ export async function claimSingleTask(
   contributor: ContributorRow,
   supabase: Supabase,
   opts: { bundleId?: string | null; leaseMinutes?: number } = {}
-): Promise<MobileClaimResponse | null> {
+): Promise<{ task: MobileClaimResponse | null; skipReasons: SkipReason[] }> {
   const useGolden = Math.random() < MOBILE_GOLDEN_RATIO;
   const contributorCaps = parseCapabilities(contributor);
+  const skipReasons: SkipReason[] = [];
+  const recordSkip = (task: TaskRow, reason: SkipReasonCode) => {
+    skipReasons.push({ taskId: task.id, reason });
+  };
   const candidateSets = [
     await fetchCandidates(supabase, { goldenOnly: useGolden }),
     await fetchCandidates(supabase, { goldenOnly: false }),
@@ -102,6 +119,7 @@ export async function claimSingleTask(
   for (const candidates of candidateSets) {
     for (const task of candidates) {
       if (!task.clip) {
+        recordSkip(task, "missing_clip");
         await logMobileEvent(contributor.id, "task_skipped", {
           task_id: task.id,
           reason: "missing_clip",
@@ -110,6 +128,7 @@ export async function claimSingleTask(
       }
 
       if (!hasTaskTypeCapability(contributorCaps, task.task_type)) {
+        recordSkip(task, "capability_mismatch");
         await logMobileEvent(contributor.id, "task_skipped", {
           task_id: task.id,
           reason: "capability_mismatch",
@@ -121,6 +140,7 @@ export async function claimSingleTask(
         task.task_type !== "translation_check" &&
         !isTaskEligible(contributor, contributorCaps, task, task.clip)
       ) {
+        recordSkip(task, "eligibility_failure");
         await logMobileEvent(contributor.id, "task_skipped", {
           task_id: task.id,
           reason: "eligibility_failure",
@@ -136,14 +156,18 @@ export async function claimSingleTask(
             assignment.state !== "released"
         )
       ) {
+        recordSkip(task, "already_assigned");
         continue;
       }
 
       const openSlots =
-        (task.target_votes || MOBILE_TARGET_VOTES) -
-        countActiveVotes(activeAssignments);
+        task.task_type === "translation_check"
+          ? Number.POSITIVE_INFINITY
+          : (task.target_votes || MOBILE_TARGET_VOTES) -
+            countActiveVotes(activeAssignments);
 
       if (openSlots <= 0) {
+        recordSkip(task, "no_open_slots");
         continue;
       }
 
@@ -167,6 +191,7 @@ export async function claimSingleTask(
         .single();
 
       if (insertResult.error) {
+        recordSkip(task, "assignment_insert_failed");
         continue;
       }
 
@@ -183,19 +208,22 @@ export async function claimSingleTask(
       });
 
       return {
-        task_id: task.id,
-        assignment_id: assignmentId,
-        lease_expires_at: leaseExpiresAt,
-        clip: buildClipPayload(task.clip),
-        task_type: task.task_type as TaskType,
-        ai_suggestion: (task.ai_suggestion as Record<string, any>) || undefined,
-        price_cents: price,
-        bundle_id: opts.bundleId ?? undefined,
+        task: {
+          task_id: task.id,
+          assignment_id: assignmentId,
+          lease_expires_at: leaseExpiresAt,
+          clip: buildClipPayload(task.clip),
+          task_type: task.task_type as TaskType,
+          ai_suggestion: (task.ai_suggestion as Record<string, any>) || undefined,
+          price_cents: price,
+          bundle_id: opts.bundleId ?? undefined,
+        },
+        skipReasons,
       };
     }
   }
 
-  return null;
+  return { task: null, skipReasons };
 }
 
 export async function claimBundle(
@@ -228,13 +256,21 @@ export async function claimBundle(
 
   const bundle = bundleInsert.data;
   const tasks: MobileClaimResponse[] = [];
+  let lastSkipReasons: SkipReason[] = [];
 
   for (let i = 0; i < count; i++) {
-    const claimed = await claimSingleTask(contributor, supabase, {
+    const { task: claimed, skipReasons } = await claimSingleTask(
+      contributor,
+      supabase,
+      {
       bundleId: bundle.id,
       leaseMinutes: MOBILE_BUNDLE_TTL_MINUTES,
-    });
-    if (!claimed) break;
+      }
+    );
+    if (!claimed) {
+      lastSkipReasons = skipReasons;
+      break;
+    }
     tasks.push(claimed);
   }
 
@@ -243,7 +279,9 @@ export async function claimBundle(
       .from("task_bundles")
       .update({ state: "closed" })
       .eq("id", bundle.id);
-    throw new MobileApiError("NO_TASKS", 404, "No tasks available");
+    const error = new MobileApiError("NO_TASKS", 404, "No tasks available");
+    error.skipReasons = lastSkipReasons;
+    throw error;
   }
 
   await logMobileEvent(contributor.id, "bundle_created", {
