@@ -65,6 +65,9 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     if (error instanceof MobileApiError) {
       if (error.code === "NO_TASKS") {
+        const skipReasons =
+          (error as MobileApiError & { skipReasons?: unknown }).skipReasons ??
+          null;
         const candidateStats =
           contributorContext?.supabase && !mockModeActive()
             ? await summarizeCandidateTasks(contributorContext.supabase)
@@ -74,6 +77,7 @@ export async function GET(req: NextRequest) {
           contributorId: contributorContext?.contributor.id,
           locale: contributorContext?.contributor.locale,
           featureFlags: contributorContext?.contributor.feature_flags,
+          skipReasons,
           filters: {
             status: ["pending", "in_progress"],
             requiredLocale: contributorContext?.contributor.locale ?? null,
@@ -93,6 +97,7 @@ export async function GET(req: NextRequest) {
               contributorId: contributorContext?.contributor.id ?? null,
               locale: contributorContext?.contributor.locale ?? null,
               featureFlags: contributorContext?.contributor.feature_flags ?? null,
+              skipReasons,
             },
           },
           { status: 200 }
