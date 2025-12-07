@@ -237,13 +237,33 @@ export async function claimBundle(
   supabase: Supabase,
   count: number = MOBILE_DEFAULT_BUNDLE_SIZE
 ): Promise<MobileBundleResponse> {
-  const activeBundle = await expireStaleBundle(supabase, contributor.id);
-  if (activeBundle) {
+  await expireStaleBundle(supabase, contributor.id);
+
+  const { data: openBundle, error: openBundleError } = await supabase
+    .from("task_bundles")
+    .select("*")
+    .eq("contributor_id", contributor.id)
+    .neq("state", "closed")
+    .limit(1)
+    .maybeSingle();
+
+  if (openBundleError) {
     throw new MobileApiError(
-      "BUNDLE_ACTIVE",
-      409,
-      "You already have an active bundle"
+      "SERVER_ERROR",
+      500,
+      "Failed to check existing bundles"
     );
+  }
+
+  if (openBundle) {
+    const { error: closeError } = await supabase
+      .from("task_bundles")
+      .update({ state: "closed" })
+      .eq("id", openBundle.id);
+
+    if (closeError) {
+      throw new MobileApiError("SERVER_ERROR", 500, "Failed to close bundle");
+    }
   }
 
   const bundleInsert = await supabase
@@ -257,7 +277,12 @@ export async function claimBundle(
     .single();
 
   if (bundleInsert.error || !bundleInsert.data) {
-    throw new MobileApiError("SERVER_ERROR", 500, "Failed to create bundle");
+    const message = bundleInsert.error?.message || "Failed to create bundle";
+    throw new MobileApiError(
+      "SERVER_ERROR",
+      500,
+      `Failed to create bundle: ${message}`
+    );
   }
 
   const bundle = bundleInsert.data;
@@ -269,8 +294,8 @@ export async function claimBundle(
       contributor,
       supabase,
       {
-      bundleId: bundle.id,
-      leaseMinutes: MOBILE_BUNDLE_TTL_MINUTES,
+        bundleId: bundle.id,
+        leaseMinutes: MOBILE_BUNDLE_TTL_MINUTES,
       }
     );
     if (!claimed) {
