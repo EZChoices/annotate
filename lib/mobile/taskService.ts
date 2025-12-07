@@ -41,7 +41,8 @@ type SkipReasonCode =
   | "already_assigned"
   | "no_open_slots"
   | "assignment_insert_failed"
-  | "bundle_reuse";
+  | "bundle_reuse"
+  | "assignment_update_failed";
 
 export interface SkipReason {
   taskId: string;
@@ -183,7 +184,8 @@ export async function claimSingleTask(
         Date.now() + leaseMinutes * 60 * 1000
       ).toISOString();
 
-      const assignmentId = randomUUID();
+      let assignmentId = randomUUID();
+      let claimedLeaseExpiresAt = leaseExpiresAt;
       const insertResult = await supabase
         .from("task_assignments")
         .insert({
@@ -198,8 +200,39 @@ export async function claimSingleTask(
         .single();
 
       if (insertResult.error) {
-        recordSkip(task, "assignment_insert_failed");
-        continue;
+        const { data: existingAssignment } = await supabase
+          .from("task_assignments")
+          .select("id, bundle_id")
+          .eq("task_id", task.id)
+          .eq("contributor_id", contributor.id)
+          .maybeSingle();
+
+        if (!existingAssignment) {
+          recordSkip(task, "assignment_insert_failed");
+          continue;
+        }
+
+        const renewedLeaseExpiresAt = new Date(
+          Date.now() + MOBILE_BUNDLE_TTL_MINUTES * 60 * 1000
+        ).toISOString();
+        const updateResult = await supabase
+          .from("task_assignments")
+          .update({
+            state: "leased",
+            lease_expires_at: renewedLeaseExpiresAt,
+            bundle_id: opts.bundleId ?? existingAssignment.bundle_id ?? null,
+          })
+          .eq("id", existingAssignment.id);
+
+        if (updateResult.error) {
+          recordSkip(task, "assignment_update_failed");
+          continue;
+        }
+
+        assignmentId = existingAssignment.id;
+        claimedLeaseExpiresAt = renewedLeaseExpiresAt;
+      } else if (insertResult.data?.id) {
+        assignmentId = insertResult.data.id;
       }
 
       await supabase
@@ -218,7 +251,7 @@ export async function claimSingleTask(
         task: {
           task_id: task.id,
           assignment_id: assignmentId,
-          lease_expires_at: leaseExpiresAt,
+          lease_expires_at: claimedLeaseExpiresAt,
           clip: buildClipPayload(task.clip),
           task_type: task.task_type as TaskType,
           ai_suggestion: (task.ai_suggestion as Record<string, any>) || undefined,
