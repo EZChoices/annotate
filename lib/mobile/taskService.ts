@@ -147,10 +147,12 @@ export async function claimSingleTask(
         });
         continue;
       }
-      const activeAssignments = await loadAssignments(supabase, task.id);
+      const assignments = await loadAssignments(supabase, task.id);
+      const totalAssignments = assignments.length;
+      const targetVotes = task.target_votes || MOBILE_TARGET_VOTES;
 
       if (
-        activeAssignments.some(
+        assignments.some(
           (assignment) =>
             assignment.contributor_id === contributor.id &&
             assignment.state !== "released"
@@ -160,11 +162,15 @@ export async function claimSingleTask(
         continue;
       }
 
+      if (totalAssignments >= targetVotes) {
+        recordSkip(task, "no_open_slots");
+        continue;
+      }
+
       const openSlots =
         task.task_type === "translation_check"
           ? Number.POSITIVE_INFINITY
-          : (task.target_votes || MOBILE_TARGET_VOTES) -
-            countActiveVotes(activeAssignments);
+          : targetVotes - totalAssignments;
 
       if (openSlots <= 0) {
         recordSkip(task, "no_open_slots");
