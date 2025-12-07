@@ -157,7 +157,8 @@ export async function claimSingleTask(
         assignments.some(
           (assignment) =>
             assignment.contributor_id === contributor.id &&
-            assignment.state !== "released"
+            assignment.state !== "released" &&
+            new Date(assignment.lease_expires_at) > new Date()
         )
       ) {
         recordSkip(task, "already_assigned");
@@ -633,7 +634,7 @@ export async function summarizeCandidateTasks(
 async function loadAssignments(supabase: Supabase, taskId: string) {
   const { data } = await supabase
     .from("task_assignments")
-    .select("id, contributor_id, state")
+    .select("id, contributor_id, state, lease_expires_at")
     .eq("task_id", taskId);
   return (data as AssignmentRow[]) ?? [];
 }
