@@ -608,7 +608,7 @@ async function fetchCandidates(
     query = query.eq("is_golden", true);
   }
   const { data } = await query
-    .order("created_at", { ascending: true })
+    .order("created_at", { ascending: false })
     .limit(opts.limit ?? 25);
   return ((data as TaskRecord[]) ?? []).filter(Boolean);
 }
