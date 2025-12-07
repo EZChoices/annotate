@@ -315,27 +315,14 @@ export async function claimBundle(
   let lastSkipReasons: SkipReason[] = [];
 
   if (bundleInsert.error || !bundleInsert.data) {
-    const isDuplicate = bundleInsert.error?.code === "23505";
+    const { data: existingBundle, error: existingBundleError } = await supabase
+      .from("task_bundles")
+      .select("*")
+      .eq("contributor_id", contributor.id)
+      .neq("state", "closed")
+      .maybeSingle();
 
-    if (isDuplicate) {
-      const { data: existingBundle, error: existingBundleError } = await supabase
-        .from("task_bundles")
-        .select("*")
-        .eq("contributor_id", contributor.id)
-        .eq("state", "active")
-        .maybeSingle();
-
-      if (existingBundleError || !existingBundle) {
-        throw new MobileApiError(
-          "SERVER_ERROR",
-          500,
-          "Failed to reuse existing bundle"
-        );
-      }
-
-      bundle = existingBundle;
-      lastSkipReasons = [{ taskId: bundle.id, reason: "bundle_reuse" }];
-    } else {
+    if (existingBundleError || !existingBundle) {
       const message = bundleInsert.error?.message || "Failed to create bundle";
       throw new MobileApiError(
         "SERVER_ERROR",
@@ -343,6 +330,9 @@ export async function claimBundle(
         `Failed to create bundle: ${message}`
       );
     }
+
+    bundle = existingBundle;
+    lastSkipReasons = [{ taskId: bundle.id, reason: "bundle_reuse" }];
   }
 
   const tasks: MobileClaimResponse[] = [];
