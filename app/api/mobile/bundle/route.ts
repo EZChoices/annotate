@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
     const { contributor, supabase } = contributorContext;
     userId = contributor.id;
     if (
-      !consumeRateLimit(contributor.id, "bundle/hour", 10, 60 * 60 * 1000)
+      !consumeRateLimit(contributor.id, "bundle/hour", 100, 60 * 60 * 1000)
     ) {
       return jsonWithLog(
         "GET /api/mobile/bundle",
