@@ -249,19 +249,8 @@ export async function claimSingleTask(
         bundle_id: opts.bundleId ?? null,
       });
 
-      let clipPayload = buildClipPayload(task.clip);
-
-      if (task.clip?.asset_id) {
-        const { data: asset } = await supabase
-          .from("media_assets")
-          .select("id, uri, meta")
-          .eq("id", task.clip.asset_id)
-          .maybeSingle();
-
-        if (asset) {
-          clipPayload = buildClipPayload(task.clip, asset);
-        }
-      }
+      const clipAsset = await loadMediaAssetForClip(supabase, task.clip);
+      const clipPayload = buildClipPayload(task.clip, clipAsset);
 
       return {
         task: {
@@ -569,12 +558,13 @@ export async function getClipContext(
     throw new MobileApiError("VALIDATION_FAILED", 404, "Clip not found");
   }
 
+  const clipAsset = await loadMediaAssetForClip(supabase, clip);
   const result: {
     clip: MobileClipPayload;
     prev?: MobileClipPayload | null;
     next?: MobileClipPayload | null;
   } = {
-    clip: buildClipPayload(clip),
+    clip: buildClipPayload(clip, clipAsset),
   };
 
   if (clip.context_prev_clip) {
@@ -584,7 +574,8 @@ export async function getClipContext(
       .eq("id", clip.context_prev_clip)
       .maybeSingle();
     if (prev.data) {
-      result.prev = buildClipPayload(prev.data);
+      const prevAsset = await loadMediaAssetForClip(supabase, prev.data);
+      result.prev = buildClipPayload(prev.data, prevAsset);
     }
   }
 
@@ -595,7 +586,8 @@ export async function getClipContext(
       .eq("id", clip.context_next_clip)
       .maybeSingle();
     if (next.data) {
-      result.next = buildClipPayload(next.data);
+      const nextAsset = await loadMediaAssetForClip(supabase, next.data);
+      result.next = buildClipPayload(next.data, nextAsset);
     }
   }
 
@@ -650,6 +642,23 @@ function countActiveVotes(assignments: AssignmentRow[]) {
   ).length;
 }
 
+async function loadMediaAssetForClip(
+  supabase: Supabase,
+  clip?: ClipRow | null
+): Promise<MediaAssetRow | null> {
+  if (!clip?.asset_id) {
+    return null;
+  }
+
+  const { data } = await supabase
+    .from("media_assets")
+    .select("id, uri, meta")
+    .eq("id", clip.asset_id)
+    .maybeSingle();
+
+  return data ?? null;
+}
+
 function buildClipPayload(
   clip: ClipRow | null,
   asset?: MediaAssetRow | null
@@ -673,13 +682,12 @@ function buildClipPayload(
     null;
   const videoUrl = assetUri || meta.video_url || meta.video || null;
   const captionsUrl =
-    asset
-      ? assetMeta.transcript_vtt_url ?? null
-      : (clip as any)?.captions_vtt_url ||
-        meta.captions_vtt_url ||
-        meta.subtitles_vtt_url ||
-        meta.transcript_vtt_url ||
-        null;
+    assetMeta.transcript_vtt_url ??
+    (clip as any)?.captions_vtt_url ||
+    meta.captions_vtt_url ||
+    meta.subtitles_vtt_url ||
+    meta.transcript_vtt_url ||
+    null;
   const captionsPreference =
     meta.captions_auto_enabled ?? meta.captions_auto ?? meta.auto_captions;
   const captionsAuto =
