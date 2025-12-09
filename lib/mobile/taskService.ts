@@ -666,9 +666,11 @@ async function loadMediaAssetForClip(
   return data;
 }
 
-function buildClipPayload(clip: ClipRow, asset: MediaAssetRow | null): MobileClipPayload {
+function buildClipPayload(
+  clip: ClipRow,
+  asset: MediaAssetRow | null
+): MobileClipPayload {
   const meta = ((asset?.meta ?? {}) as any) ?? {};
-  const assetMeta = (asset?.meta as any) ?? {};
   const clipAny = clip as any;
 
   const speakers =
@@ -677,14 +679,13 @@ function buildClipPayload(clip: ClipRow, asset: MediaAssetRow | null): MobileCli
       : [];
 
   const audioUrl = asset?.uri ?? clipAny.audio_url ?? null;
-
   const videoUrl = asset?.uri ?? clipAny.video_url ?? null;
 
   const captionsUrl =
-    (assetMeta?.transcript_vtt_url ?? clipAny.captions_vtt_url) ||
+    meta.transcript_vtt_url ||
+    clipAny.captions_vtt_url ||
     meta.captions_vtt_url ||
     meta.subtitles_vtt_url ||
-    meta.transcript_vtt_url ||
     null;
 
   return {
