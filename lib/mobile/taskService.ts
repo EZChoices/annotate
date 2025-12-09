@@ -644,66 +644,62 @@ function countActiveVotes(assignments: AssignmentRow[]) {
 
 async function loadMediaAssetForClip(
   supabase: Supabase,
-  clip?: ClipRow | null
+  clip: ClipRow
 ): Promise<MediaAssetRow | null> {
-  if (!clip?.asset_id) {
-    return null;
-  }
+  if (!clip.asset_id) return null;
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("media_assets")
     .select("id, kind, uri, duration_ms, meta, created_at")
     .eq("id", clip.asset_id)
-    .maybeSingle();
+    .maybeSingle<MediaAssetRow>();
 
-  return data ?? null;
+  if (error) {
+    console.error("Failed to load media asset for clip", {
+      clipId: clip.id,
+      assetId: clip.asset_id,
+      error,
+    });
+    return null;
+  }
+
+  return data;
 }
 
-function buildClipPayload(
-  clip: ClipRow | null,
-  asset?: MediaAssetRow | null
-): MobileClipPayload {
-  if (!clip) {
-    throw new MobileApiError("SERVER_ERROR", 500, "Clip metadata missing");
-  }
-  const meta = (clip.meta as any) || {};
-  const assetMeta = (asset?.meta as any) || {};
+function buildClipPayload(clip: ClipRow, asset: MediaAssetRow | null): MobileClipPayload {
+  const meta = ((asset?.meta ?? {}) as any) ?? {};
+  const assetMeta = (asset?.meta as any) ?? {};
+  const clipAny = clip as any;
+
   const speakers =
     Array.isArray(clip.speakers) && clip.speakers.every((s) => typeof s === "string")
       ? (clip.speakers as string[])
       : [];
-  const assetUri = asset?.uri ?? null;
-  const audioUrl =
-    assetUri ||
-    meta.audio_url ||
-    meta.audio ||
-    meta.audio_uri ||
-    meta.audio_proxy_url ||
-    null;
-  const videoUrl = assetUri || meta.video_url || meta.video || null;
+
+  const audioUrl = asset?.uri ?? clipAny.audio_url ?? null;
+
+  const videoUrl = asset?.uri ?? clipAny.video_url ?? null;
+
   const captionsUrl =
-    (assetMeta.transcript_vtt_url ?? (clip as any)?.captions_vtt_url) ||
+    (assetMeta?.transcript_vtt_url ?? clipAny.captions_vtt_url) ||
     meta.captions_vtt_url ||
     meta.subtitles_vtt_url ||
     meta.transcript_vtt_url ||
     null;
-  const captionsPreference =
-    meta.captions_auto_enabled ?? meta.captions_auto ?? meta.auto_captions;
-  const captionsAuto =
-    captionsPreference === undefined ? Boolean(captionsUrl) : Boolean(captionsPreference);
+
   return {
     id: clip.id,
     asset_id: clip.asset_id,
     start_ms: clip.start_ms,
     end_ms: clip.end_ms,
-    overlap_ms: clip.overlap_ms ?? 0,
+    overlap_ms: clip.overlap_ms,
     speakers,
+    context_prev_clip: clip.context_prev_clip,
+    context_next_clip: clip.context_next_clip,
     audio_url: audioUrl,
     video_url: videoUrl,
     captions_vtt_url: captionsUrl,
-    captions_auto_enabled: captionsAuto,
-    context_prev_clip: clip.context_prev_clip,
-    context_next_clip: clip.context_next_clip,
+    captions_auto_enabled: false,
   };
 }
 
