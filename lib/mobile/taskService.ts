@@ -27,6 +27,7 @@ type Supabase = ReturnType<typeof getServiceSupabase>;
 
 type TaskRow = Database["public"]["Tables"]["tasks"]["Row"];
 type ClipRow = Database["public"]["Tables"]["clips"]["Row"];
+type MediaAssetRow = Database["public"]["Tables"]["media_assets"]["Row"];
 type AssignmentRow = Database["public"]["Tables"]["task_assignments"]["Row"];
 type StatsRow = Database["public"]["Tables"]["contributor_stats"]["Row"];
 
@@ -248,12 +249,26 @@ export async function claimSingleTask(
         bundle_id: opts.bundleId ?? null,
       });
 
+      let clipPayload = buildClipPayload(task.clip);
+
+      if (task.clip?.asset_id) {
+        const { data: asset } = await supabase
+          .from("media_assets")
+          .select("id, uri, meta")
+          .eq("id", task.clip.asset_id)
+          .maybeSingle();
+
+        if (asset) {
+          clipPayload = buildClipPayload(task.clip, asset);
+        }
+      }
+
       return {
         task: {
           task_id: task.id,
           assignment_id: assignmentId,
           lease_expires_at: claimedLeaseExpiresAt,
-          clip: buildClipPayload(task.clip),
+          clip: clipPayload,
           task_type: task.task_type as TaskType,
           ai_suggestion: (task.ai_suggestion as Record<string, any>) || undefined,
           price_cents: price,
@@ -635,28 +650,36 @@ function countActiveVotes(assignments: AssignmentRow[]) {
   ).length;
 }
 
-function buildClipPayload(clip: ClipRow | null): MobileClipPayload {
+function buildClipPayload(
+  clip: ClipRow | null,
+  asset?: MediaAssetRow | null
+): MobileClipPayload {
   if (!clip) {
     throw new MobileApiError("SERVER_ERROR", 500, "Clip metadata missing");
   }
   const meta = (clip.meta as any) || {};
+  const assetMeta = (asset?.meta as any) || {};
   const speakers =
     Array.isArray(clip.speakers) && clip.speakers.every((s) => typeof s === "string")
       ? (clip.speakers as string[])
       : [];
+  const assetUri = asset?.uri ?? null;
   const audioUrl =
+    assetUri ||
     meta.audio_url ||
     meta.audio ||
     meta.audio_uri ||
     meta.audio_proxy_url ||
     null;
-  const videoUrl = meta.video_url || meta.video || null;
+  const videoUrl = assetUri || meta.video_url || meta.video || null;
   const captionsUrl =
-    (clip as any)?.captions_vtt_url ||
-    meta.captions_vtt_url ||
-    meta.subtitles_vtt_url ||
-    meta.transcript_vtt_url ||
-    null;
+    asset
+      ? assetMeta.transcript_vtt_url ?? null
+      : (clip as any)?.captions_vtt_url ||
+        meta.captions_vtt_url ||
+        meta.subtitles_vtt_url ||
+        meta.transcript_vtt_url ||
+        null;
   const captionsPreference =
     meta.captions_auto_enabled ?? meta.captions_auto ?? meta.auto_captions;
   const captionsAuto =
