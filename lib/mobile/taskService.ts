@@ -682,12 +682,11 @@ function buildClipPayload(
     null;
   const videoUrl = assetUri || meta.video_url || meta.video || null;
   const captionsUrl =
-    assetMeta.transcript_vtt_url ??
-    ((clip as any)?.captions_vtt_url ||
-      meta.captions_vtt_url ||
-      meta.subtitles_vtt_url ||
-      meta.transcript_vtt_url ||
-      null);
+    (assetMeta.transcript_vtt_url ?? (clip as any)?.captions_vtt_url) ||
+    meta.captions_vtt_url ||
+    meta.subtitles_vtt_url ||
+    meta.transcript_vtt_url ||
+    null;
   const captionsPreference =
     meta.captions_auto_enabled ?? meta.captions_auto ?? meta.auto_captions;
   const captionsAuto =
